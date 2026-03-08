@@ -145,6 +145,8 @@ static void load_pjvm(const char *path) {
         exit(1);
     }
 
+    pjvm_prog = prog_data;
+    pjvm_prog_size = (uint32_t)prog_size;
     pjvm_parse(prog_data);
 }
 
@@ -163,41 +165,54 @@ int main(int argc, char **argv) {
             (unsigned)bytecodes_size);
 
 #ifdef PJVM_PAGED
-    /* Set up region pager */
-    static PJVMPager pager = {0};
-    static PJVMRegion regions[PJVM_METHOD_CAP];
+    /* Set up fixed-page pager */
+    static PJVMPager pager;
 
-    uint32_t pool_sz = 0; /* 0 = use fallback in pjvm_init_regions */
+    uint16_t page_size = 1024;
+    uint8_t  n_pages = 4;
+
     for (int i = 2; i < argc; i++) {
-        if (strncmp(argv[i], "--cache=", 8) == 0)
-            pool_sz = (uint32_t)atoi(argv[i] + 8);
+        if (strncmp(argv[i], "--page-size=", 12) == 0)
+            page_size = (uint16_t)atoi(argv[i] + 12);
+        else if (strncmp(argv[i], "--pages=", 8) == 0)
+            n_pages = (uint8_t)atoi(argv[i] + 8);
+        else if (strncmp(argv[i], "--cache=", 8) == 0) {
+            /* Shorthand: --cache=N sets total cache bytes */
+            uint32_t cache = (uint32_t)atoi(argv[i] + 8);
+            n_pages = (uint8_t)(cache / page_size);
+            if (n_pages < 2) n_pages = 2;
+        }
     }
 
-    pager.regions = regions;
-    pager.pool_size = pool_sz;
+    if (n_pages > PJVM_MAX_PAGES) n_pages = PJVM_MAX_PAGES;
+
+    /* Compute page_shift from page_size (must be power of 2) */
+    uint8_t page_shift = 0;
+    { uint16_t ps = page_size; while (ps > 1) { ps >>= 1; page_shift++; } }
+
+    pager.page_size = page_size;
+    pager.page_shift = page_shift;
+    pager.n_pages = n_pages;
+    pager.file_size = pjvm_prog_size;
     pager.read_fn = pjvm_host_read;
     pager.read_ctx = pjvm_file_handle;
-
-    pjvm_init_regions(&pager);
+    pjvm_pager_init(&pager);
 
     /* Allocate pool */
-    pager.pool = (uint8_t *)malloc(pager.pool_size);
+    pager.pool = (uint8_t *)malloc((uint32_t)n_pages * page_size);
     if (!pager.pool) {
         fprintf(stderr, "Failed to allocate %u byte pager pool\n",
-                (unsigned)pager.pool_size);
+                (unsigned)((uint32_t)n_pages * page_size));
         return 1;
     }
 
-    /* Apply header pin hints (from v2 format, if present) */
-    pjvm_apply_header_pins(&pager);
-
-    /* Apply explicit CLI pin overrides */
+    /* Apply explicit CLI pin overrides (pin chunks) */
     for (int i = 2; i < argc; i++) {
         if (strncmp(argv[i], "--pin=", 6) == 0) {
             const char *s = argv[i] + 6;
             while (*s) {
-                int mi = atoi(s);
-                pjvm_pin_method(&pager, (uint8_t)mi);
+                int chunk = atoi(s);
+                pjvm_pin_chunk(&pager, (uint16_t)chunk);
                 while (*s && *s != ',') s++;
                 if (*s == ',') s++;
             }
@@ -205,8 +220,9 @@ int main(int argc, char **argv) {
     }
 
     ctx.pager = &pager;
-    fprintf(stderr, "PAGE | pool: %uB, %u regions\n",
-            (unsigned)pager.pool_size, (unsigned)pager.n_regions);
+    fprintf(stderr, "PAGE | %u pages × %uB = %uB pool\n",
+            (unsigned)n_pages, (unsigned)page_size,
+            (unsigned)((uint32_t)n_pages * page_size));
 #endif
 
     ctx.heap_ptr = HEAP_BASE;
@@ -227,6 +243,10 @@ int main(int argc, char **argv) {
             pager.hits + pager.misses > 0
                 ? 100.0 * pager.hits / (pager.hits + pager.misses)
                 : 0.0);
+    fprintf(stderr, "PAGE | per-slot misses:");
+    for (uint8_t i = 0; i < pager.n_pages; i++)
+        fprintf(stderr, " [%u]=%u", (unsigned)i, (unsigned)pager.slot_misses[i]);
+    fprintf(stderr, "\n");
     fclose(pjvm_file_handle);
     free(pager.pool);
 #endif

@@ -96,35 +96,28 @@ typedef struct {
 } PJVMFrame;
 
 #ifdef PJVM_PAGED
-/* --- region pager types ---------------------------------------------- */
-typedef struct PJVMRegion {
-    uint32_t file_offset;   /* absolute offset into .pjvm file */
-    uint32_t bc_offset;     /* bytecode-relative offset (= m_co[mi]) */
-    uint16_t length;        /* bytes of bytecode in this region */
-    uint8_t *ram_ptr;       /* NULL = not resident */
-    uint8_t  pinned;        /* 1 = never evict */
-    uint8_t  method_idx;    /* which method this region covers */
-    struct PJVMRegion *lru_prev;
-    struct PJVMRegion *lru_next;
-} PJVMRegion;
+/* --- fixed-page pager types ------------------------------------------ */
+#ifndef PJVM_MAX_PAGES
+#define PJVM_MAX_PAGES 16
+#endif
 
 typedef struct {
-    PJVMRegion *regions;     /* array of regions */
-    PJVMRegion *method_region[PJVM_METHOD_CAP]; /* method_idx -> region (NULL for native) */
-    uint8_t     n_regions;   /* number of regions */
-    uint8_t    *pool;        /* RAM pool for region data */
-    uint32_t    pool_size;   /* total bytes available */
-    uint32_t    pool_used;   /* bytes currently occupied */
-    PJVMRegion *lru_head;    /* most recently used */
-    PJVMRegion *lru_tail;    /* least recently used (eviction candidate) */
-    PJVMRegion *cached_region; /* fast-path: last accessed region */
+    uint8_t  *pool;         /* flat buffer: n_pages * page_size bytes */
+    uint16_t  page_size;    /* 256, 512, 1024, 4096, etc. */
+    uint8_t   page_shift;   /* log2(page_size) — bit-shift division */
+    uint8_t   n_pages;      /* number of page slots in pool */
+    uint32_t  file_size;    /* total .pjvm file size */
+    uint16_t  tag[PJVM_MAX_PAGES];   /* which chunk is in each slot (0xFFFF = empty) */
+    uint8_t   age[PJVM_MAX_PAGES];   /* LRU counter */
+    uint8_t   pinned[PJVM_MAX_PAGES]; /* 1 = don't evict */
+    uint8_t   lru_clock;
     /* platform read callback */
     void (*read_fn)(uint32_t file_offset, uint8_t *buf, uint16_t len, void *ctx);
-    void *read_ctx;          /* platform-specific handle (FILE*, FCB*, etc.) */
-#ifdef PJVM_TRACK_STATS
-    uint32_t hits;
-    uint32_t misses;
-#endif
+    void *read_ctx;
+    /* stats */
+    uint32_t  hits;
+    uint32_t  misses;
+    uint8_t   slot_misses[PJVM_MAX_PAGES];
 } PJVMPager;
 #endif /* PJVM_PAGED */
 
@@ -155,211 +148,110 @@ static uint8_t  m_fl[PJVM_METHOD_CAP], m_vs[PJVM_METHOD_CAP], m_vmid[PJVM_METHOD
 static uint8_t  m_ec[PJVM_METHOD_CAP], m_eo[PJVM_METHOD_CAP];
 static uint32_t m_co[PJVM_METHOD_CAP];
 static uint16_t m_cb[PJVM_METHOD_CAP];
-static uint16_t m_sz[PJVM_METHOD_CAP];  /* bytecode size per method */
-#ifdef PJVM_PAGED
-static uint8_t  m_pin[PJVM_METHOD_CAP]; /* header pin hints (v2 only) */
-static uint8_t  has_pin_hints;           /* 1 if v2 header has pin hints */
-#endif
 static uint8_t  cls_pid[PJVM_CLASS_CAP], cls_nf[PJVM_CLASS_CAP], cls_vb[PJVM_CLASS_CAP], cls_vs[PJVM_CLASS_CAP], cls_ci[PJVM_CLASS_CAP];
 static uint8_t  vt[PJVM_VTABLE_CAP];
+/* --- program image access --------------------------------------------- */
+static uint8_t *pjvm_prog;     /* pointer to loaded .pjvm image */
+static uint32_t pjvm_prog_size;
+static uint32_t bc_off, cpr_off, ic_off, sc_off, et_off;
 #ifdef PJVM_ASM_HELPERS
+/* 8085 ASM helpers need direct pointers (non-paged target only) */
 uint8_t *cpr;
-uint8_t *ic;
-uint8_t *sc;
 uint8_t *bc;
-uint8_t *et;
-#else
-static uint8_t *cpr;
-static uint8_t *ic;
-static uint8_t *sc;
-static uint8_t *bc;
-static uint8_t *et;
 #endif
 static uint16_t str_refs[32];
 
-/* --- bytecode access macro (paged mode replaces with bc_fetch) --------- */
+/* --- program image access macro ---------------------------------------- */
+#ifdef PJVM_PAGED
+static uint8_t prog_fetch(uint32_t offset);
+#define PROG(off) prog_fetch(off)
+#else
+#define PROG(off) pjvm_prog[(off)]
+#endif
+#define BC(a) PROG(bc_off + (a))
+
+/* --- paged mode implementation ----------------------------------------- */
 #ifdef PJVM_PAGED
 
-static uint32_t pjvm_bc_file_offset; /* byte offset of bytecodes in .pjvm file */
-
-/* Forward declarations needed by bc_fetch / region helpers */
+/* Forward declarations needed by prog_fetch */
 static PJVMCtx *g_pjvm;
-static void pjvm_platform_trap(uint8_t op, uint16_t pc);
 
-/* LRU: move region to head (most recently used) */
-static void pjvm_lru_touch(PJVMPager *p, PJVMRegion *r) {
-    if (p->lru_head == r) return;
-    /* Unlink */
-    if (r->lru_prev) r->lru_prev->lru_next = r->lru_next;
-    if (r->lru_next) r->lru_next->lru_prev = r->lru_prev;
-    if (p->lru_tail == r) p->lru_tail = r->lru_prev;
-    /* Insert at head */
-    r->lru_prev = NULL;
-    r->lru_next = p->lru_head;
-    if (p->lru_head) p->lru_head->lru_prev = r;
-    p->lru_head = r;
-    if (!p->lru_tail) p->lru_tail = r;
-}
-
-/* Compact pool: slide resident regions down to close gaps.
- * Must process regions in pool-position order (not array order)
- * to avoid overwriting data when regions are loaded out of order. */
-static void pjvm_compact_pool(PJVMPager *p) {
-    /* Build sorted index of resident regions by ram_ptr position */
-    uint8_t order[PJVM_METHOD_CAP];
-    uint8_t n = 0;
-    for (uint8_t i = 0; i < p->n_regions; i++) {
-        if (p->regions[i].ram_ptr) order[n++] = i;
-    }
-    /* Insertion sort by ram_ptr (ascending) — n is small */
-    for (uint8_t i = 1; i < n; i++) {
-        uint8_t key = order[i];
-        int8_t j = (int8_t)(i - 1);
-        while (j >= 0 && p->regions[order[(uint8_t)j]].ram_ptr >
-                         p->regions[key].ram_ptr) {
-            order[(uint8_t)(j + 1)] = order[(uint8_t)j];
-            j--;
+/* Find LRU unpinned victim slot for eviction */
+static uint8_t pjvm_find_victim(PJVMPager *p) {
+    uint8_t best = 0xFF, best_age = 0xFF;
+    for (uint8_t i = 0; i < p->n_pages; i++) {
+        if (p->pinned[i]) continue;
+        if (p->tag[i] == 0xFFFF) return i;  /* empty slot */
+        if (p->age[i] < best_age) {
+            best_age = p->age[i];
+            best = i;
         }
-        order[(uint8_t)(j + 1)] = key;
     }
-    /* Slide regions down in pool-position order */
-    uint32_t write_pos = 0;
-    for (uint8_t i = 0; i < n; i++) {
-        PJVMRegion *r = &p->regions[order[i]];
-        uint8_t *dest = p->pool + write_pos;
-        if (dest != r->ram_ptr) {
-            /* memmove-style: safe even if src/dest overlap */
-            for (uint16_t j = 0; j < r->length; j++)
-                dest[j] = r->ram_ptr[j];
-            r->ram_ptr = dest;
-        }
-        write_pos += r->length;
-    }
-    p->pool_used = write_pos;
+    return best;
 }
 
-/* Load a region into the pool, evicting as needed */
-static void pjvm_load_region(PJVMPager *p, PJVMRegion *r) {
-    /* Evict LRU unpinned regions until there's room */
-    while (p->pool_used + r->length > p->pool_size) {
-        PJVMRegion *victim = p->lru_tail;
-        while (victim && victim->pinned) victim = victim->lru_prev;
-        if (!victim || !victim->ram_ptr) break;
-        /* Unlink from LRU */
-        if (victim->lru_prev) victim->lru_prev->lru_next = victim->lru_next;
-        if (victim->lru_next) victim->lru_next->lru_prev = victim->lru_prev;
-        if (p->lru_head == victim) p->lru_head = victim->lru_next;
-        if (p->lru_tail == victim) p->lru_tail = victim->lru_prev;
-        victim->lru_prev = NULL;
-        victim->lru_next = NULL;
-        victim->ram_ptr = NULL;
-    }
-    pjvm_compact_pool(p);
-
-    r->ram_ptr = p->pool + p->pool_used;
-    p->pool_used += r->length;
-    p->read_fn(r->file_offset, r->ram_ptr, r->length, p->read_ctx);
-    pjvm_lru_touch(p, r);
+/* Load a page-sized chunk into a slot */
+static void pjvm_load_page(PJVMPager *p, uint8_t slot, uint16_t chunk) {
+    uint32_t file_offset = (uint32_t)chunk << p->page_shift;
+    uint16_t len = p->page_size;
+    if (file_offset + len > p->file_size)
+        len = (uint16_t)(p->file_size - file_offset);
+    p->read_fn(file_offset, p->pool + (uint32_t)slot * p->page_size, len, p->read_ctx);
+    p->tag[slot] = chunk;
+    p->age[slot] = ++p->lru_clock;
 }
 
-static uint8_t bc_fetch(uint32_t addr) {
+/* Fetch a single byte from the program image via the page cache */
+static uint8_t prog_fetch(uint32_t offset) {
     PJVMPager *p = g_pjvm->pager;
-    /* Fast path: cached region covers addr */
-    PJVMRegion *r = p->cached_region;
-    if (r && r->ram_ptr &&
-        addr >= r->bc_offset && addr < r->bc_offset + r->length) {
-#ifdef PJVM_TRACK_STATS
-        p->hits++;
-#endif
-        return r->ram_ptr[addr - r->bc_offset];
-    }
-    /* Lookup by current method */
-    r = p->method_region[g_pjvm->cur_mi];
-    if (r && r->ram_ptr) {
-#ifdef PJVM_TRACK_STATS
-        p->hits++;
-#endif
-        if (!r->pinned) pjvm_lru_touch(p, r);
-        p->cached_region = r;
-        return r->ram_ptr[addr - r->bc_offset];
-    }
-    /* Miss — load region */
-    if (r) {
-#ifdef PJVM_TRACK_STATS
-        p->misses++;
-#endif
-        pjvm_load_region(p, r);
-        p->cached_region = r;
-        return r->ram_ptr[addr - r->bc_offset];
-    }
-    /* Should not happen — trap */
-    pjvm_platform_trap(0xFD, (uint16_t)addr);
-    return 0;
-}
+    uint16_t chunk = (uint16_t)(offset >> p->page_shift);
+    uint16_t within = (uint16_t)(offset & (p->page_size - 1));
 
-/* Build region list from method table. Call after pjvm_parse(). */
-static void pjvm_init_regions(PJVMPager *pager) {
-    uint8_t ri = 0;
-    for (uint16_t i = 0; i < PJVM_METHOD_CAP; i++)
-        pager->method_region[i] = NULL;
-
-    for (uint8_t i = 0; i < n_methods; i++) {
-        if ((m_fl[i] & 1) || m_sz[i] == 0) continue;
-        PJVMRegion *r = &pager->regions[ri];
-        r->file_offset = pjvm_bc_file_offset + m_co[i];
-        r->bc_offset = m_co[i];
-        r->length = m_sz[i];
-        r->ram_ptr = NULL;
-        r->pinned = 0;
-        r->method_idx = i;
-        r->lru_prev = NULL;
-        r->lru_next = NULL;
-        pager->method_region[i] = r;
-        ri++;
-    }
-    pager->n_regions = ri;
-    pager->pool_used = 0;
-    pager->lru_head = NULL;
-    pager->lru_tail = NULL;
-    pager->cached_region = NULL;
-#ifdef PJVM_TRACK_STATS
-    pager->hits = 0;
-    pager->misses = 0;
-#endif
-
-    /* Fallback pool size if not set by caller */
-    if (pager->pool_size == 0) {
-        pager->pool_size = bytecodes_size < 8192 ? bytecodes_size : 8192;
-    }
-}
-
-/* Pin a method's region — loads immediately, never evicted. */
-static void pjvm_pin_method(PJVMPager *p, uint8_t method_idx) {
-    PJVMRegion *r = p->method_region[method_idx];
-    if (!r) return;
-    r->pinned = 1;
-    if (!r->ram_ptr) {
-        r->ram_ptr = p->pool + p->pool_used;
-        p->pool_used += r->length;
-        p->read_fn(r->file_offset, r->ram_ptr, r->length, p->read_ctx);
-    }
-    /* Pinned regions are NOT in the LRU list */
-}
-
-/* Apply header pin hints (unless region was already explicitly pinned). */
-static void pjvm_apply_header_pins(PJVMPager *p) {
-    if (!has_pin_hints) return;
-    for (uint8_t i = 0; i < n_methods; i++) {
-        if (m_pin[i] && p->method_region[i] && !p->method_region[i]->pinned) {
-            pjvm_pin_method(p, i);
+    /* Scan tag array for hit (n_pages is small, typically 2-8) */
+    for (uint8_t i = 0; i < p->n_pages; i++) {
+        if (p->tag[i] == chunk) {
+            p->age[i] = ++p->lru_clock;
+            p->hits++;
+            return p->pool[(uint32_t)i * p->page_size + within];
         }
     }
+
+    /* Miss — evict LRU unpinned slot, load chunk */
+    p->misses++;
+    uint8_t victim = pjvm_find_victim(p);
+    p->slot_misses[victim]++;
+    pjvm_load_page(p, victim, chunk);
+    return p->pool[(uint32_t)victim * p->page_size + within];
 }
 
-#define BC(a) bc_fetch(a)
-#else
-#define BC(a) bc[(a)]
-#endif
+/* Initialize pager: zero out tags, ages, stats */
+static void pjvm_pager_init(PJVMPager *p) {
+    for (uint8_t i = 0; i < PJVM_MAX_PAGES; i++) {
+        p->tag[i] = 0xFFFF;
+        p->age[i] = 0;
+        p->pinned[i] = 0;
+        p->slot_misses[i] = 0;
+    }
+    p->lru_clock = 0;
+    p->hits = 0;
+    p->misses = 0;
+}
+
+/* Pin a specific chunk — load into first available slot and mark pinned */
+static void pjvm_pin_chunk(PJVMPager *p, uint16_t chunk) {
+    /* Check if already loaded */
+    for (uint8_t i = 0; i < p->n_pages; i++) {
+        if (p->tag[i] == chunk) {
+            p->pinned[i] = 1;
+            return;
+        }
+    }
+    uint8_t slot = pjvm_find_victim(p);
+    pjvm_load_page(p, slot, chunk);
+    p->pinned[slot] = 1;
+}
+
+#endif /* PJVM_PAGED */
 
 /* --- global context pointer (set once at pjvm_run entry) --------------- */
 #ifdef PJVM_ASM_HELPERS
@@ -433,7 +325,8 @@ NI static int16_t bread(void) {
 }
 
 NI static uint8_t cpread(void) {
-    uint8_t r = cpr[g_pjvm->cur_cb + ((BC(g_pjvm->pc) << 8) | BC(g_pjvm->pc + 1))];
+    uint16_t idx = (BC(g_pjvm->pc) << 8) | BC(g_pjvm->pc + 1);
+    uint8_t r = PROG(cpr_off + g_pjvm->cur_cb + idx);
     g_pjvm->pc += 2;
     return r;
 }
@@ -499,64 +392,24 @@ static void pjvm_parse(uint8_t *data) {
         }
     }
 
-    /* Derive method bytecode sizes from adjacent code offsets */
-    {
-        uint8_t sorted[PJVM_METHOD_CAP];
-        uint8_t nsorted = 0;
-        for (uint8_t i = 0; i < n_methods; i++) {
-            m_sz[i] = 0;
-            if (!(m_fl[i] & 1)) sorted[nsorted++] = i;
-        }
-        /* Insertion sort by m_co */
-        for (uint8_t i = 1; i < nsorted; i++) {
-            uint8_t key = sorted[i];
-            int8_t j = (int8_t)(i - 1);
-            while (j >= 0 && m_co[sorted[(uint8_t)j]] > m_co[key]) {
-                sorted[(uint8_t)(j + 1)] = sorted[(uint8_t)j];
-                j--;
-            }
-            sorted[(uint8_t)(j + 1)] = key;
-        }
-        for (uint8_t i = 0; i < nsorted; i++) {
-            uint8_t mi = sorted[i];
-            if (i + 1 < nsorted)
-                m_sz[mi] = (uint16_t)(m_co[sorted[i + 1]] - m_co[mi]);
-            else
-                m_sz[mi] = (uint16_t)(bytecodes_size - m_co[mi]);
-        }
-    }
-
     uint16_t cpc = (uint16_t)p[0] | ((uint16_t)p[1] << 8);
     p += 2;
-    cpr = p; p += cpc;
-    ic = p; p += (uint16_t)n_int_constants * 4;
-    sc = p;
+    cpr_off = (uint32_t)(p - data); p += cpc;
+    ic_off  = (uint32_t)(p - data); p += (uint16_t)n_int_constants * 4;
+    sc_off  = (uint32_t)(p - data);
     for (uint8_t i = 0; i < n_string_constants; i++) {
         uint16_t slen = (uint16_t)p[0] | ((uint16_t)p[1] << 8);
         p += 2 + slen;
     }
-#ifdef PJVM_PAGED
-    pjvm_bc_file_offset = (uint32_t)(p - data);
-    bc = NULL;
-    p += bytecodes_size;
-#else
-    bc = p; p += bytecodes_size;
-#endif
-    et = p;
+    bc_off = (uint32_t)(p - data); p += bytecodes_size;
+    et_off = (uint32_t)(p - data);
 
-#ifdef PJVM_PAGED
-    /* Parse pin hints from v2 header if present */
-    has_pin_hints = 0;
-    for (uint8_t i = 0; i < n_methods; i++) m_pin[i] = 0;
-    if (version == 0x4B && (data[12] & 0x02)) {
-        /* Advance past exception table to find pin hints */
-        uint16_t total_exc = 0;
-        for (uint8_t i = 0; i < n_methods; i++) total_exc += m_ec[i];
-        uint8_t *ph = et + total_exc * 7;
-        for (uint8_t i = 0; i < n_methods; i++) m_pin[i] = ph[i];
-        has_pin_hints = 1;
-    }
+#ifdef PJVM_ASM_HELPERS
+    /* 8085 ASM helpers need direct pointers */
+    cpr = data + cpr_off;
+    bc  = data + bc_off;
 #endif
+
 }
 
 /* --- invoke / return -------------------------------------------------- */
@@ -688,11 +541,11 @@ static void pjvm_throw(uint16_t exc_ref, uint32_t throw_pc) {
         uint32_t rel_pc = throw_pc - m_co[g_pjvm->cur_mi];
 
         for (uint8_t i = 0; i < count; i++) {
-            uint8_t *e = et + (uint16_t)(base + i) * 7;
-            uint16_t e_start = (uint16_t)e[0] | ((uint16_t)e[1] << 8);
-            uint16_t e_end   = (uint16_t)e[2] | ((uint16_t)e[3] << 8);
-            uint16_t e_handler = (uint16_t)e[4] | ((uint16_t)e[5] << 8);
-            uint8_t  e_catch  = e[6];
+            uint32_t eoff = et_off + (uint16_t)(base + i) * 7;
+            uint16_t e_start = (uint16_t)PROG(eoff) | ((uint16_t)PROG(eoff + 1) << 8);
+            uint16_t e_end   = (uint16_t)PROG(eoff + 2) | ((uint16_t)PROG(eoff + 3) << 8);
+            uint16_t e_handler = (uint16_t)PROG(eoff + 4) | ((uint16_t)PROG(eoff + 5) << 8);
+            uint8_t  e_catch  = PROG(eoff + 6);
 
             if (rel_pc >= e_start && rel_pc < e_end) {
                 /* Check catch_type match */
@@ -756,14 +609,14 @@ static void pjvm_run(PJVMCtx *j) {
 
     /* Pre-allocate interned string constants into heap */
     {
-        uint8_t *sp = sc;
+        uint32_t soff = sc_off;
         for (uint8_t i = 0; i < n_string_constants; i++) {
-            uint16_t slen = (uint16_t)sp[0] | ((uint16_t)sp[1] << 8);
-            sp += 2;
+            uint16_t slen = (uint16_t)PROG(soff) | ((uint16_t)PROG(soff + 1) << 8);
+            soff += 2;
             uint16_t a = heap_alloc(j, (uint16_t)(4 + slen));
             w16(a, slen); w16((uint16_t)(a + 2), 0);
-            for (uint16_t k = 0; k < slen; k++) w8(a + 4 + k, sp[k]);
-            sp += slen;
+            for (uint16_t k = 0; k < slen; k++) w8(a + 4 + k, PROG(soff + k));
+            soff += slen;
             str_refs[i] = a;
         }
     }
@@ -824,13 +677,13 @@ static void pjvm_exec(void) {
             break;
         }
         case OP_LDC: {
-            uint8_t ci = cpr[g_pjvm->cur_cb + bcread()];
+            uint8_t ci = PROG(cpr_off + g_pjvm->cur_cb + bcread());
             if (ci & 0x80) {
                 spush(str_refs[ci & 0x7F], 0);
             } else {
-                uint8_t *p = ic + (uint16_t)ci * 4;
-                spush((uint16_t)p[0] | ((uint16_t)p[1] << 8),
-                      (uint16_t)p[2] | ((uint16_t)p[3] << 8));
+                uint32_t base = ic_off + (uint16_t)ci * 4;
+                spush((uint16_t)PROG(base) | ((uint16_t)PROG(base + 1) << 8),
+                      (uint16_t)PROG(base + 2) | ((uint16_t)PROG(base + 3) << 8));
             }
             break;
         }
@@ -839,9 +692,9 @@ static void pjvm_exec(void) {
             if (ci & 0x80) {
                 spush(str_refs[ci & 0x7F], 0);
             } else {
-                uint8_t *p = ic + (uint16_t)ci * 4;
-                spush((uint16_t)p[0] | ((uint16_t)p[1] << 8),
-                      (uint16_t)p[2] | ((uint16_t)p[3] << 8));
+                uint32_t base = ic_off + (uint16_t)ci * 4;
+                spush((uint16_t)PROG(base) | ((uint16_t)PROG(base + 1) << 8),
+                      (uint16_t)PROG(base + 2) | ((uint16_t)PROG(base + 3) << 8));
             }
             break;
         }
@@ -1339,4 +1192,5 @@ static void pjvm_exec(void) {
 }
 
 #undef NI
-#endif
+
+#endif /* PICOJVM_CORE_H */

@@ -156,6 +156,10 @@ static uint8_t  m_ec[PJVM_METHOD_CAP], m_eo[PJVM_METHOD_CAP];
 static uint32_t m_co[PJVM_METHOD_CAP];
 static uint16_t m_cb[PJVM_METHOD_CAP];
 static uint16_t m_sz[PJVM_METHOD_CAP];  /* bytecode size per method */
+#ifdef PJVM_PAGED
+static uint8_t  m_pin[PJVM_METHOD_CAP]; /* header pin hints (v2 only) */
+static uint8_t  has_pin_hints;           /* 1 if v2 header has pin hints */
+#endif
 static uint8_t  cls_pid[PJVM_CLASS_CAP], cls_nf[PJVM_CLASS_CAP], cls_vb[PJVM_CLASS_CAP], cls_vs[PJVM_CLASS_CAP], cls_ci[PJVM_CLASS_CAP];
 static uint8_t  vt[PJVM_VTABLE_CAP];
 #ifdef PJVM_ASM_HELPERS
@@ -340,6 +344,16 @@ static void pjvm_pin_method(PJVMPager *p, uint8_t method_idx) {
         p->read_fn(r->file_offset, r->ram_ptr, r->length, p->read_ctx);
     }
     /* Pinned regions are NOT in the LRU list */
+}
+
+/* Apply header pin hints (unless region was already explicitly pinned). */
+static void pjvm_apply_header_pins(PJVMPager *p) {
+    if (!has_pin_hints) return;
+    for (uint8_t i = 0; i < n_methods; i++) {
+        if (m_pin[i] && p->method_region[i] && !p->method_region[i]->pinned) {
+            pjvm_pin_method(p, i);
+        }
+    }
 }
 
 #define BC(a) bc_fetch(a)
@@ -529,6 +543,20 @@ static void pjvm_parse(uint8_t *data) {
     bc = p; p += bytecodes_size;
 #endif
     et = p;
+
+#ifdef PJVM_PAGED
+    /* Parse pin hints from v2 header if present */
+    has_pin_hints = 0;
+    for (uint8_t i = 0; i < n_methods; i++) m_pin[i] = 0;
+    if (version == 0x4B && (data[12] & 0x02)) {
+        /* Advance past exception table to find pin hints */
+        uint16_t total_exc = 0;
+        for (uint8_t i = 0; i < n_methods; i++) total_exc += m_ec[i];
+        uint8_t *ph = et + total_exc * 7;
+        for (uint8_t i = 0; i < n_methods; i++) m_pin[i] = ph[i];
+        has_pin_hints = 1;
+    }
+#endif
 }
 
 /* --- invoke / return -------------------------------------------------- */

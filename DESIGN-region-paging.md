@@ -1,6 +1,6 @@
 # Design: Method-Granularity Region Paging
 
-## Status: Approved design, pending implementation
+## Status: Implemented and validated
 
 ## Problem
 

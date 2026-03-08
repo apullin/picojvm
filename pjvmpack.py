@@ -288,7 +288,7 @@ def topological_sort(classes):
     return order
 
 
-def pack_pjvm(class_data_list, verbose=False, v2=False):
+def pack_pjvm(class_data_list, verbose=False, v2=False, pin_hints=None):
     """Pack one or more .class files into a single .pjvm binary."""
 
     # --- Step 1: Parse all classes ---
@@ -886,6 +886,9 @@ def pack_pjvm(class_data_list, verbose=False, v2=False):
         # v2 Header (14 bytes)
         hdr_size = 14
         mt_entry_size = 14
+        region_flags = 0
+        if pin_hints:
+            region_flags |= 0x02  # bit 1: pin hints present
         out.append(0x85)           # magic
         out.append(0x4B)           # v2
         out.append(len(method_table))
@@ -895,8 +898,8 @@ def pack_pjvm(class_data_list, verbose=False, v2=False):
         out.append(len(class_order))
         out.append(len(global_string_constants))
         out.extend(struct.pack("<I", len(bytecode_section)))  # 32-bit
-        out.append(0)              # page_shift (0 = no hint)
-        out.append(0)              # reserved
+        out.append(region_flags)   # [12] region_flags
+        out.append(0)              # [13] reserved
     else:
         # v1 Header (10 bytes)
         hdr_size = 10
@@ -962,6 +965,14 @@ def pack_pjvm(class_data_list, verbose=False, v2=False):
         out.extend(struct.pack("<H", e_end))
         out.extend(struct.pack("<H", e_handler))
         out.append(e_catch_cid)
+
+    # Pin hints (one byte per method, after exception table, v2 only)
+    if v2 and pin_hints:
+        pin_set = set(pin_hints)
+        for i in range(len(method_table)):
+            out.append(1 if i in pin_set else 0)
+        if verbose:
+            print(f"  Pin hints: methods {sorted(pin_set)}")
 
     if verbose:
         fmt_str = "v2" if v2 else "v1"
@@ -1053,6 +1064,8 @@ def main():
                         help="Emit .pjvmmap sidecar for exception trace decoding")
     parser.add_argument("--v2", action="store_true",
                         help="Emit v2 format (32-bit code offsets, 32-bit bytecodes_size)")
+    parser.add_argument("--pin-hints",
+                        help="Comma-separated method indices to recommend pinning (v2 only)")
     args = parser.parse_args()
 
     class_data_list = []
@@ -1060,9 +1073,17 @@ def main():
         with open(path, "rb") as f:
             class_data_list.append(f.read())
 
+    pin_hints = None
+    if args.pin_hints:
+        pin_hints = [int(x) for x in args.pin_hints.split(",")]
+        if not args.v2:
+            print("WARNING: --pin-hints requires --v2, ignoring", file=sys.stderr)
+            pin_hints = None
+
     pjvm, class_order, method_table = pack_pjvm(class_data_list,
                                                 verbose=args.verbose,
-                                                v2=args.v2)
+                                                v2=args.v2,
+                                                pin_hints=pin_hints)
 
     out_path = args.output
     if not out_path:

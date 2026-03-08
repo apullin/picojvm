@@ -188,7 +188,10 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    /* Apply pin overrides */
+    /* Apply header pin hints (from v2 format, if present) */
+    pjvm_apply_header_pins(&pager);
+
+    /* Apply explicit CLI pin overrides */
     for (int i = 2; i < argc; i++) {
         if (strncmp(argv[i], "--pin=", 6) == 0) {
             const char *s = argv[i] + 6;

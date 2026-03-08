@@ -152,11 +152,11 @@ from static globals into `PJVMPager`. Add `pjvm_init()`.
 - [x] Phase 3: Add pjvm_pin_method() and pin support
 - [x] Phase 3: Add --cache and --pin CLI options to host
 - [x] Phase 3: Verify pins work with tiny cache sizes
-- [ ] Phase 4: Add --pin-hints to pjvmpack.py
-- [ ] Phase 4: Parse region_flags and pin hints in core.h
-- [ ] Phase 4: Implement config resolution (explicit → header → fallback)
-- [ ] Phase 4: Verify v1/v2 × paged/non-paged × pins all work
-- [ ] Phase 5: Cleanup and final validation
+- [x] Phase 4: Add --pin-hints to pjvmpack.py
+- [x] Phase 4: Parse region_flags and pin hints in core.h
+- [x] Phase 4: Implement config resolution (explicit → header → fallback)
+- [x] Phase 4: Verify v1/v2 × paged/non-paged × pins all work
+- [x] Phase 5: Cleanup and final validation
 
 ## Decision Log
 

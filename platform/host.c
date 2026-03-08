@@ -8,6 +8,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #define PJVM_METHOD_CAP 256
 #define PJVM_CLASS_CAP 64
@@ -84,9 +85,10 @@ static void pjvm_platform_poke8(uint16_t a, uint8_t v) {
 #ifdef PJVM_PAGED
 static FILE *pjvm_file_handle;
 
-static void pjvm_platform_read_page(uint32_t file_offset, uint8_t *buf, uint16_t len) {
-    fseek(pjvm_file_handle, (long)file_offset, SEEK_SET);
-    fread(buf, 1, len, pjvm_file_handle);
+static void pjvm_host_read(uint32_t file_offset, uint8_t *buf, uint16_t len, void *ctx) {
+    FILE *f = (FILE *)ctx;
+    fseek(f, (long)file_offset, SEEK_SET);
+    fread(buf, 1, len, f);
 }
 #endif
 
@@ -150,7 +152,7 @@ int main(int argc, char **argv) {
     PJVMCtx ctx = {0};
 
     if (argc < 2) {
-        fprintf(stderr, "Usage: picojvm <program.pjvm>\n");
+        fprintf(stderr, "Usage: picojvm <program.pjvm> [--cache=N] [--pin=0,3,7]\n");
         return 1;
     }
 
@@ -159,6 +161,50 @@ int main(int argc, char **argv) {
     fprintf(stderr, "picoJVM | %s | %u methods, %u classes, %u bytes bytecode\n",
             argv[1], (unsigned)n_methods, (unsigned)n_classes,
             (unsigned)bytecodes_size);
+
+#ifdef PJVM_PAGED
+    /* Set up region pager */
+    static PJVMPager pager = {0};
+    static PJVMRegion regions[PJVM_METHOD_CAP];
+
+    uint32_t pool_sz = 0; /* 0 = use fallback in pjvm_init_regions */
+    for (int i = 2; i < argc; i++) {
+        if (strncmp(argv[i], "--cache=", 8) == 0)
+            pool_sz = (uint32_t)atoi(argv[i] + 8);
+    }
+
+    pager.regions = regions;
+    pager.pool_size = pool_sz;
+    pager.read_fn = pjvm_host_read;
+    pager.read_ctx = pjvm_file_handle;
+
+    pjvm_init_regions(&pager);
+
+    /* Allocate pool */
+    pager.pool = (uint8_t *)malloc(pager.pool_size);
+    if (!pager.pool) {
+        fprintf(stderr, "Failed to allocate %u byte pager pool\n",
+                (unsigned)pager.pool_size);
+        return 1;
+    }
+
+    /* Apply pin overrides */
+    for (int i = 2; i < argc; i++) {
+        if (strncmp(argv[i], "--pin=", 6) == 0) {
+            const char *s = argv[i] + 6;
+            while (*s) {
+                int mi = atoi(s);
+                pjvm_pin_method(&pager, (uint8_t)mi);
+                while (*s && *s != ',') s++;
+                if (*s == ',') s++;
+            }
+        }
+    }
+
+    ctx.pager = &pager;
+    fprintf(stderr, "PAGE | pool: %uB, %u regions\n",
+            (unsigned)pager.pool_size, (unsigned)pager.n_regions);
+#endif
 
     ctx.heap_ptr = HEAP_BASE;
     pjvm_run(&ctx);
@@ -173,13 +219,13 @@ int main(int argc, char **argv) {
 
 #ifdef PJVM_PAGED
     fprintf(stderr,
-            "PAGE | hits: %u, misses: %u, rate: %.1f%% | %u slots x %uB\n",
-            (unsigned)pjvm_page_hits, (unsigned)pjvm_page_misses,
-            pjvm_page_hits + pjvm_page_misses > 0
-                ? 100.0 * pjvm_page_hits / (pjvm_page_hits + pjvm_page_misses)
-                : 0.0,
-            (unsigned)PJVM_PAGE_SLOTS, (unsigned)PJVM_PAGE_SIZE);
+            "PAGE | hits: %u, misses: %u, rate: %.1f%%\n",
+            (unsigned)pager.hits, (unsigned)pager.misses,
+            pager.hits + pager.misses > 0
+                ? 100.0 * pager.hits / (pager.hits + pager.misses)
+                : 0.0);
     fclose(pjvm_file_handle);
+    free(pager.pool);
 #endif
 
     return 0;

@@ -23,13 +23,18 @@ BUILDDIR = build
 
 PICOJVM_PAGED = ./picojvm-paged
 
+# Capacity overrides for 8085 target (smaller than host defaults)
+SIM_CAPS = -DPJVM_METHOD_CAP=64 -DPJVM_CLASS_CAP=16 -DPJVM_VTABLE_CAP=128 \
+           -DPJVM_STATIC_CAP=32 -DPJVM_MAX_STACK=64 -DPJVM_MAX_LOCALS=128 \
+           -DPJVM_MAX_FRAMES=16
+
 all: $(PICOJVM)
 
-$(PICOJVM): platform/host.c core.h
-	$(CC) $(CFLAGS) -o $@ $<
+$(PICOJVM): core.c platform/host.c pjvm.h
+	$(CC) $(CFLAGS) -o $@ core.c platform/host.c
 
-$(PICOJVM_PAGED): platform/host.c core.h
-	$(CC) $(CFLAGS) -DPJVM_PAGED -o $@ $<
+$(PICOJVM_PAGED): core.c platform/host.c pjvm.h
+	$(CC) $(CFLAGS) -DPJVM_PAGED -o $@ core.c platform/host.c
 
 # Compile all test .java files
 tests/%.class: tests/%.java tests/Native.java
@@ -132,8 +137,11 @@ $(BUILDDIR)/pjvm_data.c: | $(BUILDDIR)
 $(BUILDDIR)/crt0.o: $(CRT) | $(BUILDDIR)
 	$(CLANG) --target=i8085-unknown-elf -ffreestanding -fno-builtin -$(TARGET_OPT) -c $< -o $@
 
-$(BUILDDIR)/i8085_sim.o: platform/i8085_sim.c core.h | $(BUILDDIR)
-	$(CLANG) --target=i8085-unknown-elf -ffreestanding -fno-builtin -$(TARGET_OPT) -c $< -o $@
+$(BUILDDIR)/core.o: core.c pjvm.h | $(BUILDDIR)
+	$(CLANG) --target=i8085-unknown-elf -ffreestanding -fno-builtin -$(TARGET_OPT) $(SIM_CAPS) -c $< -o $@
+
+$(BUILDDIR)/i8085_sim.o: platform/i8085_sim.c pjvm.h | $(BUILDDIR)
+	$(CLANG) --target=i8085-unknown-elf -ffreestanding -fno-builtin -$(TARGET_OPT) $(SIM_CAPS) -c $< -o $@
 
 $(BUILDDIR)/i8085_helpers.o: platform/i8085_helpers.S | $(BUILDDIR)
 	$(CLANG) --target=i8085-unknown-elf -c $< -o $@
@@ -141,7 +149,7 @@ $(BUILDDIR)/i8085_helpers.o: platform/i8085_helpers.S | $(BUILDDIR)
 $(BUILDDIR)/pjvm_data.o: $(BUILDDIR)/pjvm_data.c | $(BUILDDIR)
 	$(CLANG) --target=i8085-unknown-elf -ffreestanding -fno-builtin -$(TARGET_OPT) -c $< -o $@
 
-$(BUILDDIR)/picojvm.elf: $(BUILDDIR)/crt0.o $(BUILDDIR)/i8085_sim.o $(BUILDDIR)/i8085_helpers.o $(BUILDDIR)/pjvm_data.o $(LIBGCC) $(LIBC)
+$(BUILDDIR)/picojvm.elf: $(BUILDDIR)/crt0.o $(BUILDDIR)/core.o $(BUILDDIR)/i8085_sim.o $(BUILDDIR)/i8085_helpers.o $(BUILDDIR)/pjvm_data.o $(LIBGCC) $(LIBC)
 	$(LLD) -m i8085elf --gc-sections -T $(LDSCRIPT) -o $@ $^ $(LIBGCC)
 
 $(BUILDDIR)/picojvm.bin: $(BUILDDIR)/picojvm.elf

@@ -10,15 +10,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define PJVM_METHOD_CAP 256
-#define PJVM_CLASS_CAP 64
-#define PJVM_VTABLE_CAP 256
-#define PJVM_STATIC_CAP 64
-#define PJVM_MAX_STACK 256
-#define PJVM_MAX_LOCALS 1024
-#define PJVM_MAX_FRAMES 64
-#define PJVM_TRACK_STATS
-
 #define RAW_MEM_SIZE 65536u
 #define HEAP_MEM_SIZE 65536u
 #define HEAP_BASE 1u
@@ -30,9 +21,9 @@ static size_t prog_size;
 static uint16_t heap_alloc_count;
 static uint32_t heap_bytes_used;
 
-#include "../core.h"
+#include "../pjvm.h"
 
-static uint16_t heap_alloc(PJVMCtx *j, uint16_t size) {
+uint16_t heap_alloc(PJVMCtx *j, uint16_t size) {
     uint16_t a = j->heap_ptr;
     uint32_t end = (uint32_t)a + size;
 
@@ -53,32 +44,32 @@ static uint16_t heap_alloc(PJVMCtx *j, uint16_t size) {
     return a;
 }
 
-static uint8_t r8(uint16_t a) {
+uint8_t r8(uint16_t a) {
     return heap_mem[a];
 }
 
-static void w8(uint16_t a, uint8_t v) {
+void w8(uint16_t a, uint8_t v) {
     heap_mem[a] = v;
 }
 
-static uint16_t r16(uint16_t a) {
+uint16_t r16(uint16_t a) {
     return (uint16_t)heap_mem[a] | ((uint16_t)heap_mem[(uint16_t)(a + 1)] << 8);
 }
 
-static void w16(uint16_t a, uint16_t v) {
+void w16(uint16_t a, uint16_t v) {
     heap_mem[a] = (uint8_t)v;
     heap_mem[(uint16_t)(a + 1)] = (uint8_t)(v >> 8);
 }
 
-static void pjvm_platform_putchar(uint8_t ch) {
+void pjvm_platform_putchar(uint8_t ch) {
     putchar((int)ch);
 }
 
-static uint8_t pjvm_platform_peek8(uint16_t a) {
+uint8_t pjvm_platform_peek8(uint16_t a) {
     return raw_mem[a];
 }
 
-static void pjvm_platform_poke8(uint16_t a, uint8_t v) {
+void pjvm_platform_poke8(uint16_t a, uint8_t v) {
     raw_mem[a] = v;
 }
 
@@ -92,7 +83,7 @@ static void pjvm_host_read(uint32_t file_offset, uint8_t *buf, uint16_t len, voi
 }
 #endif
 
-static void pjvm_platform_trap(uint8_t op, uint16_t pc) {
+void pjvm_platform_trap(uint8_t op, uint16_t pc) {
     if (op == 0xFF) {
         fprintf(stderr, "Unknown native method at bytecode offset %u\n",
                 (unsigned)pc);

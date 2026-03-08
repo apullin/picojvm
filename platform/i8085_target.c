@@ -10,17 +10,9 @@
 #define PJVM_DATA    ((uint8_t *)0x1000)
 #define HEAP_START  0x4000
 
-#define PJVM_METHOD_CAP 64
-#define PJVM_CLASS_CAP 16
-#define PJVM_VTABLE_CAP 128
-#define PJVM_STATIC_CAP 32
-#define PJVM_MAX_STACK 64
-#define PJVM_MAX_LOCALS 128
-#define PJVM_MAX_FRAMES 16
+#include "../pjvm.h"
 
-#include "../core.h"
-
-static uint16_t heap_alloc(PJVMCtx *j, uint16_t size) {
+uint16_t heap_alloc(PJVMCtx *j, uint16_t size) {
     uint16_t a = j->heap_ptr;
     uint8_t *p = (uint8_t *)a;
 
@@ -33,44 +25,45 @@ static uint16_t heap_alloc(PJVMCtx *j, uint16_t size) {
     return a;
 }
 
-static uint8_t r8(uint16_t a) {
+uint8_t r8(uint16_t a) {
     return *(uint8_t *)a;
 }
 
-static void w8(uint16_t a, uint8_t v) {
+void w8(uint16_t a, uint8_t v) {
     *(uint8_t *)a = v;
 }
 
-static uint16_t r16(uint16_t a) {
+uint16_t r16(uint16_t a) {
     uint8_t *p = (uint8_t *)a;
     return (uint16_t)p[0] | ((uint16_t)p[1] << 8);
 }
 
-static void w16(uint16_t a, uint16_t v) {
+void w16(uint16_t a, uint16_t v) {
     uint8_t *p = (uint8_t *)a;
     p[0] = (uint8_t)v;
     p[1] = (uint8_t)(v >> 8);
 }
 
-static void pjvm_platform_putchar(uint8_t ch) {
+void pjvm_platform_putchar(uint8_t ch) {
     OUTPUT_PORT = ch;
 }
 
-static uint8_t pjvm_platform_peek8(uint16_t a) {
+uint8_t pjvm_platform_peek8(uint16_t a) {
     return *(uint8_t *)(uintptr_t)a;
 }
 
-static void pjvm_platform_poke8(uint16_t a, uint8_t v) {
+void pjvm_platform_poke8(uint16_t a, uint8_t v) {
     *(uint8_t *)(uintptr_t)a = v;
 }
 
-static void pjvm_platform_trap(uint8_t op, uint16_t pc) {
+void pjvm_platform_trap(uint8_t op, uint16_t pc) {
     (void)op;
     (void)pc;
     __asm__ volatile("hlt");
 }
 
 static void pjvm_load(void) {
+    pjvm_prog = PJVM_DATA;
     pjvm_parse(PJVM_DATA);
 }
 

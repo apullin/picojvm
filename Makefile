@@ -5,7 +5,7 @@ PYTHON  = python3
 PICOJVM = ./picojvm
 
 # Single-class tests
-TESTS_SINGLE = tests/Fib tests/HelloWorld tests/BubbleSort tests/Counter tests/StringTest tests/StaticInitTest tests/MultiArrayTest tests/StringSwitchTest
+TESTS_SINGLE = tests/Fib tests/HelloWorld tests/BubbleSort tests/Counter tests/StringTest tests/StaticInitTest tests/MultiArrayTest tests/StringSwitchTest tests/MD5Test tests/FFTTest
 
 # --- 8085 target toolchain ---
 ROOT     = $(shell cd ../.. && pwd)

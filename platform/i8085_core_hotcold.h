@@ -3,6 +3,8 @@
 
 #include <stdint.h>
 
+#define PJVM_PC_HALT 0xFFFFFFFFu
+
 #ifndef PJVM_METHOD_CAP
 #error "PJVM_METHOD_CAP must be defined before including core.h"
 #endif
@@ -80,7 +82,7 @@ enum {
 };
 
 typedef struct {
-    uint16_t pc;
+    uint32_t pc;
     uint16_t cb;
     uint8_t mi;
     uint8_t lb;
@@ -88,7 +90,8 @@ typedef struct {
 } PJVMFrame;
 
 typedef struct {
-    uint16_t pc, cur_cb;
+    uint32_t pc;
+    uint16_t cur_cb;
     uint8_t sp, lt, cur_mi, cur_lb;
     int8_t fdepth;
 #ifdef PJVM_TRACK_STATS
@@ -111,9 +114,10 @@ typedef struct {
 
 static uint8_t n_methods, main_mi, n_classes;
 static uint8_t n_static_fields, n_int_constants;
-static uint16_t bytecodes_size;
+static uint32_t bytecodes_size;
 static uint8_t m_ml[PJVM_METHOD_CAP], m_ac[PJVM_METHOD_CAP], m_fl[PJVM_METHOD_CAP], m_vs[PJVM_METHOD_CAP];
-static uint16_t m_co[PJVM_METHOD_CAP], m_cb[PJVM_METHOD_CAP];
+static uint32_t m_co[PJVM_METHOD_CAP];
+static uint16_t m_cb[PJVM_METHOD_CAP];
 static uint8_t cls_nf[PJVM_CLASS_CAP], cls_vb[PJVM_CLASS_CAP], cls_vs[PJVM_CLASS_CAP];
 static uint8_t vt[PJVM_VTABLE_CAP];
 static uint8_t *cpr;
@@ -192,7 +196,7 @@ static void pjvm_parse(uint8_t *data) {
     n_static_fields = data[4];
     n_int_constants = data[5];
     n_classes = data[6];
-    bytecodes_size = (uint16_t)data[8] | ((uint16_t)data[9] << 8);
+    bytecodes_size = (uint32_t)((uint16_t)data[8] | ((uint16_t)data[9] << 8));
 
     {
         uint8_t *p = data + 10;
@@ -212,7 +216,7 @@ static void pjvm_parse(uint8_t *data) {
             m_ml[i] = p[0];
             m_ac[i] = p[2];
             m_fl[i] = p[3];
-            m_co[i] = (uint16_t)p[4] | ((uint16_t)p[5] << 8);
+            m_co[i] = (uint32_t)((uint16_t)p[4] | ((uint16_t)p[5] << 8));
             m_cb[i] = (uint16_t)p[6] | ((uint16_t)p[7] << 8);
             m_vs[i] = p[8];
             p += 9;
@@ -267,7 +271,7 @@ static void pjvm_inv(PJVMCtx *j, uint8_t mi) {
             break;
         case NATIVE_HALT:
             hot->fdepth = 0;
-            hot->pc = 0xFFFF;
+            hot->pc = PJVM_PC_HALT;
             break;
         case NATIVE_OBJECT_INIT:
             hot->sp--;
@@ -323,7 +327,7 @@ static void pjvm_ret(PJVMCtx *j, uint8_t has_val) {
     hot->fdepth--;
 
     if (hot->fdepth < 0) {
-        hot->pc = 0xFFFF;
+        hot->pc = PJVM_PC_HALT;
         if (has_val) {
             pjvm_push(j, rlo, rhi);
         }
@@ -469,7 +473,8 @@ static void pjvm_run(PJVMCtx *j) {
     uint16_t *sf_hi = cold->sf_hi;
     uint8_t *code = bc;
     uint8_t *cp_map = cpr;
-    uint16_t pc, cur_cb;
+    uint32_t pc;
+    uint16_t cur_cb;
     uint8_t sp, lt, cur_mi, cur_lb, sp_max;
     uint16_t alo = 0, ahi = 0, blo = 0, bhi = 0;
     uint16_t tos_lo = 0, tos_hi = 0;
@@ -497,8 +502,8 @@ static void pjvm_run(PJVMCtx *j) {
     PJVM_RELOAD_HOT(hot, pc, cur_cb, cur_mi, cur_lb, sp, lt, sp_max);
     PJVM_TOS_RELOAD(stk_lo, stk_hi, sp, tos_valid, tos_synced, tos_lo, tos_hi);
 
-    while (pc != 0xFFFF) {
-        uint16_t opc = pc;
+    while (pc != PJVM_PC_HALT) {
+        uint32_t opc = pc;
         uint8_t op = PJVM_HOT_RU1(code, pc);
 
         switch (op) {

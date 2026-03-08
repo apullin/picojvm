@@ -8,7 +8,7 @@
 
 #include <stdint.h>
 
-#define PJVM_ASM_HELPERS
+/* #define PJVM_ASM_HELPERS  -- disabled: uint32_t pc breaks ASM offset assumptions */
 
 /* Output buffer: putchar writes sequentially starting at 0x0200 */
 static uint16_t output_ptr = 0x0200;

@@ -8,20 +8,20 @@
  * Offsets below assume sim-build CAP values:
  *   STACK=64, LOCALS=128, STATIC=32, FRAMES=16
  *
- * PJVMCtx field offsets (i8085, PJVMFrame=7 bytes):
+ * PJVMCtx field offsets (i8085, PJVMFrame=9 bytes):
  *   stk_lo   =    0   (64 × 2 = 128 bytes)
  *   stk_hi   =  128   (64 × 2 = 128 bytes)
  *   loc_lo   =  256   (128 × 2 = 256 bytes)
  *   loc_hi   =  512   (128 × 2 = 256 bytes)
- *   frames   =  896   (16 × 7 = 112 bytes)
- *   pc       = 1008
- *   cur_cb   = 1010
- *   sp       = 1012
- *   lt       = 1013
- *   cur_mi   = 1014
- *   cur_lb   = 1015
- *   fdepth   = 1016
- *   heap_ptr = 1017
+ *   frames   =  896   (16 × 9 = 144 bytes)
+ *   pc       = 1040   (uint32_t; ASM reads low 16 bits only)
+ *   cur_cb   = 1044
+ *   sp       = 1046
+ *   lt       = 1047
+ *   cur_mi   = 1048
+ *   cur_lb   = 1049
+ *   fdepth   = 1050
+ *   heap_ptr = 1051
  */
 
     .text
@@ -30,10 +30,10 @@
 .set OFF_STK_HI,  128
 .set OFF_LOC_LO,  256
 .set OFF_LOC_HI,  512
-.set OFF_PC,      1008
-.set OFF_CUR_CB,  1010
-.set OFF_SP,      1012
-.set OFF_CUR_LB,  1015
+.set OFF_PC,      1040
+.set OFF_CUR_CB,  1044
+.set OFF_SP,      1046
+.set OFF_CUR_LB,  1049
 
 /* ====================================================================== */
 /*  _spush_bcde — internal entry: push BC=lo, DE=hi onto operand stack    */

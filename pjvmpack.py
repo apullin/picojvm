@@ -288,7 +288,7 @@ def topological_sort(classes):
     return order
 
 
-def pack_pjvm(class_data_list, verbose=False):
+def pack_pjvm(class_data_list, verbose=False, v2=False):
     """Pack one or more .class files into a single .pjvm binary."""
 
     # --- Step 1: Parse all classes ---
@@ -882,16 +882,34 @@ def pack_pjvm(class_data_list, verbose=False):
     # --- Step 9: Emit .pjvm binary ---
     out = bytearray()
 
-    # Header (10 bytes)
-    out.append(0x85)           # magic
-    out.append(0x4A)
-    out.append(len(method_table))
-    out.append(main_index)
-    out.append(total_static_fields)
-    out.append(len(global_int_constants))
-    out.append(len(class_order))
-    out.append(len(global_string_constants))
-    out.extend(struct.pack("<H", len(bytecode_section)))
+    if v2:
+        # v2 Header (14 bytes)
+        hdr_size = 14
+        mt_entry_size = 14
+        out.append(0x85)           # magic
+        out.append(0x4B)           # v2
+        out.append(len(method_table))
+        out.append(main_index)
+        out.append(total_static_fields)
+        out.append(len(global_int_constants))
+        out.append(len(class_order))
+        out.append(len(global_string_constants))
+        out.extend(struct.pack("<I", len(bytecode_section)))  # 32-bit
+        out.append(0)              # page_shift (0 = no hint)
+        out.append(0)              # reserved
+    else:
+        # v1 Header (10 bytes)
+        hdr_size = 10
+        mt_entry_size = 12
+        out.append(0x85)           # magic
+        out.append(0x4A)           # v1
+        out.append(len(method_table))
+        out.append(main_index)
+        out.append(total_static_fields)
+        out.append(len(global_int_constants))
+        out.append(len(class_order))
+        out.append(len(global_string_constants))
+        out.extend(struct.pack("<H", len(bytecode_section)))  # 16-bit
 
     # Class table (variable length)
     for name in class_order:
@@ -903,7 +921,7 @@ def pack_pjvm(class_data_list, verbose=False):
         for vt_entry in cls.vtable:
             out.append(vt_entry)
 
-    # Method table (12 bytes per method)
+    # Method table
     for mt in method_table:
         flags = 0
         if mt["is_native"]:
@@ -912,7 +930,10 @@ def pack_pjvm(class_data_list, verbose=False):
         out.append(mt["max_stack"])
         out.append(mt["arg_count"])
         out.append(flags)
-        out.extend(struct.pack("<H", mt["code_offset"]))
+        if v2:
+            out.extend(struct.pack("<I", mt["code_offset"]))  # 32-bit
+        else:
+            out.extend(struct.pack("<H", mt["code_offset"]))  # 16-bit
         out.extend(struct.pack("<H", mt["cp_base"]))
         out.append(mt["vtable_slot"])
         out.append(mt.get("vmid", 0xFF))
@@ -943,12 +964,13 @@ def pack_pjvm(class_data_list, verbose=False):
         out.append(e_catch_cid)
 
     if verbose:
-        print(f"\n.pjvm output: {len(out)} bytes")
-        print(f"  Header: 10 bytes")
+        fmt_str = "v2" if v2 else "v1"
+        print(f"\n.pjvm output ({fmt_str}): {len(out)} bytes")
+        print(f"  Header: {hdr_size} bytes")
         ct_size = sum(4 + len(classes[n].vtable) for n in class_order)
         print(f"  Class table: {len(class_order)} classes, {ct_size} bytes")
-        print(f"  Method table: {len(method_table)} × 12 = "
-              f"{len(method_table) * 12} bytes")
+        print(f"  Method table: {len(method_table)} × {mt_entry_size} = "
+              f"{len(method_table) * mt_entry_size} bytes")
         print(f"  CP resolution: {len(global_cp_resolve) + 2} bytes")
         print(f"  Int constants: {len(global_int_constants)} × 4 = "
               f"{len(global_int_constants) * 4} bytes")
@@ -1029,6 +1051,8 @@ def main():
     parser.add_argument("--c-header", help="Emit C header with embedded array")
     parser.add_argument("--emit-map", action="store_true",
                         help="Emit .pjvmmap sidecar for exception trace decoding")
+    parser.add_argument("--v2", action="store_true",
+                        help="Emit v2 format (32-bit code offsets, 32-bit bytecodes_size)")
     args = parser.parse_args()
 
     class_data_list = []
@@ -1036,7 +1060,9 @@ def main():
         with open(path, "rb") as f:
             class_data_list.append(f.read())
 
-    pjvm, class_order, method_table = pack_pjvm(class_data_list, verbose=args.verbose)
+    pjvm, class_order, method_table = pack_pjvm(class_data_list,
+                                                verbose=args.verbose,
+                                                v2=args.v2)
 
     out_path = args.output
     if not out_path:

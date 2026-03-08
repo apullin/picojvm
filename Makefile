@@ -21,10 +21,15 @@ LDSCRIPT = $(ROOT)/sysroot/ldscripts/i8085-32kram-32krom.ld
 TARGET_OPT = Os
 BUILDDIR = build
 
+PICOJVM_PAGED = ./picojvm-paged
+
 all: $(PICOJVM)
 
 $(PICOJVM): platform/host.c core.h
 	$(CC) $(CFLAGS) -o $@ $<
+
+$(PICOJVM_PAGED): platform/host.c core.h
+	$(CC) $(CFLAGS) -DPJVM_PAGED -o $@ $<
 
 # Compile all test .java files
 tests/%.class: tests/%.java tests/Native.java
@@ -86,6 +91,29 @@ test: $(PICOJVM) $(addsuffix .pjvm,$(TESTS_SINGLE)) tests/Shapes.pjvm tests/Feat
 	$(PICOJVM) tests/ExceptionTest.pjvm
 	@echo ""
 
+# Paged-mode run and test
+run-paged-%: $(PICOJVM_PAGED) tests/%.pjvm
+	$(PICOJVM_PAGED) tests/$*.pjvm
+
+test-paged: $(PICOJVM_PAGED) $(addsuffix .pjvm,$(TESTS_SINGLE)) tests/Shapes.pjvm tests/Features.pjvm tests/InterfaceTest.pjvm tests/ExceptionTest.pjvm
+	@for t in $(TESTS_SINGLE); do \
+		echo "=== $$(basename $$t) [paged] ==="; \
+		$(PICOJVM_PAGED) $$t.pjvm; \
+		echo ""; \
+	done
+	@echo "=== Shapes [paged] ==="
+	$(PICOJVM_PAGED) tests/Shapes.pjvm
+	@echo ""
+	@echo "=== Features [paged] ==="
+	$(PICOJVM_PAGED) tests/Features.pjvm
+	@echo ""
+	@echo "=== InterfaceTest [paged] ==="
+	$(PICOJVM_PAGED) tests/InterfaceTest.pjvm
+	@echo ""
+	@echo "=== ExceptionTest [paged] ==="
+	$(PICOJVM_PAGED) tests/ExceptionTest.pjvm
+	@echo ""
+
 # --- 8085 simulator target ---
 
 $(BUILDDIR):
@@ -130,7 +158,7 @@ sim-%: tests/%.pjvm
 	$(MAKE) sim PJVM_FILE=tests/$*.pjvm
 
 clean:
-	rm -f $(PICOJVM) tests/*.class tests/*.pjvm tests/*.pjvmmap
+	rm -f $(PICOJVM) $(PICOJVM_PAGED) tests/*.class tests/*.pjvm tests/*.pjvmmap
 	rm -rf $(BUILDDIR)
 
-.PHONY: all test clean sim
+.PHONY: all test test-paged clean sim

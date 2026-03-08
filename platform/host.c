@@ -81,6 +81,15 @@ static void pjvm_platform_poke8(uint16_t a, uint8_t v) {
     raw_mem[a] = v;
 }
 
+#ifdef PJVM_PAGED
+static FILE *pjvm_file_handle;
+
+static void pjvm_platform_read_page(uint32_t file_offset, uint8_t *buf, uint16_t len) {
+    fseek(pjvm_file_handle, (long)file_offset, SEEK_SET);
+    fread(buf, 1, len, pjvm_file_handle);
+}
+#endif
+
 static void pjvm_platform_trap(uint8_t op, uint16_t pc) {
     if (op == 0xFF) {
         fprintf(stderr, "Unknown native method at bytecode offset %u\n",
@@ -123,9 +132,13 @@ static void load_pjvm(const char *path) {
         exit(1);
     }
 
+#ifdef PJVM_PAGED
+    pjvm_file_handle = f;  /* keep open for paged reads */
+#else
     fclose(f);
+#endif
 
-    if (prog_data[0] != 0x85 || prog_data[1] != 0x4A) {
+    if (prog_data[0] != 0x85 || (prog_data[1] != 0x4A && prog_data[1] != 0x4B)) {
         fprintf(stderr, "Bad .pjvm magic\n");
         exit(1);
     }
@@ -157,5 +170,17 @@ int main(int argc, char **argv) {
             (unsigned)ctx.sp_max, (unsigned)PJVM_MAX_STACK,
             (unsigned)ctx.lt_max, (unsigned)PJVM_MAX_LOCALS,
             (unsigned)ctx.fdepth_max, (unsigned)PJVM_MAX_FRAMES);
+
+#ifdef PJVM_PAGED
+    fprintf(stderr,
+            "PAGE | hits: %u, misses: %u, rate: %.1f%% | %u slots x %uB\n",
+            (unsigned)pjvm_page_hits, (unsigned)pjvm_page_misses,
+            pjvm_page_hits + pjvm_page_misses > 0
+                ? 100.0 * pjvm_page_hits / (pjvm_page_hits + pjvm_page_misses)
+                : 0.0,
+            (unsigned)PJVM_PAGE_SLOTS, (unsigned)PJVM_PAGE_SIZE);
+    fclose(pjvm_file_handle);
+#endif
+
     return 0;
 }

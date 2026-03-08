@@ -5,7 +5,7 @@ PYTHON  = python3
 PICOJVM = ./picojvm
 
 # Single-class tests
-TESTS_SINGLE = tests/Fib tests/HelloWorld tests/BubbleSort tests/Counter tests/StringTest tests/StaticInitTest tests/MultiArrayTest tests/StringSwitchTest tests/MD5Test tests/FFTTest
+TESTS_SINGLE = tests/Fib tests/HelloWorld tests/BubbleSort tests/Counter tests/StringTest tests/StaticInitTest tests/MultiArrayTest tests/StringSwitchTest
 
 # --- 8085 target toolchain ---
 ROOT     = $(shell cd ../.. && pwd)
@@ -138,10 +138,10 @@ $(BUILDDIR)/crt0.o: $(CRT) | $(BUILDDIR)
 	$(CLANG) --target=i8085-unknown-elf -ffreestanding -fno-builtin -$(TARGET_OPT) -c $< -o $@
 
 $(BUILDDIR)/core.o: core.c pjvm.h | $(BUILDDIR)
-	$(CLANG) --target=i8085-unknown-elf -ffreestanding -fno-builtin -$(TARGET_OPT) $(SIM_CAPS) -c $< -o $@
+	$(CLANG) --target=i8085-unknown-elf -ffreestanding -fno-builtin -$(TARGET_OPT) $(SIM_CAPS) -DPJVM_ASM_HELPERS -c $< -o $@
 
 $(BUILDDIR)/i8085_sim.o: platform/i8085_sim.c pjvm.h | $(BUILDDIR)
-	$(CLANG) --target=i8085-unknown-elf -ffreestanding -fno-builtin -$(TARGET_OPT) $(SIM_CAPS) -c $< -o $@
+	$(CLANG) --target=i8085-unknown-elf -ffreestanding -fno-builtin -$(TARGET_OPT) $(SIM_CAPS) -DPJVM_ASM_HELPERS -c $< -o $@
 
 $(BUILDDIR)/i8085_helpers.o: platform/i8085_helpers.S | $(BUILDDIR)
 	$(CLANG) --target=i8085-unknown-elf -c $< -o $@

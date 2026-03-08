@@ -273,8 +273,8 @@ void pjvm_parse(uint8_t *data) {
     for (uint8_t i = 0; i < n_methods; i++) {
         m_ml[i] = p[0]; m_ac[i] = p[2]; m_fl[i] = p[3];
         if (version == 0x4B) {
-            m_co[i] = (uint32_t)p[4] | ((uint32_t)p[5] << 8)
-                     | ((uint32_t)p[6] << 16) | ((uint32_t)p[7] << 24);
+            m_co[i] = (uint32_t)((uint32_t)p[4] | ((uint32_t)p[5] << 8)
+                     | ((uint32_t)p[6] << 16) | ((uint32_t)p[7] << 24));
             m_cb[i] = (uint16_t)p[8] | ((uint16_t)p[9] << 8);
             m_vs[i] = p[10]; m_vmid[i] = p[11];
             m_ec[i] = p[12]; m_eo[i] = p[13]; p += 14;

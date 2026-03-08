@@ -8,8 +8,6 @@
 
 #include <stdint.h>
 
-/* #define PJVM_ASM_HELPERS  -- disabled: uint32_t pc breaks ASM offset assumptions */
-
 /* Output buffer: putchar writes sequentially starting at 0x0200 */
 static uint16_t output_ptr = 0x0200;
 
@@ -73,7 +71,7 @@ void pjvm_platform_trap(uint8_t op, uint16_t pc) {
 }
 
 int main(void) {
-    PJVMCtx ctx = {0};
+    static PJVMCtx ctx;  /* BSS — auto-zeroed by CRT */
 
     pjvm_prog = (uint8_t *)pjvm_program;
     pjvm_parse(pjvm_prog);

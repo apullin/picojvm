@@ -68,7 +68,7 @@ static void pjvm_load(void) {
 }
 
 void pjvm_main(void) {
-    PJVMCtx ctx = {0};
+    static PJVMCtx ctx;  /* BSS — auto-zeroed by CRT */
 
     pjvm_load();
     ctx.heap_ptr = HEAP_START;

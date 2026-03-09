@@ -1,0 +1,17 @@
+test,config,text_size,steps,cycles,halt
+Fib,noasm,24779,488184,3029656,hlt
+Fib,asm,23921,321183,2112486,hlt
+HelloWorld,noasm,24823,153893,953709,hlt
+HelloWorld,asm,23963,106834,690755,hlt
+BubbleSort,noasm,24867,1023783,6296559,hlt
+BubbleSort,asm,24007,713528,4731533,hlt
+Counter,noasm,24785,50472,311066,hlt
+Counter,asm,23925,41264,260261,hlt
+StringTest,noasm,24865,48728,302331,hlt
+StringTest,asm,24007,38918,246730,hlt
+StaticInitTest,noasm,24751,26504,163832,hlt
+StaticInitTest,asm,23891,22257,138798,hlt
+Shapes,noasm,25095,120092,743854,hlt
+Shapes,asm,24237,88271,563348,hlt
+ExceptionTest,noasm,25009,61135,378349,hlt
+ExceptionTest,asm,24151,51048,319897,hlt

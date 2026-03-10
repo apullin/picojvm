@@ -19,18 +19,30 @@ They should observe 36/36 tests passing, each producing the expected byte sequen
 
 ## Progress
 
-- [ ] Milestone 1: Foundation (Lexer, Token, project scaffolding, bootstrap build)
-- [ ] Milestone 2: Catalog and Resolve (Pass 1 + Pass 2 + Pass 4 skeleton)
-- [ ] Milestone 3: Core Language Emission (Pass 3 for Tier 1 tests T01-T12)
-- [ ] Milestone 4: Object-Oriented Emission (Tier 2 tests T13-T19)
-- [ ] Milestone 5: Advanced Features (Tier 3 tests T20-T30)
-- [ ] Milestone 6: Compatibility and Polish (Tier 4 tests T31-T36, test harness, simulator integration)
+- [x] Milestone 1: Foundation (Lexer, Token, project scaffolding, bootstrap build)
+- [x] Milestone 2: Catalog and Resolve (Pass 1 + Pass 2 + Pass 4 skeleton)
+- [x] Milestone 3: Core Language Emission (Pass 3 for Tier 1 tests T01-T12)
+- [x] Milestone 4: Object-Oriented Emission (Tier 2 tests T13-T19)
+- [x] Milestone 5: Advanced Features (Tier 3 tests T20-T30)
+- [x] Milestone 6: Compatibility and Polish (Tier 4 tests T31-T38, 36/36 passing)
 - [ ] Milestone 7: Self-Hosting (picojc compiles itself)
+
+Note: T23_StringSwitch and T26_Interface are deferred (need hashCode/equals pattern and vmid dispatch respectively). T37_Recursion and T38_LinkedList were added to reach 36 tests.
 
 
 ## Surprises & Discoveries
 
-(None yet -- to be populated as implementation proceeds.)
+- **Consolidated architecture**: The original plan called for 7 separate .java files (Token, Lexer, SymbolTable, Resolver, Emitter, PjvmWriter, Compiler). In practice, all compilation logic lives in Compiler.java with Token.java, Lexer.java, and Native.java as supporting files. The flat-array approach with static fields works well for the 8085's memory constraints.
+
+- **Exception class hierarchy double-resolution bug**: `synthesizeExceptionClass()` sets `classParent` to a resolved class index, but the `resolve()` pass re-iterates all classes and reinterprets that index as a name index. Fix: limit the resolution loop to `origClassCount` (classes that existed before synthesis).
+
+- **Finally body duplication**: Java's `finally` clause must emit code on both the normal path and the exception path. The compiler re-lexes the source to parse the finally body twice. Critical: save the source position BEFORE `expect(TOK_LBRACE)` consumes the opening brace, since `expect` calls `nextToken` which advances past the first token of the body.
+
+- **Inline static field initializers**: `static int x = 42;` requires saving the source position of the initializer expression during catalog, then re-lexing to emit bytecodes at the start of `<clinit>`. A synthetic `<clinit>` is created if only field initializers exist (no explicit `static { }` block).
+
+- **Array element type tracking**: Simple `int type` (0=int, 1=ref) is insufficient for arrays. Extended to 0=int, 1=ref, 3=int[], 4=byte[], 5=char[] to emit the correct BALOAD/BASTORE vs IALOAD/IASTORE vs CALOAD/CASTORE opcodes.
+
+- **Implicit this.method() calls**: Instance methods called without `this.` prefix (e.g., `area()` inside a class) need ALOAD_0 + INVOKEVIRTUAL, not INVOKESTATIC. Required a method lookup before falling through to static call.
 
 
 ## Decision Log

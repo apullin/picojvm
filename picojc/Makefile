@@ -23,7 +23,8 @@ TESTS = T01_Empty T02_Literal T03_Arithmetic T04_IfElse T05_WhileLoop \
         T20_NullRef T21_ObjectArray T22_Switch \
         T24_Exception T25_TypeConversion \
         T27_Fib T28_BubbleSort T29_StringTest T30_MultiClass \
-        T31_Shapes T32_ExceptionTest T33_Counter T34_StaticInit T35_ByteArray
+        T31_Shapes T32_ExceptionTest T33_Counter T34_StaticInit T35_ByteArray \
+        T36_CharArray
 # TODO: T23_StringSwitch (needs hashCode/equals pattern), T26_Interface (vmid dispatch)
 
 all: $(BUILDDIR)/picojc.pjvm

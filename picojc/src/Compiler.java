@@ -145,8 +145,6 @@ public class Compiler {
     // ==================== MAIN ====================
 
     public static void main(String[] args) {
-        Native.out(0xFE, '0'); // debug: reached main
-
         int srcLen = (Native.peek(SRC_LEN_ADDR) & 0xFF) |
                      ((Native.peek(SRC_LEN_ADDR + 1) & 0xFF) << 8);
         if (srcLen == 0) {
@@ -154,34 +152,26 @@ public class Compiler {
             return;
         }
 
-        Native.out(0xFE, '1'); // debug: before keywords
         Lexer.initKeywords();
-        Native.out(0xFE, '2'); // debug: before names
         initNames();
-        Native.out(0xFE, '3'); // debug: before builtins
         initBuiltins();
 
         // Pass 1: Catalog
-        Native.out(0xFE, 'C'); // debug: catalog
         Lexer.init(SRC_BASE, srcLen);
         Lexer.nextToken();
         catalog();
 
         // Pass 2: Resolve
-        Native.out(0xFE, 'R'); // debug: resolve
         resolve();
 
         // Pass 3: Emit
-        Native.out(0xFE, 'E'); // debug: emit
         Lexer.init(SRC_BASE, srcLen);
         Lexer.nextToken();
         emit();
 
         // Pass 4: Link (write .pjvm to stdout)
-        Native.out(0xFE, 'L'); // debug: link
         writeOutput();
 
-        Native.out(0xFE, 'D'); // debug: done
         Native.halt();
     }
 

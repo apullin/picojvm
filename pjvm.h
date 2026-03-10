@@ -20,7 +20,7 @@
 #define PJVM_VTABLE_CAP 256
 #endif
 #ifndef PJVM_STATIC_CAP
-#define PJVM_STATIC_CAP 64
+#define PJVM_STATIC_CAP 256
 #endif
 #ifndef PJVM_MAX_STACK
 #define PJVM_MAX_STACK 256
@@ -118,5 +118,6 @@ void     pjvm_platform_putchar(uint8_t ch);
 uint8_t  pjvm_platform_peek8(uint16_t a);
 void     pjvm_platform_poke8(uint16_t a, uint8_t v);
 void     pjvm_platform_trap(uint8_t op, uint16_t pc);
+void     pjvm_platform_out(uint16_t port, uint16_t val);
 
 #endif /* PJVM_H */

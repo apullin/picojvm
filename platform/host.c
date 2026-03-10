@@ -11,7 +11,7 @@
 #include <string.h>
 
 #define RAW_MEM_SIZE 65536u
-#define HEAP_MEM_SIZE 65536u
+#define HEAP_MEM_SIZE 524288u
 #define HEAP_BASE 1u
 
 static uint8_t raw_mem[RAW_MEM_SIZE];
@@ -32,6 +32,11 @@ uint16_t heap_alloc(PJVMCtx *j, uint16_t size) {
                 (unsigned)a, (unsigned)size, (unsigned)HEAP_MEM_SIZE);
         exit(1);
     }
+    if (end > 65535u) {
+        fprintf(stderr, "JVM heap_ptr overflow! (%u + %u = %u > 65535)\n",
+                (unsigned)a, (unsigned)size, (unsigned)end);
+        exit(1);
+    }
 
     j->heap_ptr = (uint16_t)end;
 
@@ -41,6 +46,10 @@ uint16_t heap_alloc(PJVMCtx *j, uint16_t size) {
 
     heap_alloc_count++;
     heap_bytes_used += size;
+    if (getenv("PJVM_HEAP_TRACE"))
+        fprintf(stderr, "HEAP | alloc #%u: %u bytes at %u (heap_ptr=%u, mi=%u)\n",
+                (unsigned)heap_alloc_count, (unsigned)size, (unsigned)a,
+                (unsigned)end, (unsigned)g_pjvm->cur_mi);
     return a;
 }
 
@@ -48,7 +57,13 @@ uint8_t r8(uint16_t a) {
     return heap_mem[a];
 }
 
+static uint16_t watch_addr;
 void w8(uint16_t a, uint8_t v) {
+    if (watch_addr && (a == watch_addr || a == (uint16_t)(watch_addr + 1))) {
+        fprintf(stderr, "WATCH | w8(%u, 0x%02X) mi=%u pc=%u sp=%u\n",
+                (unsigned)a, (unsigned)v, (unsigned)g_pjvm->cur_mi,
+                (unsigned)g_pjvm->pc, (unsigned)g_pjvm->sp);
+    }
     heap_mem[a] = v;
 }
 
@@ -57,6 +72,12 @@ uint16_t r16(uint16_t a) {
 }
 
 void w16(uint16_t a, uint16_t v) {
+    if (watch_addr && (a == watch_addr || a == (uint16_t)(watch_addr + 1) ||
+        (uint16_t)(a + 1) == watch_addr || (uint16_t)(a + 1) == (uint16_t)(watch_addr + 1))) {
+        fprintf(stderr, "WATCH | w16(%u, 0x%04X) mi=%u pc=%u sp=%u\n",
+                (unsigned)a, (unsigned)v, (unsigned)g_pjvm->cur_mi,
+                (unsigned)g_pjvm->pc, (unsigned)g_pjvm->sp);
+    }
     heap_mem[a] = (uint8_t)v;
     heap_mem[(uint16_t)(a + 1)] = (uint8_t)(v >> 8);
 }
@@ -73,6 +94,12 @@ void pjvm_platform_poke8(uint16_t a, uint8_t v) {
     raw_mem[a] = v;
 }
 
+void pjvm_platform_out(uint16_t port, uint16_t val) {
+    if (port == 0xFE) {
+        fprintf(stderr, "[DBG] %c\n", (char)val);
+    }
+}
+
 #ifdef PJVM_PAGED
 static FILE *pjvm_file_handle;
 
@@ -84,7 +111,26 @@ static void pjvm_host_read(uint32_t file_offset, uint8_t *buf, uint16_t len, voi
 #endif
 
 void pjvm_platform_trap(uint8_t op, uint16_t pc) {
-    if (op == 0xFF) {
+    if (op == 0xFE) {
+        extern uint8_t pjvm_trace_enabled;
+        extern uint32_t trace_idx;
+        extern uint32_t trace_pc[];
+        extern uint8_t trace_op[], trace_mi[], trace_sp[];
+        extern uint16_t trace_stk0[];
+        fprintf(stderr, "STEP LIMIT hit at pc=%u, mi=%u, sp=%u, fdepth=%d\n",
+                (unsigned)pc, (unsigned)g_pjvm->cur_mi,
+                (unsigned)g_pjvm->sp, (int)g_pjvm->fdepth);
+        fprintf(stderr, "Last %d instructions:\n", trace_idx < 32 ? (int)trace_idx : 32);
+        uint32_t start = trace_idx > 32 ? trace_idx - 32 : 0;
+        for (uint32_t i = start; i < trace_idx; i++) {
+            uint32_t ti = i % 32;
+            fprintf(stderr, "  [%u] pc=%u mi=%u op=0x%02X sp=%u stk0=%u\n",
+                    (unsigned)i, (unsigned)trace_pc[ti],
+                    (unsigned)trace_mi[ti], (unsigned)trace_op[ti],
+                    (unsigned)trace_sp[ti], (unsigned)trace_stk0[ti]);
+        }
+        exit(2);
+    } else if (op == 0xFF) {
         fprintf(stderr, "Unknown native method at bytecode offset %u\n",
                 (unsigned)pc);
     } else {
@@ -92,6 +138,38 @@ void pjvm_platform_trap(uint8_t op, uint16_t pc) {
                 op, (unsigned)pc);
     }
     exit(1);
+}
+
+static void preload_raw(const char *spec) {
+    /* Parse "ADDR:FILE" — load file into raw_mem at ADDR, store length at ADDR-2 */
+    char *colon = strchr(spec, ':');
+    if (!colon) {
+        fprintf(stderr, "Bad --preload format, expected ADDR:FILE\n");
+        exit(1);
+    }
+    unsigned long addr = strtoul(spec, NULL, 0);
+    const char *path = colon + 1;
+    FILE *f = fopen(path, "rb");
+    if (!f) { perror(path); exit(1); }
+    fseek(f, 0, SEEK_END);
+    size_t len = (size_t)ftell(f);
+    fseek(f, 0, SEEK_SET);
+    if (addr + len > RAW_MEM_SIZE) {
+        fprintf(stderr, "Preload overflow: 0x%lx + %zu > %u\n",
+                addr, len, (unsigned)RAW_MEM_SIZE);
+        exit(1);
+    }
+    if (fread(raw_mem + addr, 1, len, f) != len) {
+        perror("fread preload");
+        exit(1);
+    }
+    fclose(f);
+    /* Store length at addr-2 as 16-bit LE */
+    if (addr >= 2) {
+        raw_mem[addr - 2] = (uint8_t)(len & 0xFF);
+        raw_mem[addr - 1] = (uint8_t)((len >> 8) & 0xFF);
+    }
+    fprintf(stderr, "PRELOAD | 0x%04lx: %zu bytes from %s\n", addr, len, path);
 }
 
 static void load_pjvm(const char *path) {
@@ -143,10 +221,32 @@ static void load_pjvm(const char *path) {
 
 int main(int argc, char **argv) {
     PJVMCtx ctx = {0};
+    const char *save_spec = NULL;
 
     if (argc < 2) {
-        fprintf(stderr, "Usage: picojvm <program.pjvm> [--cache=N] [--pin=0,3,7]\n");
+        fprintf(stderr, "Usage: picojvm <program.pjvm> [--preload ADDR:FILE] [--save-raw ADDR:FILE]\n");
         return 1;
+    }
+
+    /* Pre-parse --preload and --save-raw before loading .pjvm */
+    for (int i = 2; i < argc; i++) {
+        if (strcmp(argv[i], "--preload") == 0 && i + 1 < argc) {
+            preload_raw(argv[++i]);
+        } else if (strncmp(argv[i], "--preload=", 10) == 0) {
+            preload_raw(argv[i] + 10);
+        } else if (strcmp(argv[i], "--save-raw") == 0 && i + 1 < argc) {
+            save_spec = argv[++i];
+        } else if (strncmp(argv[i], "--save-raw=", 11) == 0) {
+            save_spec = argv[i] + 11;
+        } else if (strncmp(argv[i], "--step-limit=", 13) == 0) {
+            extern uint32_t pjvm_step_limit;
+            pjvm_step_limit = (uint32_t)strtoul(argv[i] + 13, NULL, 0);
+        } else if (strcmp(argv[i], "--trace") == 0) {
+            extern uint8_t pjvm_trace_enabled;
+            pjvm_trace_enabled = 1;
+        } else if (strncmp(argv[i], "--watch=", 8) == 0) {
+            watch_addr = (uint16_t)strtoul(argv[i] + 8, NULL, 0);
+        }
     }
 
     load_pjvm(argv[1]);
@@ -219,6 +319,28 @@ int main(int argc, char **argv) {
     ctx.heap_ptr = HEAP_BASE;
     pjvm_run(&ctx);
     fflush(stdout);
+
+    /* Save raw memory region after execution */
+    if (save_spec) {
+        char *colon = strchr(save_spec, ':');
+        if (colon) {
+            unsigned long addr = strtoul(save_spec, NULL, 0);
+            const char *spath = colon + 1;
+            /* Read length from addr-2 (16-bit LE) */
+            uint16_t len = 0;
+            if (addr >= 2)
+                len = (uint16_t)raw_mem[addr - 2] | ((uint16_t)raw_mem[addr - 1] << 8);
+            if (len > 0 && addr + len <= RAW_MEM_SIZE) {
+                FILE *sf = fopen(spath, "wb");
+                if (sf) {
+                    fwrite(raw_mem + addr, 1, len, sf);
+                    fclose(sf);
+                    fprintf(stderr, "SAVE | 0x%04lx: %u bytes to %s\n",
+                            addr, (unsigned)len, spath);
+                }
+            }
+        }
+    }
 
     fprintf(stderr,
             "HALT | heap: %u obj, %uB | stack: %u/%u slots | locals: %u/%u | frames: %u/%u\n",

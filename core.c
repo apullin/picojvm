@@ -88,7 +88,7 @@ static uint16_t m_cb[PJVM_METHOD_CAP];
 static uint8_t  cls_pid[PJVM_CLASS_CAP], cls_nf[PJVM_CLASS_CAP];
 static uint8_t  cls_vb[PJVM_CLASS_CAP], cls_vs[PJVM_CLASS_CAP], cls_ci[PJVM_CLASS_CAP];
 static uint8_t  vt[PJVM_VTABLE_CAP];
-static uint16_t str_refs[32];
+static uint16_t str_refs[128];
 
 /* --- program image access macro --------------------------------------- */
 #ifdef PJVM_PAGED
@@ -321,9 +321,12 @@ static void pjvm_inv(uint8_t mi) {
             spop_lo();
             spush(0, 0);
             break;
-        case NATIVE_OUT:
-            g_pjvm->sp -= 2;
+        case NATIVE_OUT: {
+            uint16_t ov = spop_lo(); spop_hi();
+            uint16_t op = spop_lo(); spop_hi();
+            pjvm_platform_out(op, ov);
             break;
+        }
         case NATIVE_PEEK:
             alo = spop_lo();
             spush(pjvm_platform_peek8(alo), 0);
@@ -526,10 +529,34 @@ void pjvm_run(PJVMCtx *j) {
     pjvm_exec();
 }
 
+uint32_t pjvm_step_limit;
+uint8_t  pjvm_trace_enabled;
+#define TRACE_BUF_SIZE 32
+uint32_t trace_pc[TRACE_BUF_SIZE];
+uint8_t  trace_op[TRACE_BUF_SIZE];
+uint8_t  trace_mi[TRACE_BUF_SIZE];
+uint8_t  trace_sp[TRACE_BUF_SIZE];
+uint16_t trace_stk0[TRACE_BUF_SIZE];
+uint32_t trace_idx;
+
 static void pjvm_exec(void) {
+    uint32_t steps = 0;
     while (g_pjvm->pc != PJVM_PC_HALT) {
+        if (pjvm_step_limit && ++steps > pjvm_step_limit) {
+            pjvm_platform_trap(0xFE, g_pjvm->pc);
+            return;
+        }
         uint32_t opc = g_pjvm->pc;
         uint8_t op = BC(g_pjvm->pc++);
+        if (pjvm_trace_enabled) {
+            uint32_t ti = trace_idx % TRACE_BUF_SIZE;
+            trace_pc[ti] = opc;
+            trace_op[ti] = op;
+            trace_mi[ti] = g_pjvm->cur_mi;
+            trace_sp[ti] = g_pjvm->sp;
+            trace_stk0[ti] = (g_pjvm->sp > 0) ? g_pjvm->stk_lo[g_pjvm->sp - 1] : 0xFFFF;
+            trace_idx++;
+        }
         uint16_t alo, ahi, blo, bhi;
 
         switch (op) {
@@ -714,8 +741,7 @@ static void pjvm_exec(void) {
             uint16_t old = g_pjvm->loc_lo[i];
             uint16_t inc = (uint16_t)(int16_t)v;
             uint16_t nlo = old + inc;
-            uint16_t carry = (v >= 0) ? (nlo < old ? 1 : 0)
-                                      : (nlo > old ? (uint16_t)-1 : 0);
+            uint16_t carry = (nlo < old) ? 1 : 0;
             g_pjvm->loc_lo[i] = nlo;
             g_pjvm->loc_hi[i] += (v < 0 ? 0xFFFF : 0) + carry;
             break;

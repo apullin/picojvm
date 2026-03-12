@@ -2,18 +2,18 @@ public class Compiler {
     // Limits — sized to fit in picoJVM 64KB heap
     static int MAX_CLASSES  = 32;
     static int MAX_METHODS  = 128;
-    static int MAX_FIELDS   = 64;
-    static int MAX_NAMES    = 256;
-    static int MAX_CP       = 1024;
-    static int MAX_CODE     = 20480;
+    static int MAX_FIELDS   = 384;
+    static int MAX_NAMES    = 640;
+    static int MAX_CP       = 2560;
+    static int MAX_CODE     = 19456;
     static int MAX_LOCALS   = 64;
     static int MAX_EXC      = 32;
     static int MAX_VTABLE   = 128;
-    static int MAX_INT_CONST= 64;
-    static int MAX_STR_CONST= 64;
+    static int MAX_INT_CONST= 80;
+    static int MAX_STR_CONST= 80;
 
     // --- Name pool (interning) ---
-    static byte[] namePool = new byte[4096];
+    static byte[] namePool = new byte[10240];
     static int namePoolLen;
     static int[] nameOff = new int[MAX_NAMES];
     static int[] nameLen = new int[MAX_NAMES];
@@ -53,6 +53,7 @@ public class Compiler {
     static int[] fieldSlot   = new int[MAX_FIELDS]; // assigned in resolve
     static int[] fieldInitPos  = new int[MAX_FIELDS]; // source pos of initializer (-1=none)
     static int[] fieldInitLine = new int[MAX_FIELDS]; // line of initializer
+    static int[] fieldArrayKind = new int[MAX_FIELDS]; // 0=non-array/int[], 4=byte[], 5=char[]
 
     // --- Method table ---
     static int methodCount;
@@ -81,13 +82,14 @@ public class Compiler {
     static int cpSize;
 
     // --- Per-method CP (during emit) ---
-    static int[] cpMethodVals = new int[128]; // resolved values
-    static int[] cpMethodKeys = new int[128]; // hash keys for dedup
+    static int[] cpMethodVals = new int[1280]; // resolved values
+    static int[] cpMethodKeys = new int[1280]; // hash keys for dedup
     static int cpMethodCount;
     static int cpMethodBase; // global offset
 
     // --- Bytecodes ---
-    static byte[] code = new byte[MAX_CODE]; // global bytecodes
+    // Bytecodes stored in raw memory beyond source (not on heap)
+    static int codeBase; // set at runtime to SRC_BASE + srcLen
     static int codeLen;
     static byte[] mcode = new byte[2048]; // current method bytecodes
     static int mcodeLen;
@@ -119,16 +121,20 @@ public class Compiler {
     static int maxStack;
 
     // --- Backpatch / Labels ---
-    static int[] patchLoc   = new int[256]; // offset in mcode of branch operand
-    static int[] patchLabel = new int[256]; // which label
+    static int[] patchLoc   = new int[320]; // offset in mcode of branch operand
+    static int[] patchLabel = new int[320]; // which label
     static int patchCount;
-    static int[] labelAddr  = new int[256]; // address for each label
+    static int[] labelAddr  = new int[320]; // address for each label
     static int labelCount;
 
     // --- Loop context stack (break/continue targets) ---
     static int[] loopBreakLabel = new int[32];
     static int[] loopContLabel  = new int[32];
     static int loopDepth;
+
+    // --- Switch case arrays (reused, not nested) ---
+    static int[] caseVals   = new int[64];
+    static int[] caseLabels = new int[64];
 
     // --- Current context ---
     static int curClass;
@@ -137,7 +143,7 @@ public class Compiler {
 
     // Source address
     static int SRC_BASE = 0xC000;
-    static int SRC_LEN_ADDR = 0xBFFE;
+    static int SRC_LEN_ADDR = 0xBFFC;
 
     // Output to stdout via putchar
     static int outLen;
@@ -146,11 +152,15 @@ public class Compiler {
 
     public static void main(String[] args) {
         int srcLen = (Native.peek(SRC_LEN_ADDR) & 0xFF) |
-                     ((Native.peek(SRC_LEN_ADDR + 1) & 0xFF) << 8);
+                     ((Native.peek(SRC_LEN_ADDR + 1) & 0xFF) << 8) |
+                     ((Native.peek(SRC_LEN_ADDR + 2) & 0xFF) << 16) |
+                     ((Native.peek(SRC_LEN_ADDR + 3) & 0xFF) << 24);
         if (srcLen == 0) {
             Native.halt();
             return;
         }
+
+        codeBase = SRC_BASE + srcLen; // store bytecodes beyond source
 
         Lexer.initKeywords();
         initNames();
@@ -219,6 +229,10 @@ public class Compiler {
                 if (match) return i;
             }
         }
+        if (nameCount >= MAX_NAMES || namePoolLen + len > 10240) {
+            Lexer.error(250); // name pool overflow
+            return 0;
+        }
         int idx = nameCount++;
         nameOff[idx] = namePoolLen;
         nameLen[idx] = len;
@@ -241,6 +255,10 @@ public class Compiler {
                 }
                 if (match) return i;
             }
+        }
+        if (nameCount >= MAX_NAMES || namePoolLen + len > 10240) {
+            Lexer.error(251); // name pool overflow
+            return 0;
         }
         int idx = nameCount++;
         nameOff[idx] = namePoolLen;
@@ -272,6 +290,7 @@ public class Compiler {
         for (int i = 0; i < methodCount; i++) {
             if (methodIsNative[i] && methodName[i] == methodNameIdx &&
                 methodClass[i] == classNameIdx) {
+                methodFlags[i] = (nativeId << 1) | 1;
                 return i;
             }
         }
@@ -443,6 +462,7 @@ public class Compiler {
 
         // Return type or constructor
         int retType = 0; // 0=void, 1=int, 2=ref
+        int arrayKind = 0; // 0=non-array, 4=byte[], 5=char[]
         boolean isCtor = false;
         int retTypeToken = Token.type;
 
@@ -477,18 +497,33 @@ public class Compiler {
                  Token.type == Token.TOK_BOOLEAN) {
             retType = 1; // int-like
             Lexer.nextToken();
-            // Check for array type
-            if (Token.type == Token.TOK_LBRACKET) {
-                Lexer.nextToken();
-                Lexer.expect(Token.TOK_RBRACKET);
-                retType = 2; // array = ref
+            // Check for array type (supports multi-dimensional)
+            {
+                int dimCount = 0;
+                while (Token.type == Token.TOK_LBRACKET) {
+                    Lexer.nextToken();
+                    Lexer.expect(Token.TOK_RBRACKET);
+                    dimCount++;
+                    if (retType == 1) {
+                        if (retTypeToken == Token.TOK_BYTE || retTypeToken == Token.TOK_BOOLEAN) arrayKind = 4;
+                        else if (retTypeToken == Token.TOK_CHAR) arrayKind = 5;
+                    }
+                    retType = 2; // array = ref
+                }
+                // Multi-dimensional: outer array is reference array, but track inner type
+                // 6=byte[][], 7=char[][] — after first [i], type becomes 4 or 5
+                if (dimCount > 1) {
+                    if (arrayKind == 4) arrayKind = 6;      // byte[][]
+                    else if (arrayKind == 5) arrayKind = 7;  // char[][]
+                    else arrayKind = 0;
+                }
             }
         }
         else if (Token.type == Token.TOK_STRING_KW || Token.type == Token.TOK_IDENT) {
             retType = 2; // reference
             Lexer.nextToken();
-            // Check for array type
-            if (Token.type == Token.TOK_LBRACKET) {
+            // Check for array type (supports multi-dimensional)
+            while (Token.type == Token.TOK_LBRACKET) {
                 Lexer.nextToken();
                 Lexer.expect(Token.TOK_RBRACKET);
             }
@@ -508,15 +543,16 @@ public class Compiler {
             catalogMethod(ci, nm, isStat, false, isNat, isAbstract, retType);
         } else {
             // Field
-            catalogField(ci, nm, isStat, retType);
+            catalogField(ci, nm, isStat, retType, arrayKind);
         }
     }
 
-    static void catalogField(int ci, int nm, boolean isStat, int retType) {
+    static void catalogField(int ci, int nm, boolean isStat, int retType, int arrKind) {
         int fi = fieldCount++;
         fieldClass[fi] = ci;
         fieldName[fi] = nm;
         fieldIsStatic[fi] = isStat;
+        fieldArrayKind[fi] = arrKind;
         fieldSlot[fi] = -1;
         fieldInitPos[fi] = -1;
         fieldInitLine[fi] = 0;
@@ -559,6 +595,7 @@ public class Compiler {
                 fieldClass[fi2] = ci;
                 fieldName[fi2] = nm2;
                 fieldIsStatic[fi2] = isStat;
+                fieldArrayKind[fi2] = arrKind;
                 fieldSlot[fi2] = -1;
                 fieldInitPos[fi2] = -1;
                 fieldInitLine[fi2] = 0;
@@ -802,6 +839,28 @@ public class Compiler {
             }
         }
 
+        // Ensure all cataloged native methods have their flags set
+        for (int mi = 0; mi < methodCount; mi++) {
+            if (methodIsNative[mi] && methodFlags[mi] == 0) {
+                int nm = methodName[mi];
+                int nid = -1;
+                if (nm == N_PUTCHAR)      nid = 0;
+                else if (nm == N_IN)      nid = 1;
+                else if (nm == N_OUT)     nid = 2;
+                else if (nm == N_PEEK)    nid = 3;
+                else if (nm == N_POKE)    nid = 4;
+                else if (nm == N_HALT)    nid = 5;
+                else if (nm == N_INIT)    nid = 6;
+                else if (nm == N_LENGTH)  nid = 7;
+                else if (nm == N_CHARAT)  nid = 8;
+                else if (nm == N_EQUALS)  nid = 9;
+                else if (nm == N_TOSTRING) nid = 10;
+                else if (nm == N_PRINT)   nid = 11;
+                else if (nm == N_HASHCODE) nid = 12;
+                if (nid >= 0) methodFlags[mi] = (nid << 1) | 1;
+            }
+        }
+
         // Find main method
         mainMi = -1;
         for (int mi = 0; mi < methodCount; mi++) {
@@ -1031,6 +1090,7 @@ public class Compiler {
         patchCount = 0;
         labelCount = 0;
         localCount = 0;
+        localNextSlot = 0;
         loopDepth = 0;
         stackDepth = 0;
         maxStack = 0;
@@ -1142,7 +1202,7 @@ public class Compiler {
         // Copy method bytecodes to global
         methodCodeOff[mi] = codeLen;
         for (int i = 0; i < mcodeLen; i++) {
-            code[codeLen++] = mcode[i];
+            Native.poke(codeBase + codeLen, mcode[i] & 0xFF); codeLen++;
         }
 
         // Store CP
@@ -1183,7 +1243,7 @@ public class Compiler {
 
                 methodCodeOff[mi] = codeLen;
                 for (int i = 0; i < mcodeLen; i++) {
-                    code[codeLen++] = mcode[i];
+                    Native.poke(codeBase + codeLen, mcode[i] & 0xFF); codeLen++;
                 }
                 methodCpBase[mi] = cpMethodBase;
                 for (int i = 0; i < cpMethodCount; i++) {
@@ -1225,7 +1285,7 @@ public class Compiler {
 
                 methodCodeOff[mi] = codeLen;
                 for (int i = 0; i < mcodeLen; i++) {
-                    code[codeLen++] = mcode[i];
+                    Native.poke(codeBase + codeLen, mcode[i] & 0xFF); codeLen++;
                 }
                 methodCpBase[mi] = cpMethodBase;
                 for (int i = 0; i < cpMethodCount; i++) {
@@ -1242,26 +1302,25 @@ public class Compiler {
         // Returns: 0=int, 1=ref, 3=int[], 4=byte[], 5=char[]
         int baseType = 0;
         int elemKind = 0; // 0=int-like, 1=byte, 2=char
-        if (Token.type == Token.TOK_BYTE) {
+        if (Token.type == Token.TOK_BYTE || Token.type == Token.TOK_BOOLEAN) {
             elemKind = 1; Lexer.nextToken();
         } else if (Token.type == Token.TOK_CHAR) {
             elemKind = 2; Lexer.nextToken();
-        } else if (Token.type == Token.TOK_INT || Token.type == Token.TOK_SHORT ||
-                   Token.type == Token.TOK_BOOLEAN) {
+        } else if (Token.type == Token.TOK_INT || Token.type == Token.TOK_SHORT) {
             elemKind = 0; Lexer.nextToken();
         } else {
             baseType = 1; // reference
             Lexer.nextToken();
         }
         // Array dimensions
-        boolean isArray = false;
+        int dimCount = 0;
         while (Token.type == Token.TOK_LBRACKET) {
             Lexer.nextToken();
             if (Token.type == Token.TOK_RBRACKET) Lexer.nextToken();
-            isArray = true;
+            dimCount++;
         }
-        if (isArray) {
-            if (baseType == 1) return 1; // Object[] = reference
+        if (dimCount > 0) {
+            if (baseType == 1 || dimCount > 1) return 1; // Object[]/multi-dim = reference
             if (elemKind == 1) return 4; // byte[]
             if (elemKind == 2) return 5; // char[]
             return 3; // int[]
@@ -1325,7 +1384,7 @@ public class Compiler {
         localSlot[localCount] = localCount;
         localType[localCount] = type;
         localCount++;
-        localNextSlot = localCount;
+        if (localCount > localNextSlot) localNextSlot = localCount;
     }
 
     static int findLocal(int nm) {
@@ -1724,8 +1783,8 @@ public class Compiler {
         int bodyStart = Lexer.pos;
         int bodyLine = Lexer.line;
         Lexer.expect(Token.TOK_LBRACE);
-        int[] caseVals = new int[64];
-        int[] caseLabels = new int[64];
+        // Static to avoid heap allocation per switch (no nested switches)
+        // Allocated once in <clinit>, reused for each switch statement
         int caseCount = 0;
         int defaultLabel = -1;
 
@@ -2325,17 +2384,37 @@ public class Compiler {
                     else if (type == 5) emitByte(0x55);  // CASTORE (char[])
                     else emitByte(0x4F);                  // IASTORE (int[]/ref[])
                     type = 0; // void
+                } else if (Token.type == Token.TOK_INC || Token.type == Token.TOK_DEC) {
+                    // Array element post-increment: arr[idx]++
+                    // Stack: [arrRef, idx] (idx was popped from tracker but still on JVM stack)
+                    int op = Token.type;
+                    Lexer.nextToken();
+                    pushStack(); // re-count idx
+                    emitByte(0x5C); pushStack(); pushStack(); // DUP2
+                    if (type == 4) emitByte(0x33);       // BALOAD
+                    else if (type == 5) emitByte(0x34);  // CALOAD
+                    else emitByte(0x2E);                  // IALOAD
+                    popStack(); // IALOAD consumes dup'd pair, pushes value: net -1
+                    emitByte(0x5B); pushStack(); // DUP_X2: old value below arrRef,idx,new
+                    emitByte(0x04); pushStack(); // ICONST_1
+                    emitByte(op == Token.TOK_INC ? 0x60 : 0x64); popStack(); // IADD/ISUB
+                    if (type == 4) emitByte(0x54);       // BASTORE
+                    else if (type == 5) emitByte(0x55);  // CASTORE
+                    else emitByte(0x4F);                  // IASTORE
+                    popStack(); popStack(); popStack(); // IASTORE consumes arrRef,idx,value
+                    type = 1; // old value remains on stack
                 } else {
                     if (type == 4) emitByte(0x33);       // BALOAD (byte[])
                     else if (type == 5) emitByte(0x34);  // CALOAD (char[])
                     else emitByte(0x2E);                  // IALOAD (int[]/ref[])
-                    type = 1;
+                    // Propagate inner type for multi-dim arrays
+                    if (type == 6) type = 4;             // byte[][] elem → byte[]
+                    else if (type == 7) type = 5;        // char[][] elem → char[]
+                    else type = 1;
                 }
             }
             else if (Token.type == Token.TOK_INC || Token.type == Token.TOK_DEC) {
-                // Post-increment/decrement (on a variable - we need to handle this)
-                // This is tricky in postfix position on stack values
-                // For now, just handle local variables
+                // Post-increment/decrement in general postfix position
                 Lexer.nextToken();
                 type = 1;
             }
@@ -2524,13 +2603,22 @@ public class Compiler {
                     emitByte(0xB4); // GETFIELD
                     emitShortBE(cpIdx);
                     // stack: -1 (obj) +1 (value) = net 0
+                    if (fieldArrayKind[fi] != 0) return fieldArrayKind[fi];
                     return 1;
                 }
             }
 
-            // Check for static field
-            for (int fi = 0; fi < fieldCount; fi++) {
-                if (fieldName[fi] == nm && fieldIsStatic[fi]) {
+            // Check for static field (prefer current class first)
+            {
+                int sfi = -1;
+                for (int fi2 = 0; fi2 < fieldCount; fi2++) {
+                    if (fieldName[fi2] == nm && fieldIsStatic[fi2]) {
+                        if (fieldClass[fi2] == curClass) { sfi = fi2; break; }
+                        if (sfi < 0) sfi = fi2;
+                    }
+                }
+                if (sfi >= 0) {
+                    int fi = sfi;
                     if (Token.type == Token.TOK_ASSIGN) {
                         Lexer.nextToken();
                         parseExpression();
@@ -2577,6 +2665,7 @@ public class Compiler {
                     emitByte(0xB2); // GETSTATIC
                     emitShortBE(cpIdx);
                     pushStack();
+                    if (fieldArrayKind[fi] != 0) return fieldArrayKind[fi];
                     return 1;
                 }
             }
@@ -2626,9 +2715,17 @@ public class Compiler {
             else if (elemType == Token.TOK_SHORT) typeCode = 9;
             else if (elemType == Token.TOK_BOOLEAN) typeCode = 4;
 
-            // Check for 2D array
+            // Check for 2D array: new type[N][M] or new type[N][]
             if (Token.type == Token.TOK_LBRACKET) {
                 Lexer.nextToken();
+                if (Token.type == Token.TOK_RBRACKET) {
+                    // new type[N][] — array of references, size N
+                    Lexer.nextToken();
+                    int cpIdx = allocClassCP(0);
+                    emitByte(0xBD); // ANEWARRAY
+                    emitShortBE(cpIdx);
+                    return 2; // reference array
+                }
                 parseExpression();
                 Lexer.expect(Token.TOK_RBRACKET);
                 // MULTIANEWARRAY
@@ -2645,9 +2742,9 @@ public class Compiler {
             emitByte(typeCode);
             // Stack: count consumed, array ref pushed = net 0
             // Return specific array type for proper BALOAD/BASTORE emission
-            if (typeCode == 8) return 4;  // byte[]
+            if (typeCode == 8 || typeCode == 4) return 4;  // byte[] or boolean[]
             if (typeCode == 5) return 5;  // char[]
-            return 3; // int[] (or short[], boolean[])
+            return 3; // int[] (or short[])
         }
 
         // Object or reference array: new ClassName(...) or new ClassName[size]
@@ -2900,6 +2997,7 @@ public class Compiler {
         emitByte(0xB4); // GETFIELD
         emitShortBE(cpIdx);
         // Stack: obj consumed, value pushed = net 0
+        if (fieldArrayKind[fi] != 0) return fieldArrayKind[fi];
         return 1;
     }
 
@@ -2907,8 +3005,8 @@ public class Compiler {
         int fi = -1;
         for (int f = 0; f < fieldCount; f++) {
             if (fieldName[f] == fieldNm && fieldIsStatic[f]) {
-                fi = f;
-                break;
+                if (fieldClass[f] == ci) { fi = f; break; }
+                if (fi < 0) fi = f;
             }
         }
         if (fi < 0) {
@@ -2925,11 +3023,43 @@ public class Compiler {
             popStack();
             return 0;
         }
+        if (Token.type >= Token.TOK_PLUS_EQ && Token.type <= Token.TOK_USHR_EQ) {
+            int op = Token.type;
+            Lexer.nextToken();
+            int cpIdx = allocFieldCP(fieldSlot[fi]);
+            emitByte(0xB2); // GETSTATIC
+            emitShortBE(cpIdx);
+            pushStack();
+            parseExpression();
+            emitCompoundOp(op);
+            popStack();
+            emitByte(0x59); pushStack(); // DUP
+            emitByte(0xB3); // PUTSTATIC
+            emitShortBE(cpIdx);
+            popStack();
+            return 1;
+        }
+        if (Token.type == Token.TOK_INC || Token.type == Token.TOK_DEC) {
+            int op = Token.type;
+            Lexer.nextToken();
+            int cpIdx = allocFieldCP(fieldSlot[fi]);
+            emitByte(0xB2); // GETSTATIC
+            emitShortBE(cpIdx);
+            pushStack();
+            emitByte(0x59); pushStack(); // DUP
+            emitByte(0x04); pushStack(); // ICONST_1
+            emitByte(op == Token.TOK_INC ? 0x60 : 0x64); popStack(); // IADD/ISUB
+            emitByte(0xB3); // PUTSTATIC
+            emitShortBE(cpIdx);
+            popStack();
+            return 1;
+        }
 
         int cpIdx = allocFieldCP(fieldSlot[fi]);
         emitByte(0xB2); // GETSTATIC
         emitShortBE(cpIdx);
         pushStack();
+        if (fieldArrayKind[fi] != 0) return fieldArrayKind[fi];
         return 1;
     }
 
@@ -3090,7 +3220,7 @@ public class Compiler {
 
         // Bytecodes
         for (int i = 0; i < codeLen; i++) {
-            writeByte(code[i] & 0xFF);
+            writeByte(Native.peek(codeBase + i) & 0xFF);
         }
 
         // Exception table (7 bytes per entry)

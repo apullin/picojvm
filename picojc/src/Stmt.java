@@ -92,10 +92,7 @@ public class Stmt {
 
     static void pExprStmt() {
         int type = Expr.pExpr();
-        if (type != 0) { // non-void expression, pop result
-            E.eb(0x57); // POP
-            E.pop();
-        }
+        if (type != 0) E.epop();
         Lexer.expect(Tk.SEMI);
     }
 
@@ -164,11 +161,9 @@ public class Stmt {
         E.pop();
         E.eBr(0x99, lblEnd); // IFEQ → end
 
-        C.lpBrkLbl[C.lpDepth] = lblEnd;
-        C.lpContLbl[C.lpDepth] = lblCont;
-        C.lpDepth++;
+        E.pushLp(lblEnd, lblCont);
         pStmt();
-        C.lpDepth--;
+        E.popLp();
 
         E.eBr(0xA7, lblTop); // GOTO top
         E.mark(lblEnd);
@@ -181,11 +176,9 @@ public class Stmt {
         int lblCont = E.label();
         E.mark(lblTop);
 
-        C.lpBrkLbl[C.lpDepth] = lblEnd;
-        C.lpContLbl[C.lpDepth] = lblCont;
-        C.lpDepth++;
+        E.pushLp(lblEnd, lblCont);
         pStmt();
-        C.lpDepth--;
+        E.popLp();
 
         Lexer.expect(Tk.WHILE);
         E.mark(lblCont);
@@ -210,7 +203,7 @@ public class Stmt {
                 pLocal(); // includes semicolon
             } else {
                 int type = Expr.pExpr();
-                if (type != 0) { E.eb(0x57); E.pop(); }
+                if (type != 0) E.epop();
                 Lexer.expect(Tk.SEMI);
             }
         } else {
@@ -247,11 +240,9 @@ public class Stmt {
         Lexer.expect(Tk.RPAREN);
 
         // Body
-        C.lpBrkLbl[C.lpDepth] = lblEnd;
-        C.lpContLbl[C.lpDepth] = lblUpdate;
-        C.lpDepth++;
+        E.pushLp(lblEnd, lblUpdate);
         pStmt();
-        C.lpDepth--;
+        E.popLp();
 
         // Update
         E.mark(lblUpdate);
@@ -272,7 +263,7 @@ public class Stmt {
             Lexer.nextToken();
             if (Tk.type != Tk.RPAREN) {
                 int type = Expr.pExpr();
-                if (type != 0) { E.eb(0x57); E.pop(); }
+                if (type != 0) E.epop();
             }
 
             // Restore full lexer + token state
@@ -415,9 +406,7 @@ public class Stmt {
 
         int curCaseIdx = -1;
 
-        C.lpBrkLbl[C.lpDepth] = lblEnd;
-        C.lpContLbl[C.lpDepth] = lblEnd; // continue in switch = break
-        C.lpDepth++;
+        E.pushLp(lblEnd, lblEnd); // continue in switch = break
 
         while (Tk.type != Tk.RBRACE && Tk.type != Tk.EOF) {
             if (Tk.type == Tk.CASE) {
@@ -458,7 +447,7 @@ public class Stmt {
             }
         }
 
-        C.lpDepth--;
+        E.popLp();
 
         // If no default, patch default to end
         if (defaultLabel < 0) {

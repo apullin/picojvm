@@ -180,12 +180,10 @@ class E {
             Lexer.expect(Tk.RPAREN);
 
             // Emit super() call
-            eb(0x2A); // ALOAD_0 (this)
-            push();
+            ethis();
             int objInitMi = C.ensNat(C.N_OBJECT, C.N_INIT);
             int cpIdx = aCP(objInitMi);
-            eb(0xB7); // INVOKESPECIAL
-            eSBE(cpIdx);
+            eOp(0xB7, cpIdx); // INVOKESPECIAL
             pop(); // 'this' consumed
 
             // Parse body
@@ -286,8 +284,7 @@ class E {
                 eb(0x2A); // ALOAD_0
                 int objInitMi = C.ensNat(C.N_OBJECT, C.N_INIT);
                 int cpIdx = aCP(objInitMi);
-                eb(0xB7); // INVOKESPECIAL
-                eSBE(cpIdx);
+                eOp(0xB7, cpIdx); // INVOKESPECIAL
                 eb(0xB1); // RETURN
 
                 commitMC(mi);
@@ -326,7 +323,7 @@ class E {
                 Lexer.nextToken();
                 Expr.pExpr();
                 int cpIdx = aCP(C.fSlot[fi]);
-                eb(0xB3); eSBE(cpIdx); pop(); // PUTSTATIC
+                eOp(0xB3, cpIdx); pop(); // PUTSTATIC
             }
         }
     }
@@ -371,6 +368,15 @@ class E {
         eBr(op, lbl); ic0(); eBr(0xA7, lblEnd);
         mark(lbl); ic1(); mark(lblEnd);
     }
+    static void eOp(int op, int cp) { eb(op); eSBE(cp); }
+    static void epop() { eb(0x57); pop(); } // POP
+    static void ethis() { eLd(0, 1); push(); } // ALOAD_0 this
+    static void pushLp(int brk, int cont) {
+        C.lpBrkLbl[C.lpDepth] = brk;
+        C.lpContLbl[C.lpDepth] = cont;
+        C.lpDepth++;
+    }
+    static void popLp() { C.lpDepth--; }
 
     static void eb(int b) {
         C.mcode[C.mcLen++] = (byte)(b & 0xFF);

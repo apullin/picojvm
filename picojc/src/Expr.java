@@ -35,8 +35,7 @@ public class Expr {
             E.edup();
             E.eBr(0x9A, lblTrue); // IFNE → true
             E.pop();
-            E.eb(0x57); // POP
-            E.pop();
+            E.epop();
             pAnd();
             E.eBr(0xA7, lblEnd);
             E.mark(lblTrue);
@@ -54,8 +53,7 @@ public class Expr {
             E.edup();
             E.eBr(0x99, lblFalse); // IFEQ → false
             E.pop();
-            E.eb(0x57); // POP
-            E.pop();
+            E.epop();
             pBOr();
             E.eBr(0xA7, lblEnd);
             E.mark(lblFalse);
@@ -125,8 +123,7 @@ public class Expr {
                 E.pop();
                 int ci = Resolver.fClsByNm(classNm);
                 int cpIdx = E.aCCP(ci >= 0 ? ci : 0);
-                E.eb(0xC1); // INSTANCEOF
-                E.eSBE(cpIdx);
+                E.eOp(0xC1, cpIdx); // INSTANCEOF
                 E.push();
                 type = 1;
                 continue;
@@ -261,8 +258,7 @@ public class Expr {
                         // Object cast = CHECKCAST
                         int ci = Resolver.fClsByNm(castNm);
                         int cpIdx = E.aCCP(ci >= 0 ? ci : 0);
-                        E.eb(0xC0); // CHECKCAST
-                        E.eSBE(cpIdx);
+                        E.eOp(0xC0, cpIdx); // CHECKCAST
                     }
                     return castType == Tk.IDENT ? 2 : 1;
                 }
@@ -474,53 +470,45 @@ public class Expr {
                     // Check for assignment
                     if (Tk.type == Tk.ASSIGN) {
                         Lexer.nextToken();
-                        E.eLd(0, 1); // ALOAD_0 (this)
-                        E.push();
+                        E.ethis();
                         pExpr();
                         int cpIdx = E.aFCP(C.fSlot[fi]);
-                        E.eb(0xB5); // PUTFIELD
-                        E.eSBE(cpIdx);
-                        E.pop(); E.pop(); // obj + value consumed
-                        // Push value back for expression result
-                        // Actually for statement context this is void
+                        E.eOp(0xB5, cpIdx); // PUTFIELD
+                        E.pop(); E.pop();
                         return 0;
                     }
                     if (Tk.type == Tk.INC || Tk.type == Tk.DEC) {
                         int op = Tk.type;
                         Lexer.nextToken();
                         int cpIdx = E.aFCP(C.fSlot[fi]);
-                        // Post-inc/dec: load old value, then update field
-                        E.eLd(0, 1); E.push(); // ALOAD_0
-                        E.eb(0xB4); E.eSBE(cpIdx); // GETFIELD (old value)
-                        // Keep old value for expression result
-                        E.eLd(0, 1); E.push(); // ALOAD_0 again
-                        E.eLd(0, 1); E.push(); // ALOAD_0 again
-                        E.eb(0xB4); E.eSBE(cpIdx); // GETFIELD again
+                        E.ethis();
+                        E.eOp(0xB4, cpIdx); // GETFIELD (old value)
+                        E.ethis();
+                        E.ethis();
+                        E.eOp(0xB4, cpIdx); // GETFIELD again
                         E.ic1();
                         E.eb(op == Tk.INC ? 0x60 : 0x64); E.pop(); // IADD/ISUB
-                        E.eb(0xB5); E.eSBE(cpIdx); // PUTFIELD
-                        E.pop(); E.pop(); // obj + value consumed by PUTFIELD
-                        return 1; // old value remains on stack
+                        E.eOp(0xB5, cpIdx); // PUTFIELD
+                        E.pop(); E.pop();
+                        return 1;
                     }
                     if (Tk.type >= Tk.PLUS_EQ && Tk.type <= Tk.USHR_EQ) {
                         int op = Tk.type;
                         Lexer.nextToken();
                         int cpIdx = E.aFCP(C.fSlot[fi]);
-                        E.eLd(0, 1); E.push(); // ALOAD_0
-                        E.eLd(0, 1); E.push(); // ALOAD_0
-                        E.eb(0xB4); E.eSBE(cpIdx); // GETFIELD
+                        E.ethis();
+                        E.ethis();
+                        E.eOp(0xB4, cpIdx); // GETFIELD
                         pExpr();
                         E.eCO(op);
                         E.pop();
-                        E.eb(0xB5); E.eSBE(cpIdx); // PUTFIELD
+                        E.eOp(0xB5, cpIdx); // PUTFIELD
                         E.pop(); E.pop();
                         return 0;
                     }
-                    E.eLd(0, 1); // ALOAD_0 (this)
-                    E.push();
+                    E.ethis();
                     int cpIdx = E.aFCP(C.fSlot[fi]);
-                    E.eb(0xB4); // GETFIELD
-                    E.eSBE(cpIdx);
+                    E.eOp(0xB4, cpIdx); // GETFIELD
                     // stack: -1 (obj) +1 (value) = net 0
                     if (C.fArrKind[fi] != 0) return C.fArrKind[fi];
                     return 1;
@@ -536,8 +524,7 @@ public class Expr {
                         pExpr();
                         E.edup();
                         int cpIdx = E.aFCP(C.fSlot[fi]);
-                        E.eb(0xB3); // PUTSTATIC
-                        E.eSBE(cpIdx);
+                        E.eOp(0xB3, cpIdx); // PUTSTATIC
                         E.pop();
                         return 1;
                     }
@@ -545,15 +532,13 @@ public class Expr {
                         int op = Tk.type;
                         Lexer.nextToken();
                         int cpIdx = E.aFCP(C.fSlot[fi]);
-                        E.eb(0xB2); // GETSTATIC
-                        E.eSBE(cpIdx);
+                        E.eOp(0xB2, cpIdx); // GETSTATIC
                         E.push();
                         pExpr();
                         E.eCO(op);
                         E.pop();
                         E.edup();
-                        E.eb(0xB3); // PUTSTATIC
-                        E.eSBE(cpIdx);
+                        E.eOp(0xB3, cpIdx); // PUTSTATIC
                         E.pop();
                         return 1;
                     }
@@ -561,20 +546,17 @@ public class Expr {
                         int op = Tk.type;
                         Lexer.nextToken();
                         int cpIdx = E.aFCP(C.fSlot[fi]);
-                        E.eb(0xB2); // GETSTATIC
-                        E.eSBE(cpIdx);
+                        E.eOp(0xB2, cpIdx); // GETSTATIC
                         E.push();
                         E.edup();
                         E.ic1();
                         E.eb(op == Tk.INC ? 0x60 : 0x64); E.pop(); // IADD/ISUB
-                        E.eb(0xB3); // PUTSTATIC
-                        E.eSBE(cpIdx);
+                        E.eOp(0xB3, cpIdx); // PUTSTATIC
                         E.pop();
                         return 1;
                     }
                     int cpIdx = E.aFCP(C.fSlot[fi]);
-                    E.eb(0xB2); // GETSTATIC
-                    E.eSBE(cpIdx);
+                    E.eOp(0xB2, cpIdx); // GETSTATIC
                     E.push();
                     if (C.fArrKind[fi] != 0) return C.fArrKind[fi];
                     return 1;
@@ -589,8 +571,7 @@ public class Expr {
                         if (C.mClass[mi2] == C.curCi && C.mName[mi2] == nm &&
                             !C.mStatic[mi2] && !C.mNative[mi2] && !C.mIsCtor[mi2]) {
                             // Instance method: push this, then INVOKEVIRTUAL
-                            E.eLd(0, 1); // ALOAD_0 (this)
-                            E.push();
+                            E.ethis();
                             return eMethCall(2, nm, false);
                         }
                     }
@@ -633,16 +614,13 @@ public class Expr {
                     // new type[N][] — array of references, size N
                     Lexer.nextToken();
                     int cpIdx = E.aCCP(0);
-                    E.eb(0xBD); // ANEWARRAY
-                    E.eSBE(cpIdx);
+                    E.eOp(0xBD, cpIdx); // ANEWARRAY
                     return 2; // reference array
                 }
                 pExpr();
                 Lexer.expect(Tk.RBRACKET);
-                // MULTIANEWARRAY
-                int cpIdx = E.aCCP(0); // type doesn't matter for int[][]
-                E.eb(0xC5); // MULTIANEWARRAY
-                E.eSBE(cpIdx);
+                int cpIdx = E.aCCP(0);
+                E.eOp(0xC5, cpIdx); // MULTIANEWARRAY
                 E.eb(2); // 2 dimensions
                 E.pop(); // second dimension
                 // First dim still on stack, result replaces it
@@ -676,15 +654,13 @@ public class Expr {
                 Lexer.nextToken();
                 pExpr();
                 Lexer.expect(Tk.RBRACKET);
-                E.eb(0xC5); // MULTIANEWARRAY
-                E.eSBE(cpIdx);
+                E.eOp(0xC5, cpIdx); // MULTIANEWARRAY
                 E.eb(2);
                 E.pop();
                 return 2;
             }
 
-            E.eb(0xBD); // ANEWARRAY
-            E.eSBE(cpIdx);
+            E.eOp(0xBD, cpIdx); // ANEWARRAY
             return 2;
         }
 
@@ -692,8 +668,7 @@ public class Expr {
         int ci = Resolver.fClsByNm(classNm);
         if (ci < 0) ci = Resolver.synthExcCls(classNm);
         int cpIdx = E.aCCP(ci);
-        E.eb(0xBB); // NEW
-        E.eSBE(cpIdx);
+        E.eOp(0xBB, cpIdx); // NEW
         E.push();
         E.edup();
 
@@ -723,8 +698,7 @@ public class Expr {
         }
 
         int ctorCpIdx = E.aCP(ctorMi);
-        E.eb(0xB7); // INVOKESPECIAL
-        E.eSBE(ctorCpIdx);
+        E.eOp(0xB7, ctorCpIdx); // INVOKESPECIAL
         // Pop args + dup from stack, keep original ref
         for (int i = 0; i < argc; i++) E.pop();
 
@@ -741,8 +715,7 @@ public class Expr {
         if (nativeMi >= 0) {
             int argc = pArgs(0);
             int cpIdx = E.aCP(nativeMi);
-            E.eb(0xB8); // INVOKESTATIC
-            E.eSBE(cpIdx);
+            E.eOp(0xB8, cpIdx); // INVOKESTATIC
             for (int i = 0; i < argc; i++) E.pop();
             int retType = C.mRetT[nativeMi];
             if (retType != 0) E.push();
@@ -769,8 +742,7 @@ public class Expr {
         }
 
         int cpIdx = E.aCP(mi);
-        E.eb(0xB8); // INVOKESTATIC
-        E.eSBE(cpIdx);
+        E.eOp(0xB8, cpIdx); // INVOKESTATIC
         for (int i = 0; i < argc; i++) E.pop();
         int retType = C.mRetT[mi];
         if (retType != 0) E.push();
@@ -788,8 +760,7 @@ public class Expr {
 
         if (nativeMi >= 0) {
             int cpIdx = E.aCP(nativeMi);
-            E.eb(0xB6); // INVOKEVIRTUAL
-            E.eSBE(cpIdx);
+            E.eOp(0xB6, cpIdx); // INVOKEVIRTUAL
             for (int i = 0; i < argc; i++) E.pop();
             int retType = C.mRetT[nativeMi];
             if (retType != 0) E.push();
@@ -811,23 +782,18 @@ public class Expr {
         }
 
         // Check if this is an interface call
-        boolean useInterface = false;
         int mci = C.mClass[mi];
-        if (mci < C.cCount && C.cIsIface[mci]) {
-            useInterface = true;
-        }
+        boolean useInterface = mci < C.cCount && C.cIsIface[mci];
 
         if (useInterface) {
             int cpIdx = E.aCP(mi);
-            E.eb(0xB9); // INVOKEINTERFACE
-            E.eSBE(cpIdx);
+            E.eOp(0xB9, cpIdx); // INVOKEINTERFACE
             E.eb(argc);
             E.eb(0);
             for (int i = 0; i < argc; i++) E.pop();
         } else {
             int cpIdx = E.aCP(mi);
-            E.eb(0xB6); // INVOKEVIRTUAL
-            E.eSBE(cpIdx);
+            E.eOp(0xB6, cpIdx); // INVOKEVIRTUAL
             for (int i = 0; i < argc; i++) E.pop();
         }
 
@@ -849,8 +815,7 @@ public class Expr {
             Lexer.nextToken();
             pExpr();
             int cpIdx = E.aFCP(C.fSlot[fi]);
-            E.eb(0xB5); // PUTFIELD
-            E.eSBE(cpIdx);
+            E.eOp(0xB5, cpIdx); // PUTFIELD
             E.pop(); E.pop();
             return 0;
         }
@@ -859,21 +824,17 @@ public class Expr {
             Lexer.nextToken();
             E.edup(); // DUP obj ref
             int cpIdx = E.aFCP(C.fSlot[fi]);
-            E.eb(0xB4); // GETFIELD
-            E.eSBE(cpIdx);
+            E.eOp(0xB4, cpIdx); // GETFIELD
             pExpr();
             E.eCO(op);
             E.pop();
-            E.eb(0xB5); // PUTFIELD
-            E.eSBE(cpIdx);
+            E.eOp(0xB5, cpIdx); // PUTFIELD
             E.pop(); E.pop();
             return 0;
         }
 
         int cpIdx = E.aFCP(C.fSlot[fi]);
-        E.eb(0xB4); // GETFIELD
-        E.eSBE(cpIdx);
-        // Stack: obj consumed, value pushed = net 0
+        E.eOp(0xB4, cpIdx); // GETFIELD
         if (C.fArrKind[fi] != 0) return C.fArrKind[fi];
         return 1;
     }
@@ -889,8 +850,7 @@ public class Expr {
             Lexer.nextToken();
             pExpr();
             int cpIdx = E.aFCP(C.fSlot[fi]);
-            E.eb(0xB3); // PUTSTATIC
-            E.eSBE(cpIdx);
+            E.eOp(0xB3, cpIdx); // PUTSTATIC
             E.pop();
             return 0;
         }
@@ -898,15 +858,13 @@ public class Expr {
             int op = Tk.type;
             Lexer.nextToken();
             int cpIdx = E.aFCP(C.fSlot[fi]);
-            E.eb(0xB2); // GETSTATIC
-            E.eSBE(cpIdx);
+            E.eOp(0xB2, cpIdx); // GETSTATIC
             E.push();
             pExpr();
             E.eCO(op);
             E.pop();
             E.edup();
-            E.eb(0xB3); // PUTSTATIC
-            E.eSBE(cpIdx);
+            E.eOp(0xB3, cpIdx); // PUTSTATIC
             E.pop();
             return 1;
         }
@@ -914,21 +872,18 @@ public class Expr {
             int op = Tk.type;
             Lexer.nextToken();
             int cpIdx = E.aFCP(C.fSlot[fi]);
-            E.eb(0xB2); // GETSTATIC
-            E.eSBE(cpIdx);
+            E.eOp(0xB2, cpIdx); // GETSTATIC
             E.push();
             E.edup();
             E.ic1();
             E.eb(op == Tk.INC ? 0x60 : 0x64); E.pop(); // IADD/ISUB
-            E.eb(0xB3); // PUTSTATIC
-            E.eSBE(cpIdx);
+            E.eOp(0xB3, cpIdx); // PUTSTATIC
             E.pop();
             return 1;
         }
 
         int cpIdx = E.aFCP(C.fSlot[fi]);
-        E.eb(0xB2); // GETSTATIC
-        E.eSBE(cpIdx);
+        E.eOp(0xB2, cpIdx); // GETSTATIC
         E.push();
         if (C.fArrKind[fi] != 0) return C.fArrKind[fi];
         return 1;

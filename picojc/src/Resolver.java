@@ -143,14 +143,6 @@ public class Resolver {
             }
         }
 
-        // Update clinit method indices
-        for (int ci = 0; ci < C.cCount; ci++) {
-            int clinitMi = C.cClinit[ci];
-            if (clinitMi != 0xFF && clinitMi < C.mCount) {
-                // clinitMi is already the method index
-            }
-        }
-
         // Ensure all cataloged native methods have their flags set
         for (int mi = 0; mi < C.mCount; mi++) {
             if (C.mNative[mi] && C.mFlags[mi] == 0) {

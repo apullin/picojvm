@@ -146,38 +146,27 @@ class E {
     }
 
 
+    // Shared method context init
+    static void initMC(int mi) {
+        C.curMi = mi; C.mcLen = 0; C.patC = 0; C.lblCount = 0;
+        C.cpMCount = 0; C.cpMBase = C.cpSz;
+    }
+
     static void eMBody(int mi) {
-        C.curMi = mi;
+        initMC(mi);
         C.curMStatic = C.mStatic[mi];
-        C.mcLen = 0;
-        C.patC = 0;
-        C.lblCount = 0;
         C.locCount = 0;
         C.locNext = 0;
         C.lpDepth = 0;
         C.stkDepth = 0;
         C.maxStk = 0;
 
-        // Init per-method CP
-        C.cpMCount = 0;
-        C.cpMBase = C.cpSz;
-
         // Set up parameters as locals
         if (C.mIsCtor[mi]) {
             // Constructor: skip params in source, set up 'this'
             aLoc(C.N_INIT, 0); // 'this'
-            // Skip to body
-            Lexer.expect(Tk.LPAREN);
-            while (Tk.type != Tk.RPAREN) {
-                // Type
-                int pType = pTypeLoc();
-                // Name
-                int pNm = C.intern(Tk.strBuf, Tk.strLen);
-                Lexer.nextToken();
-                aLoc(pNm, pType);
-                if (Tk.type == Tk.COMMA) Lexer.nextToken();
-            }
-            Lexer.expect(Tk.RPAREN);
+            // Parse constructor parameters
+            pParams();
 
             // Emit super() call
             ethis();
@@ -214,16 +203,7 @@ class E {
                 aLoc(C.iStr("this"), 1); // 'this' is slot 0
             }
 
-            // Parse parameters
-            Lexer.expect(Tk.LPAREN);
-            while (Tk.type != Tk.RPAREN && Tk.type != Tk.EOF) {
-                int pType = pTypeLoc();
-                int pNm = C.intern(Tk.strBuf, Tk.strLen);
-                Lexer.nextToken();
-                aLoc(pNm, pType);
-                if (Tk.type == Tk.COMMA) Lexer.nextToken();
-            }
-            Lexer.expect(Tk.RPAREN);
+            pParams();
 
             // Parse body
             Lexer.expect(Tk.LBRACE);
@@ -273,12 +253,7 @@ class E {
         for (int mi = 0; mi < C.mCount; mi++) {
             if (C.mIsCtor[mi] && !C.mNative[mi] && C.mBodyS[mi] == -2) {
                 // Auto-generated default constructor
-                C.curMi = mi;
-                C.mcLen = 0;
-                C.cpMCount = 0;
-                C.cpMBase = C.cpSz;
-                C.patC = 0;
-                C.lblCount = 0;
+                initMC(mi);
 
                 // ALOAD_0, INVOKESPECIAL Object.<init>, RETURN
                 eb(0x2A); // ALOAD_0
@@ -293,14 +268,10 @@ class E {
             }
             // Synthetic <clinit>: only field initializers, no explicit body
             if (C.mName[mi] == C.N_CLINIT && !C.mNative[mi] && C.mBodyS[mi] == -2) {
-                C.curMi = mi;
+                // Synthetic clinit: field initializers only
+                initMC(mi);
                 C.curCi = C.mClass[mi];
                 C.curMStatic = true;
-                C.mcLen = 0;
-                C.cpMCount = 0;
-                C.cpMBase = C.cpSz;
-                C.patC = 0;
-                C.lblCount = 0;
                 C.locCount = 0;
                 C.stkDepth = 0;
                 C.maxStk = 0;
@@ -359,6 +330,18 @@ class E {
     }
 
 
+    static void pParams() {
+        Lexer.expect(Tk.LPAREN);
+        while (Tk.type != Tk.RPAREN && Tk.type != Tk.EOF) {
+            int pType = pTypeLoc();
+            int pNm = C.intern(Tk.strBuf, Tk.strLen);
+            Lexer.nextToken();
+            aLoc(pNm, pType);
+            if (Tk.type == Tk.COMMA) Lexer.nextToken();
+        }
+        Lexer.expect(Tk.RPAREN);
+    }
+
     // Bytecode emission shortcuts
     static void ic0() { eb(0x03); push(); } // ICONST_0
     static void ic1() { eb(0x04); push(); } // ICONST_1
@@ -371,6 +354,8 @@ class E {
     static void eOp(int op, int cp) { eb(op); eSBE(cp); }
     static void epop() { eb(0x57); pop(); } // POP
     static void ethis() { eLd(0, 1); push(); } // ALOAD_0 this
+    static void eALd(int t) { eb(t==4 ? 0x33 : t==5 ? 0x34 : 0x2E); } // BALOAD/CALOAD/IALOAD
+    static void eASt(int t) { eb(t==4 ? 0x54 : t==5 ? 0x55 : 0x4F); } // BASTORE/CASTORE/IASTORE
     static void pushLp(int brk, int cont) {
         C.lpBrkLbl[C.lpDepth] = brk;
         C.lpContLbl[C.lpDepth] = cont;

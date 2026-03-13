@@ -225,38 +225,28 @@ public class Expr {
                 if (Tk.type == Tk.ASSIGN) {
                     Lexer.nextToken();
                     pExpr();
-                    E.pop(); // value
-                    E.pop(); // array ref
-                    if (type == 4) E.eb(0x54);       // BASTORE (byte[])
-                    else if (type == 5) E.eb(0x55);  // CASTORE (char[])
-                    else E.eb(0x4F);                  // IASTORE (int[]/ref[])
-                    type = 0; // void
+                    E.pop(); E.pop();
+                    E.eASt(type);
+                    type = 0;
                 } else if (Tk.type == Tk.INC || Tk.type == Tk.DEC) {
                     // Array element post-increment: arr[idx]++
-                    // Stack: [arrRef, idx] (idx was popped from tracker but still on JVM stack)
                     int op = Tk.type;
                     Lexer.nextToken();
                     E.push(); // re-count idx
                     E.eb(0x5C); E.push(); E.push(); // DUP2
-                    if (type == 4) E.eb(0x33);       // BALOAD
-                    else if (type == 5) E.eb(0x34);  // CALOAD
-                    else E.eb(0x2E);                  // IALOAD
-                    E.pop(); // IALOAD consumes dup'd pair, pushes value: net -1
-                    E.eb(0x5B); E.push(); // DUP_X2: old value below arrRef,idx,new
+                    E.eALd(type);
+                    E.pop(); // consumes dup'd pair, pushes value: net -1
+                    E.eb(0x5B); E.push(); // DUP_X2
                     E.ic1();
-                    E.eb(op == Tk.INC ? 0x60 : 0x64); E.pop(); // IADD/ISUB
-                    if (type == 4) E.eb(0x54);       // BASTORE
-                    else if (type == 5) E.eb(0x55);  // CASTORE
-                    else E.eb(0x4F);                  // IASTORE
-                    E.pop(); E.pop(); E.pop(); // IASTORE consumes arrRef,idx,value
-                    type = 1; // old value remains on stack
+                    E.eb(op == Tk.INC ? 0x60 : 0x64); E.pop();
+                    E.eASt(type);
+                    E.pop(); E.pop(); E.pop();
+                    type = 1;
                 } else {
-                    if (type == 4) E.eb(0x33);       // BALOAD (byte[])
-                    else if (type == 5) E.eb(0x34);  // CALOAD (char[])
-                    else E.eb(0x2E);                  // IALOAD (int[]/ref[])
+                    E.eALd(type);
                     // Propagate inner type for multi-dim arrays
-                    if (type == 6) type = 4;             // byte[][] elem → byte[]
-                    else if (type == 7) type = 5;        // char[][] elem → char[]
+                    if (type == 6) type = 4;
+                    else if (type == 7) type = 5;
                     else type = 1;
                 }
             }
@@ -480,27 +470,15 @@ public class Expr {
         Lexer.expect(Tk.LPAREN);
         int argc = pArgs(1); // 'this' counts
 
-        // Find constructor
+        // Find constructor: prefer argc match, fall back to any ctor
         int ctorMi = -1;
         for (int mi = 0; mi < C.mCount; mi++) {
-            if (C.mClass[mi] == ci && C.mIsCtor[mi] && C.mArgC[mi] == argc) {
-                ctorMi = mi;
-                break;
+            if (C.mClass[mi] == ci && C.mIsCtor[mi]) {
+                if (ctorMi < 0 || C.mArgC[mi] == argc) ctorMi = mi;
+                if (C.mArgC[mi] == argc) break;
             }
         }
-        if (ctorMi < 0) {
-            // Try default constructor (0 user args = 1 total with 'this')
-            for (int mi = 0; mi < C.mCount; mi++) {
-                if (C.mClass[mi] == ci && C.mIsCtor[mi]) {
-                    ctorMi = mi;
-                    break;
-                }
-            }
-        }
-        if (ctorMi < 0) {
-            // Use Object.<init> as fallback
-            ctorMi = C.ensNat(C.N_OBJECT, C.N_INIT);
-        }
+        if (ctorMi < 0) ctorMi = C.ensNat(C.N_OBJECT, C.N_INIT);
 
         int ctorCpIdx = E.aCP(ctorMi);
         E.eOp(0xB7, ctorCpIdx); // INVOKESPECIAL
@@ -512,99 +490,50 @@ public class Expr {
 
     // ==================== METHOD CALLS ====================
 
+    // Pop args, push return value if non-void
+    static int eCallRet(int mi, int argc) {
+        for (int j = 0; j < argc; j++) E.pop();
+        int rt = C.mRetT[mi]; if (rt != 0) E.push(); return rt;
+    }
+
     static int eStatCall(int classNm, int methodNm) {
         Lexer.expect(Tk.LPAREN);
-
-        // First check native methods
-        int nativeMi = C.ensNat(classNm, methodNm);
-        if (nativeMi >= 0) {
-            int argc = pArgs(0);
-            int cpIdx = E.aCP(nativeMi);
-            E.eOp(0xB8, cpIdx); // INVOKESTATIC
-            for (int i = 0; i < argc; i++) E.pop();
-            int retType = C.mRetT[nativeMi];
-            if (retType != 0) E.push();
-            return retType;
-        }
-
-        // User-defined static method
-        int mi = -1;
-        for (int m = 0; m < C.mCount; m++) {
-            if (C.mName[m] == methodNm && !C.mNative[m]) {
-                int mc = C.mClass[m];
-                if (mc < C.cCount && C.cName[mc] == classNm) {
-                    mi = m;
-                    break;
+        // Native or user-defined static method
+        int mi = C.ensNat(classNm, methodNm);
+        if (mi < 0) {
+            for (int m = 0; m < C.mCount; m++) {
+                if (C.mName[m] == methodNm && !C.mNative[m]) {
+                    int mc = C.mClass[m];
+                    if (mc < C.cCount && C.cName[mc] == classNm) { mi = m; break; }
                 }
             }
         }
-
         int argc = pArgs(0);
-
-        if (mi < 0) {
-            Lexer.error(204); // Undefined method
-            return 0;
-        }
-
-        int cpIdx = E.aCP(mi);
-        E.eOp(0xB8, cpIdx); // INVOKESTATIC
-        for (int i = 0; i < argc; i++) E.pop();
-        int retType = C.mRetT[mi];
-        if (retType != 0) E.push();
-        return retType;
+        if (mi < 0) { Lexer.error(204); return 0; }
+        E.eOp(0xB8, E.aCP(mi)); // INVOKESTATIC
+        return eCallRet(mi, argc);
     }
 
     static int eMethCall(int objType, int methodNm, boolean isInterface) {
-        // Object is already on stack
         Lexer.expect(Tk.LPAREN);
-
-        // Check for String methods
-        int nativeMi = C.ensNat(C.N_STRING, methodNm);
-
+        // Native String method or user-defined instance method
+        int mi = C.ensNat(C.N_STRING, methodNm);
         int argc = pArgs(1); // 'this' already on stack
-
-        if (nativeMi >= 0) {
-            int cpIdx = E.aCP(nativeMi);
-            E.eOp(0xB6, cpIdx); // INVOKEVIRTUAL
-            for (int i = 0; i < argc; i++) E.pop();
-            int retType = C.mRetT[nativeMi];
-            if (retType != 0) E.push();
-            return retType;
-        }
-
-        // Find the method in user classes
-        int mi = -1;
-        for (int m = 0; m < C.mCount; m++) {
-            if (C.mName[m] == methodNm && !C.mStatic[m] && !C.mNative[m]) {
-                mi = m;
-                break;
-            }
-        }
-
         if (mi < 0) {
-            Lexer.error(205);
-            return 0;
+            for (int m = 0; m < C.mCount; m++) {
+                if (C.mName[m] == methodNm && !C.mStatic[m] && !C.mNative[m]) { mi = m; break; }
+            }
+            if (mi < 0) { Lexer.error(205); return 0; }
         }
-
-        // Check if this is an interface call
+        int cpIdx = E.aCP(mi);
         int mci = C.mClass[mi];
-        boolean useInterface = mci < C.cCount && C.cIsIface[mci];
-
-        if (useInterface) {
-            int cpIdx = E.aCP(mi);
-            E.eOp(0xB9, cpIdx); // INVOKEINTERFACE
-            E.eb(argc);
-            E.eb(0);
-            for (int i = 0; i < argc; i++) E.pop();
+        // Interface dispatch only for non-native user methods
+        if (!C.mNative[mi] && mci < C.cCount && C.cIsIface[mci]) {
+            E.eOp(0xB9, cpIdx); E.eb(argc); E.eb(0); // INVOKEINTERFACE
         } else {
-            int cpIdx = E.aCP(mi);
             E.eOp(0xB6, cpIdx); // INVOKEVIRTUAL
-            for (int i = 0; i < argc; i++) E.pop();
         }
-
-        int retType = C.mRetT[mi];
-        if (retType != 0) E.push();
-        return retType;
+        return eCallRet(mi, argc);
     }
 
     // ==================== LVALUE OPS ====================

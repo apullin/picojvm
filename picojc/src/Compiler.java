@@ -23,6 +23,7 @@ public class Compiler {
     static int N_OBJECT, N_STRING, N_NATIVE, N_MAIN, N_INIT, N_CLINIT;
     static int N_THROWABLE, N_EXCEPTION, N_RUNTIME_EX;
     static int N_PUTCHAR, N_IN, N_OUT, N_PEEK, N_POKE, N_HALT, N_PRINT;
+    static int N_ARRAYCOPY, N_MEMCMP, N_WRITE_BYTES, N_STRING_FROM_BYTES;
     static int N_LENGTH, N_CHARAT, N_EQUALS, N_TOSTRING, N_HASHCODE;
     static int N_ARGS;
 
@@ -206,6 +207,10 @@ public class Compiler {
         N_POKE       = internStr("poke");
         N_HALT       = internStr("halt");
         N_PRINT      = internStr("print");
+        N_ARRAYCOPY       = internStr("arraycopy");
+        N_MEMCMP          = internStr("memcmp");
+        N_WRITE_BYTES     = internStr("writeBytes");
+        N_STRING_FROM_BYTES = internStr("stringFromBytes");
         N_LENGTH     = internStr("length");
         N_CHARAT     = internStr("charAt");
         N_EQUALS     = internStr("equals");
@@ -243,29 +248,19 @@ public class Compiler {
     }
 
     static int internBuf(byte[] buf, int len) {
-        // Check existing
         for (int i = 0; i < nameCount; i++) {
-            if (nameLen[i] == len) {
-                boolean match = true;
-                for (int j = 0; j < len; j++) {
-                    if (namePool[nameOff[i] + j] != buf[j]) {
-                        match = false;
-                        break;
-                    }
-                }
-                if (match) return i;
-            }
+            if (nameLen[i] == len && Native.memcmp(namePool, nameOff[i], buf, 0, len) == 0)
+                return i;
         }
         if (nameCount >= MAX_NAMES || namePoolLen + len > 10240) {
-            Lexer.error(251); // name pool overflow
+            Lexer.error(251);
             return 0;
         }
         int idx = nameCount++;
         nameOff[idx] = namePoolLen;
         nameLen[idx] = len;
-        for (int i = 0; i < len; i++) {
-            namePool[namePoolLen++] = buf[i];
-        }
+        Native.arraycopy(buf, 0, namePool, namePoolLen, len);
+        namePoolLen += len;
         return idx;
     }
 
@@ -330,6 +325,10 @@ public class Compiler {
             if (methodNm == N_POKE)    return addNativeMethod(N_NATIVE, N_POKE, 2, 4, true, 0);
             if (methodNm == N_HALT)    return addNativeMethod(N_NATIVE, N_HALT, 0, 5, true, 0);
             if (methodNm == N_PRINT)   return addNativeMethod(N_NATIVE, N_PRINT, 1, 11, true, 0);
+            if (methodNm == N_ARRAYCOPY)       return addNativeMethod(N_NATIVE, N_ARRAYCOPY, 5, 13, true, 0);
+            if (methodNm == N_MEMCMP)          return addNativeMethod(N_NATIVE, N_MEMCMP, 5, 14, true, 1);
+            if (methodNm == N_WRITE_BYTES)     return addNativeMethod(N_NATIVE, N_WRITE_BYTES, 3, 15, true, 0);
+            if (methodNm == N_STRING_FROM_BYTES) return addNativeMethod(N_NATIVE, N_STRING_FROM_BYTES, 3, 16, true, 2);
         }
         // String methods
         if (classNm == N_STRING) {
@@ -483,10 +482,8 @@ public class Compiler {
                 // Not a constructor, restore
                 Lexer.restore();
                 Token.type = Token.TOK_IDENT;
-                // re-intern
                 Token.strLen = nameLen[nm];
-                for (int j = 0; j < Token.strLen; j++)
-                    Token.strBuf[j] = namePool[nameOff[nm] + j];
+                Native.arraycopy(namePool, nameOff[nm], Token.strBuf, 0, Token.strLen);
             }
         }
 
@@ -857,6 +854,10 @@ public class Compiler {
                 else if (nm == N_TOSTRING) nid = 10;
                 else if (nm == N_PRINT)   nid = 11;
                 else if (nm == N_HASHCODE) nid = 12;
+                else if (nm == N_ARRAYCOPY)       nid = 13;
+                else if (nm == N_MEMCMP)          nid = 14;
+                else if (nm == N_WRITE_BYTES)     nid = 15;
+                else if (nm == N_STRING_FROM_BYTES) nid = 16;
                 if (nid >= 0) methodFlags[mi] = (nid << 1) | 1;
             }
         }
@@ -1017,8 +1018,7 @@ public class Compiler {
                 }
                 Lexer.restore();
                 Token.strLen = nameLen[nm];
-                for (int j = 0; j < Token.strLen; j++)
-                    Token.strBuf[j] = namePool[nameOff[nm] + j];
+                Native.arraycopy(namePool, nameOff[nm], Token.strBuf, 0, Token.strLen);
                 Token.type = Token.TOK_IDENT;
             }
         }
@@ -1416,24 +1416,18 @@ public class Compiler {
     }
 
     static int allocStringCP(byte[] buf, int len) {
-        // Find or add string constant
         int strIdx = -1;
         for (int i = 0; i < strConstCount; i++) {
-            if (strConstLen[i] == len) {
-                boolean match = true;
-                for (int j = 0; j < len; j++) {
-                    if (strConsts[i][j] != buf[j]) { match = false; break; }
-                }
-                if (match) { strIdx = i; break; }
+            if (strConstLen[i] == len && Native.memcmp(strConsts[i], 0, buf, 0, len) == 0) {
+                strIdx = i; break;
             }
         }
         if (strIdx < 0) {
             strIdx = strConstCount++;
             strConsts[strIdx] = new byte[len];
-            for (int j = 0; j < len; j++) strConsts[strIdx][j] = buf[j];
+            Native.arraycopy(buf, 0, strConsts[strIdx], 0, len);
             strConstLen[strIdx] = len;
         }
-        // CP value for string = 0x80 | strIdx
         return allocCP(0x80 | strIdx);
     }
 
@@ -1521,16 +1515,14 @@ public class Compiler {
                 Lexer.restore();
                 Token.type = savedType;
                 Token.strLen = nameLen[nm];
-                for (int j = 0; j < Token.strLen; j++)
-                    Token.strBuf[j] = namePool[nameOff[nm] + j];
+                Native.arraycopy(namePool, nameOff[nm], Token.strBuf, 0, Token.strLen);
                 parseLocalDecl();
             } else {
                 // Expression statement
                 Lexer.restore();
                 Token.type = savedType;
                 Token.strLen = nameLen[nm];
-                for (int j = 0; j < Token.strLen; j++)
-                    Token.strBuf[j] = namePool[nameOff[nm] + j];
+                Native.arraycopy(namePool, nameOff[nm], Token.strBuf, 0, Token.strLen);
                 parseExpressionStatement();
             }
         }
@@ -1719,7 +1711,7 @@ public class Compiler {
             int saveTokLine = Token.line;
             int saveTokStrLen = Token.strLen;
             byte[] saveTokStr = new byte[saveTokStrLen];
-            for (int si = 0; si < saveTokStrLen; si++) saveTokStr[si] = Token.strBuf[si];
+            Native.arraycopy(Token.strBuf, 0, saveTokStr, 0, saveTokStrLen);
 
             // Re-lex the update expression
             Lexer.pos = updateStart;
@@ -1737,7 +1729,7 @@ public class Compiler {
             Token.intValue = saveTokInt;
             Token.line = saveTokLine;
             Token.strLen = saveTokStrLen;
-            for (int si = 0; si < saveTokStrLen; si++) Token.strBuf[si] = saveTokStr[si];
+            Native.arraycopy(saveTokStr, 0, Token.strBuf, 0, saveTokStrLen);
         }
 
         emitBranch(0xA7, lblTop); // GOTO top
@@ -2441,7 +2433,7 @@ public class Compiler {
         }
         if (Token.type == Token.TOK_STR_LIT) {
             byte[] buf = new byte[Token.strLen];
-            for (int i = 0; i < Token.strLen; i++) buf[i] = Token.strBuf[i];
+            Native.arraycopy(Token.strBuf, 0, buf, 0, Token.strLen);
             int cpIdx = allocStringCP(buf, Token.strLen);
             Lexer.nextToken();
             emitByte(0x12); // LDC
@@ -3196,9 +3188,8 @@ public class Compiler {
 
         // CP resolution table
         writeShortLE(cpSize);
-        for (int i = 0; i < cpSize; i++) {
-            writeByte(cpEntries[i] & 0xFF);
-        }
+        Native.writeBytes(cpEntries, 0, cpSize);
+        outLen += cpSize;
 
         // Integer constants (4 bytes each, LE)
         for (int i = 0; i < intConstCount; i++) {
@@ -3213,9 +3204,8 @@ public class Compiler {
         for (int i = 0; i < strConstCount; i++) {
             int len = strConstLen[i];
             writeShortLE(len);
-            for (int j = 0; j < len; j++) {
-                writeByte(strConsts[i][j] & 0xFF);
-            }
+            Native.writeBytes(strConsts[i], 0, len);
+            outLen += len;
         }
 
         // Bytecodes

@@ -82,24 +82,14 @@ public class Lexer {
         return isAlpha(c) || isDigit(c);
     }
 
-    // Check if strBuf[0..strLen) matches a given string
-    static boolean strEquals(byte[] a, int aLen, byte[] b, int bLen) {
-        if (aLen != bLen) return false;
-        for (int i = 0; i < aLen; i++) {
-            if (a[i] != b[i]) return false;
-        }
-        return true;
-    }
-
-    // Keyword tables: stored as byte arrays for matching
-    // We use a simple sequential check
-    static byte[][] kwNames;
+    // Keyword tables
+    static String[] kwNames;
     static int[] kwTokens;
     static int kwCount;
 
     static void initKeywords() {
         kwCount = 0;
-        kwNames = new byte[40][];
+        kwNames = new String[40];
         kwTokens = new int[40];
         addKw("class",      Token.TOK_CLASS);
         addKw("extends",    Token.TOK_EXTENDS);
@@ -144,19 +134,20 @@ public class Lexer {
     }
 
     static void addKw(String name, int tok) {
-        byte[] b = new byte[name.length()];
-        for (int i = 0; i < name.length(); i++) {
-            b[i] = (byte) name.charAt(i);
-        }
-        kwNames[kwCount] = b;
+        kwNames[kwCount] = name;
         kwTokens[kwCount] = tok;
         kwCount++;
     }
 
     static int lookupKeyword() {
         for (int i = 0; i < kwCount; i++) {
-            if (strEquals(Token.strBuf, Token.strLen, kwNames[i], kwNames[i].length)) {
-                return kwTokens[i];
+            String kw = kwNames[i];
+            if (kw.length() == Token.strLen) {
+                boolean match = true;
+                for (int j = 0; j < Token.strLen; j++) {
+                    if ((byte) kw.charAt(j) != Token.strBuf[j]) { match = false; break; }
+                }
+                if (match) return kwTokens[i];
             }
         }
         return Token.TOK_IDENT;

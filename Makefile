@@ -31,7 +31,7 @@ SIM_CAPS = -DPJVM_METHOD_CAP=64 -DPJVM_CLASS_CAP=16 -DPJVM_VTABLE_CAP=128 \
 all: $(PICOJVM)
 
 $(PICOJVM): core.c platform/host.c pjvm.h
-	$(CC) $(CFLAGS) -o $@ core.c platform/host.c
+	$(CC) $(CFLAGS) -DPJVM_MAX_FRAMES=128 -o $@ core.c platform/host.c
 
 $(PICOJVM_PAGED): core.c platform/host.c pjvm.h
 	$(CC) $(CFLAGS) -DPJVM_PAGED -o $@ core.c platform/host.c
@@ -159,7 +159,7 @@ $(BUILDDIR)/picojvm.bin: $(BUILDDIR)/picojvm.elf
 sim: $(BUILDDIR)/picojvm.bin
 	@$(SIZE) $(BUILDDIR)/picojvm.elf
 	@echo "--- Running on 8085 simulator ---"
-	$(TRACE) -e 0x0000 -l 0x0000 -n 50000000 -S -q -d 0x0200:64 $(BUILDDIR)/picojvm.bin
+	$(TRACE) -e 0x0000 -l 0x0000 -n 50000000 -S -q -d 0x7000:128 $(BUILDDIR)/picojvm.bin
 
 # Build + run a specific test: make sim-Fib
 sim-%: tests/%.pjvm

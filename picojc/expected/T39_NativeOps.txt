@@ -1,0 +1,9 @@
+Hello
+42,101,111,33
+0
+LT
+World
+orld
+ABC
+2,66,67
+EQ

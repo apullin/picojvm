@@ -1,109 +1,109 @@
 public class Linker {
-    static void writeOutput() {
-        Compiler.outLen = 0;
-        int userClassCount = Compiler.classCount - Compiler.userClassStart;
+    static void writeOut() {
+        C.outLen = 0;
+        int userClassCount = C.cCount - C.uClsStart;
 
         // Count non-interface user classes
         int pjvmClassCount = 0;
-        for (int ci = Compiler.userClassStart; ci < Compiler.classCount; ci++) {
-            if (!Compiler.classIsInterface[ci]) pjvmClassCount++;
+        for (int ci = C.uClsStart; ci < C.cCount; ci++) {
+            if (!C.cIsIface[ci]) pjvmClassCount++;
         }
 
         // Header (10 bytes)
-        writeByte(0x85); // magic
-        writeByte(0x4A);
-        writeByte(Compiler.methodCount); // n_methods
-        writeByte(Compiler.mainMi); // main_mi
-        writeByte(Compiler.staticFieldCount); // n_static
-        writeByte(Compiler.intConstCount); // n_integers
-        writeByte(pjvmClassCount); // n_classes
-        writeByte(Compiler.strConstCount); // n_strings
-        writeShortLE(Compiler.codeLen); // bytecodes_size
+        wB(0x85); // magic
+        wB(0x4A);
+        wB(C.mCount); // n_methods
+        wB(C.mainMi); // main_mi
+        wB(C.sfCount); // n_static
+        wB(C.intCC); // n_integers
+        wB(pjvmClassCount); // n_classes
+        wB(C.strCC); // n_strings
+        wSLE(C.cdLen); // bytecodes_size
 
         // Class table
-        for (int ci = Compiler.userClassStart; ci < Compiler.classCount; ci++) {
-            if (Compiler.classIsInterface[ci]) continue;
+        for (int ci = C.uClsStart; ci < C.cCount; ci++) {
+            if (C.cIsIface[ci]) continue;
             int parentId = 0xFF;
-            if (Compiler.classParent[ci] >= 0) {
-                parentId = Compiler.classParent[ci] - Compiler.userClassStart;
+            if (C.cParent[ci] >= 0) {
+                parentId = C.cParent[ci] - C.uClsStart;
                 if (parentId < 0) parentId = 0xFF;
             }
-            writeByte(parentId);
-            writeByte(Compiler.classFieldCount[ci]);
-            writeByte(Compiler.classVtableSize[ci]);
+            wB(parentId);
+            wB(C.cFieldC[ci]);
+            wB(C.cVtSize[ci]);
             int clinitIdx = 0xFF;
-            if (Compiler.classClinitMi[ci] != 0xFF) clinitIdx = Compiler.classClinitMi[ci];
-            writeByte(clinitIdx);
+            if (C.cClinit[ci] != 0xFF) clinitIdx = C.cClinit[ci];
+            wB(clinitIdx);
             // Vtable entries
-            for (int j = 0; j < Compiler.classVtableSize[ci]; j++) {
-                writeByte(Compiler.vtable[Compiler.vtableBase[ci] + j]);
+            for (int j = 0; j < C.cVtSize[ci]; j++) {
+                wB(C.vtable[C.vtBase[ci] + j]);
             }
         }
 
         // Compute exc_off_idx: cumulative exception entry count per method
         int excRunning = 0;
-        for (int mi = 0; mi < Compiler.methodCount; mi++) {
-            Compiler.methodExcIdx[mi] = excRunning;
-            excRunning += Compiler.methodExcCount[mi];
+        for (int mi = 0; mi < C.mCount; mi++) {
+            C.mExcIdx[mi] = excRunning;
+            excRunning += C.mExcC[mi];
         }
 
         // Method table (12 bytes per method)
-        for (int mi = 0; mi < Compiler.methodCount; mi++) {
-            writeByte(Compiler.methodMaxLocals[mi]);
-            writeByte(Compiler.methodMaxStack[mi]);
-            writeByte(Compiler.methodArgCount[mi]);
-            writeByte(Compiler.methodFlags[mi]);
-            writeShortLE(Compiler.methodCodeOff[mi]);
-            writeShortLE(Compiler.methodCpBase[mi]);
-            writeByte(Compiler.methodVtableSlot[mi]);
-            writeByte(Compiler.methodVmid[mi]);
-            writeByte(Compiler.methodExcCount[mi]);
-            writeByte(Compiler.methodExcIdx[mi]);
+        for (int mi = 0; mi < C.mCount; mi++) {
+            wB(C.mMaxLoc[mi]);
+            wB(C.mMaxStk[mi]);
+            wB(C.mArgC[mi]);
+            wB(C.mFlags[mi]);
+            wSLE(C.mCodeOff[mi]);
+            wSLE(C.mCpBase[mi]);
+            wB(C.mVtSlot[mi]);
+            wB(C.mVmid[mi]);
+            wB(C.mExcC[mi]);
+            wB(C.mExcIdx[mi]);
         }
 
         // CP resolution table
-        writeShortLE(Compiler.cpSize);
-        Native.writeBytes(Compiler.cpEntries, 0, Compiler.cpSize);
-        Compiler.outLen += Compiler.cpSize;
+        wSLE(C.cpSz);
+        Native.writeBytes(C.cpEnt, 0, C.cpSz);
+        C.outLen += C.cpSz;
 
         // Integer constants (4 bytes each, LE)
-        for (int i = 0; i < Compiler.intConstCount; i++) {
-            int v = Compiler.intConsts[i];
-            writeByte(v & 0xFF);
-            writeByte((v >> 8) & 0xFF);
-            writeByte((v >> 16) & 0xFF);
-            writeByte((v >> 24) & 0xFF);
+        for (int i = 0; i < C.intCC; i++) {
+            int v = C.intC[i];
+            wB(v & 0xFF);
+            wB((v >> 8) & 0xFF);
+            wB((v >> 16) & 0xFF);
+            wB((v >> 24) & 0xFF);
         }
 
         // String constants
-        for (int i = 0; i < Compiler.strConstCount; i++) {
-            int len = Compiler.strConstLen[i];
-            writeShortLE(len);
-            Native.writeBytes(Compiler.strConsts[i], 0, len);
-            Compiler.outLen += len;
+        for (int i = 0; i < C.strCC; i++) {
+            int len = C.strCLen[i];
+            wSLE(len);
+            Native.writeBytes(C.strC[i], 0, len);
+            C.outLen += len;
         }
 
         // Bytecodes
-        for (int i = 0; i < Compiler.codeLen; i++) {
-            writeByte(Native.peek(Compiler.codeBase + i) & 0xFF);
+        for (int i = 0; i < C.cdLen; i++) {
+            wB(Native.peek(C.cdBase + i) & 0xFF);
         }
 
         // Exception table (7 bytes per entry)
-        for (int i = 0; i < Compiler.excCount; i++) {
-            writeShortLE(Compiler.excStartPc[i]);
-            writeShortLE(Compiler.excEndPc[i]);
-            writeShortLE(Compiler.excHandlerPc[i]);
-            writeByte(Compiler.excCatchClass[i]);
+        for (int i = 0; i < C.excC; i++) {
+            wSLE(C.excSPc[i]);
+            wSLE(C.excEPc[i]);
+            wSLE(C.excHPc[i]);
+            wB(C.excCCls[i]);
         }
     }
 
-    static void writeByte(int b) {
+    static void wB(int b) {
         Native.putchar(b & 0xFF);
-        Compiler.outLen++;
+        C.outLen++;
     }
 
-    static void writeShortLE(int s) {
-        writeByte(s & 0xFF);
-        writeByte((s >> 8) & 0xFF);
+    static void wSLE(int s) {
+        wB(s & 0xFF);
+        wB((s >> 8) & 0xFF);
     }
 }

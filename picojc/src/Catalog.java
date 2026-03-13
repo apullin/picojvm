@@ -1,115 +1,115 @@
 public class Catalog {
     static void catalog() {
-        Compiler.userClassStart = Compiler.classCount;
-        while (Token.type != Token.TOK_EOF) {
-            catalogClassOrInterface();
+        C.uClsStart = C.cCount;
+        while (Tk.type != Tk.EOF) {
+            catClass();
         }
     }
 
-    static void catalogClassOrInterface() {
+    static void catClass() {
         // Skip modifiers: public, abstract, final
-        while (Token.type == Token.TOK_PUBLIC || Token.type == Token.TOK_ABSTRACT ||
-               Token.type == Token.TOK_FINAL) {
+        while (Tk.type == Tk.PUBLIC || Tk.type == Tk.ABSTRACT ||
+               Tk.type == Tk.FINAL) {
             Lexer.nextToken();
         }
 
         boolean isIface = false;
-        if (Token.type == Token.TOK_INTERFACE) {
+        if (Tk.type == Tk.INTERFACE) {
             isIface = true;
             Lexer.nextToken();
-        } else if (Token.type == Token.TOK_CLASS) {
+        } else if (Tk.type == Tk.CLASS) {
             Lexer.nextToken();
         } else {
-            Lexer.error(Token.TOK_CLASS);
+            Lexer.error(Tk.CLASS);
             return;
         }
 
         // Class/interface name
-        int nm = Compiler.internBuf(Token.strBuf, Token.strLen);
+        int nm = C.intern(Tk.strBuf, Tk.strLen);
         Lexer.nextToken();
 
-        int ci = Compiler.classCount++;
-        Compiler.className[ci] = nm;
-        Compiler.classParent[ci] = -1; // Object by default
-        Compiler.classIsInterface[ci] = isIface;
-        Compiler.classClinitMi[ci] = 0xFF;
-        Compiler.classIfaceStart[ci] = Compiler.ifaceListLen;
-        Compiler.classIfaceCount[ci] = 0;
-        Compiler.classOwnFields[ci] = 0;
+        int ci = C.cCount++;
+        C.cName[ci] = nm;
+        C.cParent[ci] = -1; // Object by default
+        C.cIsIface[ci] = isIface;
+        C.cClinit[ci] = 0xFF;
+        C.cIfaceS[ci] = C.ifListLen;
+        C.cIfaceC[ci] = 0;
+        C.cOwnF[ci] = 0;
 
         // extends?
-        if (Token.type == Token.TOK_EXTENDS) {
+        if (Tk.type == Tk.EXTENDS) {
             Lexer.nextToken();
-            int parentNm = Compiler.internBuf(Token.strBuf, Token.strLen);
+            int parentNm = C.intern(Tk.strBuf, Tk.strLen);
             Lexer.nextToken();
             // Resolve parent later; store name for now
-            Compiler.classParent[ci] = parentNm; // store as name index, resolve in Pass 2
+            C.cParent[ci] = parentNm; // store as name index, resolve in Pass 2
         }
 
         // implements?
-        if (Token.type == Token.TOK_IMPLEMENTS) {
+        if (Tk.type == Tk.IMPLEMENTS) {
             Lexer.nextToken();
-            while (Token.type == Token.TOK_IDENT || Token.type == Token.TOK_STRING_KW) {
-                int ifNm = Compiler.internBuf(Token.strBuf, Token.strLen);
-                Compiler.ifaceList[Compiler.ifaceListLen++] = ifNm; // store as name, resolve later
-                Compiler.classIfaceCount[ci]++;
+            while (Tk.type == Tk.IDENT || Tk.type == Tk.STRING_KW) {
+                int ifNm = C.intern(Tk.strBuf, Tk.strLen);
+                C.ifList[C.ifListLen++] = ifNm; // store as name, resolve later
+                C.cIfaceC[ci]++;
                 Lexer.nextToken();
-                if (Token.type == Token.TOK_COMMA) Lexer.nextToken();
+                if (Tk.type == Tk.COMMA) Lexer.nextToken();
                 else break;
             }
         }
 
-        Lexer.expect(Token.TOK_LBRACE);
-        Compiler.classBodyStart[ci] = Lexer.pos;
+        Lexer.expect(Tk.LBRACE);
+        C.cBodyS[ci] = Lexer.pos;
 
         // Scan class body for fields and methods
-        while (Token.type != Token.TOK_RBRACE && Token.type != Token.TOK_EOF) {
-            catalogMember(ci);
+        while (Tk.type != Tk.RBRACE && Tk.type != Tk.EOF) {
+            catMember(ci);
         }
-        Compiler.classBodyEnd[ci] = Lexer.pos;
-        Lexer.expect(Token.TOK_RBRACE);
+        C.cBodyE[ci] = Lexer.pos;
+        Lexer.expect(Tk.RBRACE);
     }
 
-    static void catalogMember(int ci) {
+    static void catMember(int ci) {
         // Collect modifiers
         boolean isStat = false;
         boolean isNat = false;
         boolean isAbstract = false;
-        while (Token.type == Token.TOK_PUBLIC || Token.type == Token.TOK_PRIVATE ||
-               Token.type == Token.TOK_PROTECTED || Token.type == Token.TOK_STATIC ||
-               Token.type == Token.TOK_FINAL || Token.type == Token.TOK_NATIVE ||
-               Token.type == Token.TOK_ABSTRACT) {
-            if (Token.type == Token.TOK_STATIC) isStat = true;
-            if (Token.type == Token.TOK_NATIVE) isNat = true;
-            if (Token.type == Token.TOK_ABSTRACT) isAbstract = true;
+        while (Tk.type == Tk.PUBLIC || Tk.type == Tk.PRIVATE ||
+               Tk.type == Tk.PROTECTED || Tk.type == Tk.STATIC ||
+               Tk.type == Tk.FINAL || Tk.type == Tk.NATIVE ||
+               Tk.type == Tk.ABSTRACT) {
+            if (Tk.type == Tk.STATIC) isStat = true;
+            if (Tk.type == Tk.NATIVE) isNat = true;
+            if (Tk.type == Tk.ABSTRACT) isAbstract = true;
             Lexer.nextToken();
         }
 
         // Static initializer block: static { ... }
-        if (isStat && Token.type == Token.TOK_LBRACE) {
+        if (isStat && Tk.type == Tk.LBRACE) {
             int mi;
-            if (Compiler.classClinitMi[ci] != 0xFF && Compiler.methodBodyStart[Compiler.classClinitMi[ci]] == -2) {
+            if (C.cClinit[ci] != 0xFF && C.mBodyS[C.cClinit[ci]] == -2) {
                 // Reuse synthetic <clinit> (created for field initializers)
-                mi = Compiler.classClinitMi[ci];
+                mi = C.cClinit[ci];
             } else {
-                mi = Compiler.methodCount++;
-                Compiler.methodClass[mi] = ci;
-                Compiler.methodName[mi] = Compiler.N_CLINIT;
-                Compiler.methodArgCount[mi] = 0;
-                Compiler.methodIsStatic[mi] = true;
-                Compiler.methodIsConstructor[mi] = false;
-                Compiler.methodIsNative[mi] = false;
-                Compiler.methodRetType[mi] = 0; // void
-                Compiler.methodVtableSlot[mi] = 0xFF;
-                Compiler.methodVmid[mi] = 0xFF;
-                Compiler.methodExcCount[mi] = 0;
-                Compiler.classClinitMi[ci] = mi;
+                mi = C.mCount++;
+                C.mClass[mi] = ci;
+                C.mName[mi] = C.N_CLINIT;
+                C.mArgC[mi] = 0;
+                C.mStatic[mi] = true;
+                C.mIsCtor[mi] = false;
+                C.mNative[mi] = false;
+                C.mRetT[mi] = 0; // void
+                C.mVtSlot[mi] = 0xFF;
+                C.mVmid[mi] = 0xFF;
+                C.mExcC[mi] = 0;
+                C.cClinit[ci] = mi;
             }
             Lexer.nextToken(); // skip {
-            Compiler.methodBodyStart[mi] = Lexer.pos;
-            skipBlock();
-            Compiler.methodBodyEnd[mi] = Lexer.pos;
-            Lexer.expect(Token.TOK_RBRACE);
+            C.mBodyS[mi] = Lexer.pos;
+            skipBlk();
+            C.mBodyE[mi] = Lexer.pos;
+            Lexer.expect(Tk.RBRACE);
             return;
         }
 
@@ -117,47 +117,47 @@ public class Catalog {
         int retType = 0; // 0=void, 1=int, 2=ref
         int arrayKind = 0; // 0=non-array, 4=byte[], 5=char[]
         boolean isCtor = false;
-        int retTypeToken = Token.type;
+        int retTypeToken = Tk.type;
 
         // Check for constructor: ClassName(
-        if (Token.type == Token.TOK_IDENT) {
-            int nm = Compiler.internBuf(Token.strBuf, Token.strLen);
-            if (nm == Compiler.className[ci]) {
+        if (Tk.type == Tk.IDENT) {
+            int nm = C.intern(Tk.strBuf, Tk.strLen);
+            if (nm == C.cName[ci]) {
                 // Might be constructor or field/method named same as class
                 Lexer.save();
                 Lexer.nextToken();
-                if (Token.type == Token.TOK_LPAREN) {
+                if (Tk.type == Tk.LPAREN) {
                     // It's a constructor
                     isCtor = true;
                     retType = 0; // void
-                    catalogMethod(ci, nm, isStat, isCtor, isNat, isAbstract, retType);
+                    catMethod(ci, nm, isStat, isCtor, isNat, isAbstract, retType);
                     return;
                 }
                 // Not a constructor, restore
                 Lexer.restore();
-                Token.type = Token.TOK_IDENT;
-                Token.strLen = Compiler.nameLen[nm];
-                Native.arraycopy(Compiler.namePool, Compiler.nameOff[nm], Token.strBuf, 0, Token.strLen);
+                Tk.type = Tk.IDENT;
+                Tk.strLen = C.nLen[nm];
+                Native.arraycopy(C.nPool, C.nOff[nm], Tk.strBuf, 0, Tk.strLen);
             }
         }
 
         // Parse return type
-        if (Token.type == Token.TOK_VOID) { retType = 0; Lexer.nextToken(); }
-        else if (Token.type == Token.TOK_INT || Token.type == Token.TOK_BYTE ||
-                 Token.type == Token.TOK_CHAR || Token.type == Token.TOK_SHORT ||
-                 Token.type == Token.TOK_BOOLEAN) {
+        if (Tk.type == Tk.VOID) { retType = 0; Lexer.nextToken(); }
+        else if (Tk.type == Tk.INT || Tk.type == Tk.BYTE ||
+                 Tk.type == Tk.CHAR || Tk.type == Tk.SHORT ||
+                 Tk.type == Tk.BOOLEAN) {
             retType = 1; // int-like
             Lexer.nextToken();
             // Check for array type (supports multi-dimensional)
             {
                 int dimCount = 0;
-                while (Token.type == Token.TOK_LBRACKET) {
+                while (Tk.type == Tk.LBRACKET) {
                     Lexer.nextToken();
-                    Lexer.expect(Token.TOK_RBRACKET);
+                    Lexer.expect(Tk.RBRACKET);
                     dimCount++;
                     if (retType == 1) {
-                        if (retTypeToken == Token.TOK_BYTE || retTypeToken == Token.TOK_BOOLEAN) arrayKind = 4;
-                        else if (retTypeToken == Token.TOK_CHAR) arrayKind = 5;
+                        if (retTypeToken == Tk.BYTE || retTypeToken == Tk.BOOLEAN) arrayKind = 4;
+                        else if (retTypeToken == Tk.CHAR) arrayKind = 5;
                     }
                     retType = 2; // array = ref
                 }
@@ -170,13 +170,13 @@ public class Catalog {
                 }
             }
         }
-        else if (Token.type == Token.TOK_STRING_KW || Token.type == Token.TOK_IDENT) {
+        else if (Tk.type == Tk.STRING_KW || Tk.type == Tk.IDENT) {
             retType = 2; // reference
             Lexer.nextToken();
             // Check for array type (supports multi-dimensional)
-            while (Token.type == Token.TOK_LBRACKET) {
+            while (Tk.type == Tk.LBRACKET) {
                 Lexer.nextToken();
-                Lexer.expect(Token.TOK_RBRACKET);
+                Lexer.expect(Tk.RBRACKET);
             }
         }
         else {
@@ -185,136 +185,136 @@ public class Catalog {
         }
 
         // Name
-        int nm = Compiler.internBuf(Token.strBuf, Token.strLen);
+        int nm = C.intern(Tk.strBuf, Tk.strLen);
         Lexer.nextToken();
 
         // Method or field?
-        if (Token.type == Token.TOK_LPAREN) {
+        if (Tk.type == Tk.LPAREN) {
             // Method
-            catalogMethod(ci, nm, isStat, false, isNat, isAbstract, retType);
+            catMethod(ci, nm, isStat, false, isNat, isAbstract, retType);
         } else {
             // Field
-            catalogField(ci, nm, isStat, retType, arrayKind);
+            catField(ci, nm, isStat, retType, arrayKind);
         }
     }
 
-    static void catalogField(int ci, int nm, boolean isStat, int retType, int arrKind) {
-        int fi = Compiler.fieldCount++;
-        Compiler.fieldClass[fi] = ci;
-        Compiler.fieldName[fi] = nm;
-        Compiler.fieldIsStatic[fi] = isStat;
-        Compiler.fieldArrayKind[fi] = arrKind;
-        Compiler.fieldSlot[fi] = -1;
-        Compiler.fieldInitPos[fi] = -1;
-        Compiler.fieldInitLine[fi] = 0;
-        if (!isStat) Compiler.classOwnFields[ci]++;
+    static void catField(int ci, int nm, boolean isStat, int retType, int arrKind) {
+        int fi = C.fCount++;
+        C.fClass[fi] = ci;
+        C.fName[fi] = nm;
+        C.fStatic[fi] = isStat;
+        C.fArrKind[fi] = arrKind;
+        C.fSlot[fi] = -1;
+        C.fInitPos[fi] = -1;
+        C.fInitLn[fi] = 0;
+        if (!isStat) C.cOwnF[ci]++;
 
         // Check for initializer
-        if (Token.type == Token.TOK_ASSIGN && isStat) {
+        if (Tk.type == Tk.ASSIGN && isStat) {
             // Save position right after '=' (before the value token)
-            // Lexer.pos is already past '=' since TOK_ASSIGN was scanned
-            Compiler.fieldInitPos[fi] = Lexer.pos;
-            Compiler.fieldInitLine[fi] = Lexer.line;
+            // Lexer.pos is already past '=' since ASSIGN was scanned
+            C.fInitPos[fi] = Lexer.pos;
+            C.fInitLn[fi] = Lexer.line;
             // Ensure class has a <clinit> for field initializer emission
-            if (Compiler.classClinitMi[ci] == 0xFF) {
+            if (C.cClinit[ci] == 0xFF) {
                 // Create synthetic <clinit> (bodyStart=-2 = synthetic marker)
-                int smi = Compiler.methodCount++;
-                Compiler.methodClass[smi] = ci;
-                Compiler.methodName[smi] = Compiler.N_CLINIT;
-                Compiler.methodArgCount[smi] = 0;
-                Compiler.methodIsStatic[smi] = true;
-                Compiler.methodIsConstructor[smi] = false;
-                Compiler.methodIsNative[smi] = false;
-                Compiler.methodRetType[smi] = 0;
-                Compiler.methodVtableSlot[smi] = 0xFF;
-                Compiler.methodVmid[smi] = 0xFF;
-                Compiler.methodExcCount[smi] = 0;
-                Compiler.methodBodyStart[smi] = -2; // synthetic: no explicit body
-                Compiler.methodBodyEnd[smi] = -2;
-                Compiler.classClinitMi[ci] = smi;
+                int smi = C.mCount++;
+                C.mClass[smi] = ci;
+                C.mName[smi] = C.N_CLINIT;
+                C.mArgC[smi] = 0;
+                C.mStatic[smi] = true;
+                C.mIsCtor[smi] = false;
+                C.mNative[smi] = false;
+                C.mRetT[smi] = 0;
+                C.mVtSlot[smi] = 0xFF;
+                C.mVmid[smi] = 0xFF;
+                C.mExcC[smi] = 0;
+                C.mBodyS[smi] = -2; // synthetic: no explicit body
+                C.mBodyE[smi] = -2;
+                C.cClinit[ci] = smi;
             }
         }
 
         // Skip initializer and comma-separated declarations
-        while (Token.type != Token.TOK_SEMI && Token.type != Token.TOK_EOF) {
-            if (Token.type == Token.TOK_COMMA) {
+        while (Tk.type != Tk.SEMI && Tk.type != Tk.EOF) {
+            if (Tk.type == Tk.COMMA) {
                 Lexer.nextToken();
                 // Another field with same type
-                int nm2 = Compiler.internBuf(Token.strBuf, Token.strLen);
+                int nm2 = C.intern(Tk.strBuf, Tk.strLen);
                 Lexer.nextToken();
-                int fi2 = Compiler.fieldCount++;
-                Compiler.fieldClass[fi2] = ci;
-                Compiler.fieldName[fi2] = nm2;
-                Compiler.fieldIsStatic[fi2] = isStat;
-                Compiler.fieldArrayKind[fi2] = arrKind;
-                Compiler.fieldSlot[fi2] = -1;
-                Compiler.fieldInitPos[fi2] = -1;
-                Compiler.fieldInitLine[fi2] = 0;
-                if (!isStat) Compiler.classOwnFields[ci]++;
+                int fi2 = C.fCount++;
+                C.fClass[fi2] = ci;
+                C.fName[fi2] = nm2;
+                C.fStatic[fi2] = isStat;
+                C.fArrKind[fi2] = arrKind;
+                C.fSlot[fi2] = -1;
+                C.fInitPos[fi2] = -1;
+                C.fInitLn[fi2] = 0;
+                if (!isStat) C.cOwnF[ci]++;
             } else {
                 Lexer.nextToken();
             }
         }
-        Lexer.expect(Token.TOK_SEMI);
+        Lexer.expect(Tk.SEMI);
     }
 
-    static void catalogMethod(int ci, int nm, boolean isStat, boolean isCtor,
+    static void catMethod(int ci, int nm, boolean isStat, boolean isCtor,
                                boolean isNat, boolean isAbstract, int retType) {
-        int mi = Compiler.methodCount++;
-        Compiler.methodClass[mi] = ci;
-        Compiler.methodName[mi] = isCtor ? Compiler.N_INIT : nm;
-        Compiler.methodIsStatic[mi] = isStat;
-        Compiler.methodIsConstructor[mi] = isCtor;
-        Compiler.methodIsNative[mi] = isNat;
-        Compiler.methodRetType[mi] = retType;
-        Compiler.methodVtableSlot[mi] = 0xFF;
-        Compiler.methodVmid[mi] = 0xFF;
-        Compiler.methodExcCount[mi] = 0;
+        int mi = C.mCount++;
+        C.mClass[mi] = ci;
+        C.mName[mi] = isCtor ? C.N_INIT : nm;
+        C.mStatic[mi] = isStat;
+        C.mIsCtor[mi] = isCtor;
+        C.mNative[mi] = isNat;
+        C.mRetT[mi] = retType;
+        C.mVtSlot[mi] = 0xFF;
+        C.mVmid[mi] = 0xFF;
+        C.mExcC[mi] = 0;
 
         // Parse parameters
-        Lexer.expect(Token.TOK_LPAREN);
+        Lexer.expect(Tk.LPAREN);
         int argc = isStat ? 0 : 1; // instance methods have 'this' as arg 0
-        while (Token.type != Token.TOK_RPAREN && Token.type != Token.TOK_EOF) {
+        while (Tk.type != Tk.RPAREN && Tk.type != Tk.EOF) {
             // Skip type
-            skipType();
+            skipTy();
             // Skip name
             Lexer.nextToken();
             argc++;
-            if (Token.type == Token.TOK_COMMA) Lexer.nextToken();
+            if (Tk.type == Tk.COMMA) Lexer.nextToken();
         }
-        Lexer.expect(Token.TOK_RPAREN);
-        Compiler.methodArgCount[mi] = argc;
+        Lexer.expect(Tk.RPAREN);
+        C.mArgC[mi] = argc;
 
-        if (isNat || isAbstract || Compiler.classIsInterface[ci]) {
+        if (isNat || isAbstract || C.cIsIface[ci]) {
             // Native/abstract/interface method: no body
-            Lexer.expect(Token.TOK_SEMI);
-            Compiler.methodBodyStart[mi] = -1;
-            Compiler.methodBodyEnd[mi] = -1;
+            Lexer.expect(Tk.SEMI);
+            C.mBodyS[mi] = -1;
+            C.mBodyE[mi] = -1;
         } else {
             // Parse body
-            Lexer.expect(Token.TOK_LBRACE);
-            Compiler.methodBodyStart[mi] = Lexer.pos;
-            skipBlock();
-            Compiler.methodBodyEnd[mi] = Lexer.pos;
-            Lexer.expect(Token.TOK_RBRACE);
+            Lexer.expect(Tk.LBRACE);
+            C.mBodyS[mi] = Lexer.pos;
+            skipBlk();
+            C.mBodyE[mi] = Lexer.pos;
+            Lexer.expect(Tk.RBRACE);
         }
     }
 
-    static void skipType() {
+    static void skipTy() {
         // Skip a type declaration (int, String, ClassName, arrays)
         Lexer.nextToken(); // consume type keyword/name
-        while (Token.type == Token.TOK_LBRACKET) {
+        while (Tk.type == Tk.LBRACKET) {
             Lexer.nextToken(); // [
-            if (Token.type == Token.TOK_RBRACKET) Lexer.nextToken(); // ]
+            if (Tk.type == Tk.RBRACKET) Lexer.nextToken(); // ]
         }
     }
 
-    static void skipBlock() {
+    static void skipBlk() {
         // Skip brace-balanced block content (we're just past the opening {)
         int depth = 1;
-        while (depth > 0 && Token.type != Token.TOK_EOF) {
-            if (Token.type == Token.TOK_LBRACE) depth++;
-            else if (Token.type == Token.TOK_RBRACE) {
+        while (depth > 0 && Tk.type != Tk.EOF) {
+            if (Tk.type == Tk.LBRACE) depth++;
+            else if (Tk.type == Tk.RBRACE) {
                 depth--;
                 if (depth == 0) return; // don't consume the closing }
             }

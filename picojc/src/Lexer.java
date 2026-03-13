@@ -91,46 +91,46 @@ public class Lexer {
         kwCount = 0;
         kwNames = new String[40];
         kwTokens = new int[40];
-        addKw("class",      Token.TOK_CLASS);
-        addKw("extends",    Token.TOK_EXTENDS);
-        addKw("implements", Token.TOK_IMPLEMENTS);
-        addKw("interface",  Token.TOK_INTERFACE);
-        addKw("static",     Token.TOK_STATIC);
-        addKw("public",     Token.TOK_PUBLIC);
-        addKw("private",    Token.TOK_PRIVATE);
-        addKw("protected",  Token.TOK_PROTECTED);
-        addKw("void",       Token.TOK_VOID);
-        addKw("int",        Token.TOK_INT);
-        addKw("byte",       Token.TOK_BYTE);
-        addKw("char",       Token.TOK_CHAR);
-        addKw("short",      Token.TOK_SHORT);
-        addKw("boolean",    Token.TOK_BOOLEAN);
-        addKw("if",         Token.TOK_IF);
-        addKw("else",       Token.TOK_ELSE);
-        addKw("while",      Token.TOK_WHILE);
-        addKw("do",         Token.TOK_DO);
-        addKw("for",        Token.TOK_FOR);
-        addKw("switch",     Token.TOK_SWITCH);
-        addKw("case",       Token.TOK_CASE);
-        addKw("default",    Token.TOK_DEFAULT);
-        addKw("break",      Token.TOK_BREAK);
-        addKw("continue",   Token.TOK_CONTINUE);
-        addKw("return",     Token.TOK_RETURN);
-        addKw("new",        Token.TOK_NEW);
-        addKw("null",       Token.TOK_NULL);
-        addKw("this",       Token.TOK_THIS);
-        addKw("throw",      Token.TOK_THROW);
-        addKw("try",        Token.TOK_TRY);
-        addKw("catch",      Token.TOK_CATCH);
-        addKw("finally",    Token.TOK_FINALLY);
-        addKw("instanceof", Token.TOK_INSTANCEOF);
-        addKw("true",       Token.TOK_TRUE);
-        addKw("false",      Token.TOK_FALSE);
-        addKw("native",     Token.TOK_NATIVE);
-        addKw("super",      Token.TOK_SUPER);
-        addKw("final",      Token.TOK_FINAL);
-        addKw("abstract",   Token.TOK_ABSTRACT);
-        addKw("String",     Token.TOK_STRING_KW);
+        addKw("class",      Tk.CLASS);
+        addKw("extends",    Tk.EXTENDS);
+        addKw("implements", Tk.IMPLEMENTS);
+        addKw("interface",  Tk.INTERFACE);
+        addKw("static",     Tk.STATIC);
+        addKw("public",     Tk.PUBLIC);
+        addKw("private",    Tk.PRIVATE);
+        addKw("protected",  Tk.PROTECTED);
+        addKw("void",       Tk.VOID);
+        addKw("int",        Tk.INT);
+        addKw("byte",       Tk.BYTE);
+        addKw("char",       Tk.CHAR);
+        addKw("short",      Tk.SHORT);
+        addKw("boolean",    Tk.BOOLEAN);
+        addKw("if",         Tk.IF);
+        addKw("else",       Tk.ELSE);
+        addKw("while",      Tk.WHILE);
+        addKw("do",         Tk.DO);
+        addKw("for",        Tk.FOR);
+        addKw("switch",     Tk.SWITCH);
+        addKw("case",       Tk.CASE);
+        addKw("default",    Tk.DEFAULT);
+        addKw("break",      Tk.BREAK);
+        addKw("continue",   Tk.CONTINUE);
+        addKw("return",     Tk.RETURN);
+        addKw("new",        Tk.NEW);
+        addKw("null",       Tk.NULL);
+        addKw("this",       Tk.THIS);
+        addKw("throw",      Tk.THROW);
+        addKw("try",        Tk.TRY);
+        addKw("catch",      Tk.CATCH);
+        addKw("finally",    Tk.FINALLY);
+        addKw("instanceof", Tk.INSTANCEOF);
+        addKw("true",       Tk.TRUE);
+        addKw("false",      Tk.FALSE);
+        addKw("native",     Tk.NATIVE);
+        addKw("super",      Tk.SUPER);
+        addKw("final",      Tk.FINAL);
+        addKw("abstract",   Tk.ABSTRACT);
+        addKw("String",     Tk.STRING_KW);
     }
 
     static void addKw(String name, int tok) {
@@ -142,27 +142,27 @@ public class Lexer {
     static int lookupKeyword() {
         for (int i = 0; i < kwCount; i++) {
             String kw = kwNames[i];
-            if (kw.length() == Token.strLen) {
+            if (kw.length() == Tk.strLen) {
                 boolean match = true;
-                for (int j = 0; j < Token.strLen; j++) {
-                    if ((byte) kw.charAt(j) != Token.strBuf[j]) { match = false; break; }
+                for (int j = 0; j < Tk.strLen; j++) {
+                    if ((byte) kw.charAt(j) != Tk.strBuf[j]) { match = false; break; }
                 }
                 if (match) return kwTokens[i];
             }
         }
-        return Token.TOK_IDENT;
+        return Tk.IDENT;
     }
 
     static void readIdentifier() {
-        Token.strLen = 0;
+        Tk.strLen = 0;
         while (pos < srcLen && isAlphaNum(ch())) {
-            if (Token.strLen < 255) {
-                Token.strBuf[Token.strLen] = (byte) ch();
-                Token.strLen++;
+            if (Tk.strLen < 255) {
+                Tk.strBuf[Tk.strLen] = (byte) ch();
+                Tk.strLen++;
             }
             advance();
         }
-        Token.type = lookupKeyword();
+        Tk.type = lookupKeyword();
     }
 
     static void readNumber() {
@@ -180,8 +180,8 @@ public class Lexer {
                     else if (c >= 'A' && c <= 'F') { val = val * 16 + (c - 'A' + 10); advance(); }
                     else break;
                 }
-                Token.type = Token.TOK_INT_LIT;
-                Token.intValue = val;
+                Tk.type = Tk.INT_LIT;
+                Tk.intValue = val;
                 return;
             } else if (next == 'b' || next == 'B') {
                 // Binary literal
@@ -192,8 +192,8 @@ public class Lexer {
                     if (c == '0' || c == '1') { val = val * 2 + (c - '0'); advance(); }
                     else break;
                 }
-                Token.type = Token.TOK_INT_LIT;
-                Token.intValue = val;
+                Tk.type = Tk.INT_LIT;
+                Tk.intValue = val;
                 return;
             }
         }
@@ -205,8 +205,8 @@ public class Lexer {
         }
         // Skip L/l suffix if present
         if (pos < srcLen && (ch() == 'L' || ch() == 'l')) advance();
-        Token.type = Token.TOK_INT_LIT;
-        Token.intValue = val;
+        Tk.type = Tk.INT_LIT;
+        Tk.intValue = val;
     }
 
     static int readEscape() {
@@ -233,13 +233,13 @@ public class Lexer {
             advance();
         }
         advance(); // skip closing '
-        Token.type = Token.TOK_CHAR_LIT;
-        Token.intValue = val;
+        Tk.type = Tk.CHAR_LIT;
+        Tk.intValue = val;
     }
 
     static void readStringLiteral() {
         advance(); // skip opening "
-        Token.strLen = 0;
+        Tk.strLen = 0;
         while (pos < srcLen && ch() != '"') {
             int c;
             if (ch() == '\\') {
@@ -248,13 +248,13 @@ public class Lexer {
                 c = ch();
                 advance();
             }
-            if (Token.strLen < 255) {
-                Token.strBuf[Token.strLen] = (byte) c;
-                Token.strLen++;
+            if (Tk.strLen < 255) {
+                Tk.strBuf[Tk.strLen] = (byte) c;
+                Tk.strLen++;
             }
         }
         if (pos < srcLen) advance(); // skip closing "
-        Token.type = Token.TOK_STR_LIT;
+        Tk.type = Tk.STR_LIT;
     }
 
     static boolean matchChar(int expected) {
@@ -267,10 +267,10 @@ public class Lexer {
 
     static void nextToken() {
         skipWhitespaceAndComments();
-        Token.line = line;
+        Tk.line = line;
 
         if (pos >= srcLen) {
-            Token.type = Token.TOK_EOF;
+            Tk.type = Tk.EOF;
             return;
         }
 
@@ -286,66 +286,66 @@ public class Lexer {
         }
 
         advance(); // consume the character
-        if (c == '{') { Token.type = Token.TOK_LBRACE; }
-        else if (c == '}') { Token.type = Token.TOK_RBRACE; }
-        else if (c == '(') { Token.type = Token.TOK_LPAREN; }
-        else if (c == ')') { Token.type = Token.TOK_RPAREN; }
-        else if (c == '[') { Token.type = Token.TOK_LBRACKET; }
-        else if (c == ']') { Token.type = Token.TOK_RBRACKET; }
-        else if (c == ';') { Token.type = Token.TOK_SEMI; }
-        else if (c == ',') { Token.type = Token.TOK_COMMA; }
-        else if (c == '.') { Token.type = Token.TOK_DOT; }
-        else if (c == '~') { Token.type = Token.TOK_TILDE; }
-        else if (c == '?') { Token.type = Token.TOK_QUESTION; }
-        else if (c == ':') { Token.type = Token.TOK_COLON; }
+        if (c == '{') { Tk.type = Tk.LBRACE; }
+        else if (c == '}') { Tk.type = Tk.RBRACE; }
+        else if (c == '(') { Tk.type = Tk.LPAREN; }
+        else if (c == ')') { Tk.type = Tk.RPAREN; }
+        else if (c == '[') { Tk.type = Tk.LBRACKET; }
+        else if (c == ']') { Tk.type = Tk.RBRACKET; }
+        else if (c == ';') { Tk.type = Tk.SEMI; }
+        else if (c == ',') { Tk.type = Tk.COMMA; }
+        else if (c == '.') { Tk.type = Tk.DOT; }
+        else if (c == '~') { Tk.type = Tk.TILDE; }
+        else if (c == '?') { Tk.type = Tk.QUESTION; }
+        else if (c == ':') { Tk.type = Tk.COLON; }
         else if (c == '\'') { pos--; readCharLiteral(); }
         else if (c == '"') { pos--; readStringLiteral(); }
-        else if (c == '=') { Token.type = matchChar('=') ? Token.TOK_EQ : Token.TOK_ASSIGN; }
-        else if (c == '!') { Token.type = matchChar('=') ? Token.TOK_NE : Token.TOK_BANG; }
+        else if (c == '=') { Tk.type = matchChar('=') ? Tk.EQ : Tk.ASSIGN; }
+        else if (c == '!') { Tk.type = matchChar('=') ? Tk.NE : Tk.BANG; }
         else if (c == '<') {
-            if (matchChar('=')) Token.type = Token.TOK_LE;
-            else if (matchChar('<')) Token.type = matchChar('=') ? Token.TOK_SHL_EQ : Token.TOK_SHL;
-            else Token.type = Token.TOK_LT;
+            if (matchChar('=')) Tk.type = Tk.LE;
+            else if (matchChar('<')) Tk.type = matchChar('=') ? Tk.SHL_EQ : Tk.SHL;
+            else Tk.type = Tk.LT;
         }
         else if (c == '>') {
-            if (matchChar('=')) Token.type = Token.TOK_GE;
+            if (matchChar('=')) Tk.type = Tk.GE;
             else if (matchChar('>')) {
-                if (matchChar('>')) Token.type = matchChar('=') ? Token.TOK_USHR_EQ : Token.TOK_USHR;
-                else Token.type = matchChar('=') ? Token.TOK_SHR_EQ : Token.TOK_SHR;
+                if (matchChar('>')) Tk.type = matchChar('=') ? Tk.USHR_EQ : Tk.USHR;
+                else Tk.type = matchChar('=') ? Tk.SHR_EQ : Tk.SHR;
             }
-            else Token.type = Token.TOK_GT;
+            else Tk.type = Tk.GT;
         }
         else if (c == '+') {
-            if (matchChar('+')) Token.type = Token.TOK_INC;
-            else if (matchChar('=')) Token.type = Token.TOK_PLUS_EQ;
-            else Token.type = Token.TOK_PLUS;
+            if (matchChar('+')) Tk.type = Tk.INC;
+            else if (matchChar('=')) Tk.type = Tk.PLUS_EQ;
+            else Tk.type = Tk.PLUS;
         }
         else if (c == '-') {
-            if (matchChar('-')) Token.type = Token.TOK_DEC;
-            else if (matchChar('=')) Token.type = Token.TOK_MINUS_EQ;
-            else Token.type = Token.TOK_MINUS;
+            if (matchChar('-')) Tk.type = Tk.DEC;
+            else if (matchChar('=')) Tk.type = Tk.MINUS_EQ;
+            else Tk.type = Tk.MINUS;
         }
-        else if (c == '*') { Token.type = matchChar('=') ? Token.TOK_STAR_EQ : Token.TOK_STAR; }
-        else if (c == '/') { Token.type = matchChar('=') ? Token.TOK_SLASH_EQ : Token.TOK_SLASH; }
-        else if (c == '%') { Token.type = matchChar('=') ? Token.TOK_PERCENT_EQ : Token.TOK_PERCENT; }
+        else if (c == '*') { Tk.type = matchChar('=') ? Tk.STAR_EQ : Tk.STAR; }
+        else if (c == '/') { Tk.type = matchChar('=') ? Tk.SLASH_EQ : Tk.SLASH; }
+        else if (c == '%') { Tk.type = matchChar('=') ? Tk.PERCENT_EQ : Tk.PERCENT; }
         else if (c == '&') {
-            if (matchChar('&')) Token.type = Token.TOK_AND;
-            else if (matchChar('=')) Token.type = Token.TOK_AMP_EQ;
-            else Token.type = Token.TOK_AMP;
+            if (matchChar('&')) Tk.type = Tk.AND;
+            else if (matchChar('=')) Tk.type = Tk.AMP_EQ;
+            else Tk.type = Tk.AMP;
         }
         else if (c == '|') {
-            if (matchChar('|')) Token.type = Token.TOK_OR;
-            else if (matchChar('=')) Token.type = Token.TOK_PIPE_EQ;
-            else Token.type = Token.TOK_PIPE;
+            if (matchChar('|')) Tk.type = Tk.OR;
+            else if (matchChar('=')) Tk.type = Tk.PIPE_EQ;
+            else Tk.type = Tk.PIPE;
         }
-        else if (c == '^') { Token.type = matchChar('=') ? Token.TOK_CARET_EQ : Token.TOK_CARET; }
+        else if (c == '^') { Tk.type = matchChar('=') ? Tk.CARET_EQ : Tk.CARET; }
         else {
             error(c);
         }
     }
 
     static void expect(int tok) {
-        if (Token.type != tok) {
+        if (Tk.type != tok) {
             error(tok);
         }
         nextToken();
@@ -354,7 +354,7 @@ public class Lexer {
     static void error(int code) {
         // Output: E<line><code> then halt
         Native.putchar('E');
-        printNum(Token.line);
+        printNum(Tk.line);
         Native.putchar(':');
         printNum(code);
         Native.putchar('\n');

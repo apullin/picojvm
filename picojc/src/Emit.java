@@ -1,143 +1,144 @@
-public class Emit {
+// Emit -> E (size)
+class E {
     static void emit() {
-        Compiler.codeLen = 0;
-        Compiler.cpSize = 0;
-        Compiler.excCount = 0;
+        C.cdLen = 0;
+        C.cpSz = 0;
+        C.excC = 0;
         autoCtorsEmitted = false;
 
         // Skip to class bodies and emit methods
-        while (Token.type != Token.TOK_EOF) {
-            emitClassMethods();
+        while (Tk.type != Tk.EOF) {
+            eClsMethods();
         }
 
         // Emit auto-generated default constructors after all user methods
-        emitAutoConstructors();
+        eAutoCtors();
     }
 
-    static void emitClassMethods() {
+    static void eClsMethods() {
         // Skip to class body
-        while (Token.type != Token.TOK_LBRACE && Token.type != Token.TOK_EOF) {
+        while (Tk.type != Tk.LBRACE && Tk.type != Tk.EOF) {
             Lexer.nextToken();
         }
-        if (Token.type == Token.TOK_EOF) return;
+        if (Tk.type == Tk.EOF) return;
         Lexer.nextToken(); // skip {
 
         // We're inside a class body
-        int ci = findCurrentClass();
-        Compiler.curClass = ci;
+        int ci = fCurCls();
+        C.curCi = ci;
 
-        while (Token.type != Token.TOK_RBRACE && Token.type != Token.TOK_EOF) {
-            emitMember(ci);
+        while (Tk.type != Tk.RBRACE && Tk.type != Tk.EOF) {
+            eMem(ci);
         }
-        if (Token.type == Token.TOK_RBRACE) Lexer.nextToken();
+        if (Tk.type == Tk.RBRACE) Lexer.nextToken();
     }
 
     static int emitClassIdx; // tracking which class we're emitting
-    static int findCurrentClass() {
+    static int fCurCls() {
         // Match by position - classes appear in source order
-        for (int ci = Compiler.userClassStart; ci < Compiler.classCount; ci++) {
-            if (Compiler.classBodyStart[ci] >= 0 && Lexer.pos >= Compiler.classBodyStart[ci] &&
-                (Compiler.classBodyEnd[ci] < 0 || Lexer.pos <= Compiler.classBodyEnd[ci])) {
+        for (int ci = C.uClsStart; ci < C.cCount; ci++) {
+            if (C.cBodyS[ci] >= 0 && Lexer.pos >= C.cBodyS[ci] &&
+                (C.cBodyE[ci] < 0 || Lexer.pos <= C.cBodyE[ci])) {
                 return ci;
             }
         }
-        return Compiler.userClassStart;
+        return C.uClsStart;
     }
 
-    static void emitMember(int ci) {
+    static void eMem(int ci) {
         // Skip modifiers
         boolean isStat = false;
         boolean isNat = false;
         boolean isAbstract = false;
-        while (Token.type == Token.TOK_PUBLIC || Token.type == Token.TOK_PRIVATE ||
-               Token.type == Token.TOK_PROTECTED || Token.type == Token.TOK_STATIC ||
-               Token.type == Token.TOK_FINAL || Token.type == Token.TOK_NATIVE ||
-               Token.type == Token.TOK_ABSTRACT) {
-            if (Token.type == Token.TOK_STATIC) isStat = true;
-            if (Token.type == Token.TOK_NATIVE) isNat = true;
-            if (Token.type == Token.TOK_ABSTRACT) isAbstract = true;
+        while (Tk.type == Tk.PUBLIC || Tk.type == Tk.PRIVATE ||
+               Tk.type == Tk.PROTECTED || Tk.type == Tk.STATIC ||
+               Tk.type == Tk.FINAL || Tk.type == Tk.NATIVE ||
+               Tk.type == Tk.ABSTRACT) {
+            if (Tk.type == Tk.STATIC) isStat = true;
+            if (Tk.type == Tk.NATIVE) isNat = true;
+            if (Tk.type == Tk.ABSTRACT) isAbstract = true;
             Lexer.nextToken();
         }
 
         // Static init block
-        if (isStat && Token.type == Token.TOK_LBRACE) {
-            int mi = findMethod(ci, Compiler.N_CLINIT);
-            if (mi >= 0) emitMethodBody(mi);
-            else { Lexer.nextToken(); Catalog.skipBlock(); Lexer.expect(Token.TOK_RBRACE); }
+        if (isStat && Tk.type == Tk.LBRACE) {
+            int mi = fMeth(ci, C.N_CLINIT);
+            if (mi >= 0) eMBody(mi);
+            else { Lexer.nextToken(); Catalog.skipBlk(); Lexer.expect(Tk.RBRACE); }
             return;
         }
 
         // Constructor check
-        if (Token.type == Token.TOK_IDENT) {
-            int nm = Compiler.internBuf(Token.strBuf, Token.strLen);
-            if (nm == Compiler.className[ci]) {
+        if (Tk.type == Tk.IDENT) {
+            int nm = C.intern(Tk.strBuf, Tk.strLen);
+            if (nm == C.cName[ci]) {
                 Lexer.save();
                 Lexer.nextToken();
-                if (Token.type == Token.TOK_LPAREN) {
-                    int mi = findConstructor(ci);
-                    if (mi >= 0) emitMethodBody(mi);
-                    else skipMethodDecl();
+                if (Tk.type == Tk.LPAREN) {
+                    int mi = fCtor(ci);
+                    if (mi >= 0) eMBody(mi);
+                    else skipMDecl();
                     return;
                 }
                 Lexer.restore();
-                Token.strLen = Compiler.nameLen[nm];
-                Native.arraycopy(Compiler.namePool, Compiler.nameOff[nm], Token.strBuf, 0, Token.strLen);
-                Token.type = Token.TOK_IDENT;
+                Tk.strLen = C.nLen[nm];
+                Native.arraycopy(C.nPool, C.nOff[nm], Tk.strBuf, 0, Tk.strLen);
+                Tk.type = Tk.IDENT;
             }
         }
 
         // Return type
-        Catalog.skipType();
+        Catalog.skipTy();
 
         // Name
-        int nm = Compiler.internBuf(Token.strBuf, Token.strLen);
+        int nm = C.intern(Tk.strBuf, Tk.strLen);
         Lexer.nextToken();
 
-        if (Token.type == Token.TOK_LPAREN) {
+        if (Tk.type == Tk.LPAREN) {
             // Method
-            int mi = findMethod(ci, nm);
-            if (mi >= 0 && !Compiler.methodIsNative[mi] && Compiler.methodBodyStart[mi] >= 0) {
-                emitMethodBody(mi);
+            int mi = fMeth(ci, nm);
+            if (mi >= 0 && !C.mNative[mi] && C.mBodyS[mi] >= 0) {
+                eMBody(mi);
             } else {
-                skipMethodDecl();
+                skipMDecl();
             }
         } else {
             // Field - skip to semicolon
-            while (Token.type != Token.TOK_SEMI && Token.type != Token.TOK_EOF) {
+            while (Tk.type != Tk.SEMI && Tk.type != Tk.EOF) {
                 Lexer.nextToken();
             }
-            Lexer.expect(Token.TOK_SEMI);
+            Lexer.expect(Tk.SEMI);
         }
     }
 
-    static void skipMethodDecl() {
+    static void skipMDecl() {
         // Skip parameter list
-        Lexer.expect(Token.TOK_LPAREN);
-        while (Token.type != Token.TOK_RPAREN && Token.type != Token.TOK_EOF) {
+        Lexer.expect(Tk.LPAREN);
+        while (Tk.type != Tk.RPAREN && Tk.type != Tk.EOF) {
             Lexer.nextToken();
         }
-        Lexer.expect(Token.TOK_RPAREN);
-        if (Token.type == Token.TOK_SEMI) {
+        Lexer.expect(Tk.RPAREN);
+        if (Tk.type == Tk.SEMI) {
             Lexer.nextToken(); // native/abstract method
         } else {
-            Lexer.expect(Token.TOK_LBRACE);
-            Catalog.skipBlock();
-            Lexer.expect(Token.TOK_RBRACE);
+            Lexer.expect(Tk.LBRACE);
+            Catalog.skipBlk();
+            Lexer.expect(Tk.RBRACE);
         }
     }
 
-    static int findMethod(int ci, int nm) {
-        for (int mi = 0; mi < Compiler.methodCount; mi++) {
-            if (Compiler.methodClass[mi] == ci && Compiler.methodName[mi] == nm && !Compiler.methodIsNative[mi]) {
+    static int fMeth(int ci, int nm) {
+        for (int mi = 0; mi < C.mCount; mi++) {
+            if (C.mClass[mi] == ci && C.mName[mi] == nm && !C.mNative[mi]) {
                 return mi;
             }
         }
         return -1;
     }
 
-    static int findConstructor(int ci) {
-        for (int mi = 0; mi < Compiler.methodCount; mi++) {
-            if (Compiler.methodClass[mi] == ci && Compiler.methodIsConstructor[mi] && !Compiler.methodIsNative[mi]) {
+    static int fCtor(int ci) {
+        for (int mi = 0; mi < C.mCount; mi++) {
+            if (C.mClass[mi] == ci && C.mIsCtor[mi] && !C.mNative[mi]) {
                 return mi;
             }
         }
@@ -145,213 +146,213 @@ public class Emit {
     }
 
 
-    static void emitMethodBody(int mi) {
-        Compiler.curMethod = mi;
-        Compiler.curMethodIsStatic = Compiler.methodIsStatic[mi];
-        Compiler.mcodeLen = 0;
-        Compiler.patchCount = 0;
-        Compiler.labelCount = 0;
-        Compiler.localCount = 0;
-        Compiler.localNextSlot = 0;
-        Compiler.loopDepth = 0;
-        Compiler.stackDepth = 0;
-        Compiler.maxStack = 0;
+    static void eMBody(int mi) {
+        C.curMi = mi;
+        C.curMStatic = C.mStatic[mi];
+        C.mcLen = 0;
+        C.patC = 0;
+        C.lblCount = 0;
+        C.locCount = 0;
+        C.locNext = 0;
+        C.lpDepth = 0;
+        C.stkDepth = 0;
+        C.maxStk = 0;
 
         // Init per-method CP
-        Compiler.cpMethodCount = 0;
-        Compiler.cpMethodBase = Compiler.cpSize;
+        C.cpMCount = 0;
+        C.cpMBase = C.cpSz;
 
         // Set up parameters as locals
-        if (Compiler.methodIsConstructor[mi]) {
+        if (C.mIsCtor[mi]) {
             // Constructor: skip params in source, set up 'this'
-            addLocal(Compiler.N_INIT, 0); // 'this'
+            aLoc(C.N_INIT, 0); // 'this'
             // Skip to body
-            Lexer.expect(Token.TOK_LPAREN);
-            while (Token.type != Token.TOK_RPAREN) {
+            Lexer.expect(Tk.LPAREN);
+            while (Tk.type != Tk.RPAREN) {
                 // Type
-                int pType = parseTypeForLocal();
+                int pType = pTypeLoc();
                 // Name
-                int pNm = Compiler.internBuf(Token.strBuf, Token.strLen);
+                int pNm = C.intern(Tk.strBuf, Tk.strLen);
                 Lexer.nextToken();
-                addLocal(pNm, pType);
-                if (Token.type == Token.TOK_COMMA) Lexer.nextToken();
+                aLoc(pNm, pType);
+                if (Tk.type == Tk.COMMA) Lexer.nextToken();
             }
-            Lexer.expect(Token.TOK_RPAREN);
+            Lexer.expect(Tk.RPAREN);
 
             // Emit super() call
-            emitByte(0x2A); // ALOAD_0 (this)
-            pushStack();
-            int objInitMi = Compiler.ensureNative(Compiler.N_OBJECT, Compiler.N_INIT);
-            int cpIdx = allocCP(objInitMi);
-            emitByte(0xB7); // INVOKESPECIAL
-            emitShortBE(cpIdx);
-            popStack(); // 'this' consumed
+            eb(0x2A); // ALOAD_0 (this)
+            push();
+            int objInitMi = C.ensNat(C.N_OBJECT, C.N_INIT);
+            int cpIdx = aCP(objInitMi);
+            eb(0xB7); // INVOKESPECIAL
+            eSBE(cpIdx);
+            pop(); // 'this' consumed
 
             // Parse body
-            Lexer.expect(Token.TOK_LBRACE);
-            Stmt.parseBlock();
-            Lexer.expect(Token.TOK_RBRACE);
+            Lexer.expect(Tk.LBRACE);
+            Stmt.pBlock();
+            Lexer.expect(Tk.RBRACE);
 
             // Emit RETURN
-            emitByte(0xB1);
-        } else if (Compiler.methodName[mi] == Compiler.N_CLINIT) {
+            eb(0xB1);
+        } else if (C.mName[mi] == C.N_CLINIT) {
             // Save current lexer position (at '{' of static block)
             int clinitPos = Lexer.pos;
             int clinitLine = Lexer.line;
-            int clinitTok = Token.type;
+            int clinitTok = Tk.type;
             // Emit inline static field initializers first
-            for (int fi = 0; fi < Compiler.fieldCount; fi++) {
-                if (Compiler.fieldClass[fi] == Compiler.curClass && Compiler.fieldIsStatic[fi] && Compiler.fieldInitPos[fi] >= 0) {
-                    Lexer.pos = Compiler.fieldInitPos[fi];
-                    Lexer.line = Compiler.fieldInitLine[fi];
+            for (int fi = 0; fi < C.fCount; fi++) {
+                if (C.fClass[fi] == C.curCi && C.fStatic[fi] && C.fInitPos[fi] >= 0) {
+                    Lexer.pos = C.fInitPos[fi];
+                    Lexer.line = C.fInitLn[fi];
                     Lexer.nextToken();
-                    Expr.parseExpression();
-                    int sfSlot = Compiler.fieldSlot[fi];
-                    int cpIdx2 = allocCP(sfSlot);
-                    emitByte(0xB3); // PUTSTATIC
-                    emitShortBE(cpIdx2);
-                    popStack();
+                    Expr.pExpr();
+                    int sfSlot = C.fSlot[fi];
+                    int cpIdx2 = aCP(sfSlot);
+                    eb(0xB3); // PUTSTATIC
+                    eSBE(cpIdx2);
+                    pop();
                 }
             }
             // Restore lexer to static block body
             Lexer.pos = clinitPos;
             Lexer.line = clinitLine;
-            Token.type = clinitTok;
+            Tk.type = clinitTok;
             // Static initializer body: { ... }
             Lexer.nextToken(); // skip {
-            Stmt.parseBlock();
-            Lexer.expect(Token.TOK_RBRACE);
-            emitByte(0xB1); // RETURN
+            Stmt.pBlock();
+            Lexer.expect(Tk.RBRACE);
+            eb(0xB1); // RETURN
         } else {
             // Regular method
-            if (!Compiler.curMethodIsStatic) {
-                addLocal(Compiler.internStr("this"), 1); // 'this' is slot 0
+            if (!C.curMStatic) {
+                aLoc(C.iStr("this"), 1); // 'this' is slot 0
             }
 
             // Parse parameters
-            Lexer.expect(Token.TOK_LPAREN);
-            while (Token.type != Token.TOK_RPAREN && Token.type != Token.TOK_EOF) {
-                int pType = parseTypeForLocal();
-                int pNm = Compiler.internBuf(Token.strBuf, Token.strLen);
+            Lexer.expect(Tk.LPAREN);
+            while (Tk.type != Tk.RPAREN && Tk.type != Tk.EOF) {
+                int pType = pTypeLoc();
+                int pNm = C.intern(Tk.strBuf, Tk.strLen);
                 Lexer.nextToken();
-                addLocal(pNm, pType);
-                if (Token.type == Token.TOK_COMMA) Lexer.nextToken();
+                aLoc(pNm, pType);
+                if (Tk.type == Tk.COMMA) Lexer.nextToken();
             }
-            Lexer.expect(Token.TOK_RPAREN);
+            Lexer.expect(Tk.RPAREN);
 
             // Parse body
-            Lexer.expect(Token.TOK_LBRACE);
-            Stmt.parseBlock();
-            Lexer.expect(Token.TOK_RBRACE);
+            Lexer.expect(Tk.LBRACE);
+            Stmt.pBlock();
+            Lexer.expect(Tk.RBRACE);
 
             // If method doesn't end with return, add implicit return
-            if (Compiler.mcodeLen == 0 || (Compiler.mcode[Compiler.mcodeLen - 1] & 0xFF) != 0xB1 &&
-                (Compiler.mcode[Compiler.mcodeLen - 1] & 0xFF) != 0xAC && (Compiler.mcode[Compiler.mcodeLen - 1] & 0xFF) != 0xB0) {
-                emitByte(0xB1); // RETURN
+            if (C.mcLen == 0 || (C.mcode[C.mcLen - 1] & 0xFF) != 0xB1 &&
+                (C.mcode[C.mcLen - 1] & 0xFF) != 0xAC && (C.mcode[C.mcLen - 1] & 0xFF) != 0xB0) {
+                eb(0xB1); // RETURN
             }
         }
 
         // Resolve backpatches
-        for (int i = 0; i < Compiler.patchCount; i++) {
-            int loc = Compiler.patchLoc[i];
-            int lbl = Compiler.patchLabel[i];
-            int target = Compiler.labelAddr[lbl];
+        for (int i = 0; i < C.patC; i++) {
+            int loc = C.patLoc[i];
+            int lbl = C.patLbl[i];
+            int target = C.lblAddr[lbl];
             int offset = target - (loc - 1); // relative to branch opcode
-            Compiler.mcode[loc] = (byte) ((offset >> 8) & 0xFF);
-            Compiler.mcode[loc + 1] = (byte) (offset & 0xFF);
+            C.mcode[loc] = (byte) ((offset >> 8) & 0xFF);
+            C.mcode[loc + 1] = (byte) (offset & 0xFF);
         }
 
-        commitMethodCode(mi);
-        Compiler.methodMaxLocals[mi] = Compiler.localNextSlot > 0 ? Compiler.localNextSlot : 1;
-        Compiler.methodMaxStack[mi] = Compiler.maxStack > 0 ? Compiler.maxStack : 1;
+        commitMC(mi);
+        C.mMaxLoc[mi] = C.locNext > 0 ? C.locNext : 1;
+        C.mMaxStk[mi] = C.maxStk > 0 ? C.maxStk : 1;
     }
 
-    static void commitMethodCode(int mi) {
-        Compiler.methodCodeOff[mi] = Compiler.codeLen;
-        for (int i = 0; i < Compiler.mcodeLen; i++) {
-            Native.poke(Compiler.codeBase + Compiler.codeLen, Compiler.mcode[i] & 0xFF); Compiler.codeLen++;
+    static void commitMC(int mi) {
+        C.mCodeOff[mi] = C.cdLen;
+        for (int i = 0; i < C.mcLen; i++) {
+            Native.poke(C.cdBase + C.cdLen, C.mcode[i] & 0xFF); C.cdLen++;
         }
-        Compiler.methodCpBase[mi] = Compiler.cpMethodBase;
-        for (int i = 0; i < Compiler.cpMethodCount; i++) {
-            Compiler.cpEntries[Compiler.cpMethodBase + i] = (byte) Compiler.cpMethodVals[i];
+        C.mCpBase[mi] = C.cpMBase;
+        for (int i = 0; i < C.cpMCount; i++) {
+            C.cpEnt[C.cpMBase + i] = (byte) C.cpMVals[i];
         }
-        Compiler.cpSize = Compiler.cpMethodBase + Compiler.cpMethodCount;
+        C.cpSz = C.cpMBase + C.cpMCount;
     }
 
     static boolean autoCtorsEmitted;
 
-    static void emitAutoConstructors() {
+    static void eAutoCtors() {
         if (autoCtorsEmitted) return;
         autoCtorsEmitted = true;
 
-        for (int mi = 0; mi < Compiler.methodCount; mi++) {
-            if (Compiler.methodIsConstructor[mi] && !Compiler.methodIsNative[mi] && Compiler.methodBodyStart[mi] == -2) {
+        for (int mi = 0; mi < C.mCount; mi++) {
+            if (C.mIsCtor[mi] && !C.mNative[mi] && C.mBodyS[mi] == -2) {
                 // Auto-generated default constructor
-                Compiler.curMethod = mi;
-                Compiler.mcodeLen = 0;
-                Compiler.cpMethodCount = 0;
-                Compiler.cpMethodBase = Compiler.cpSize;
-                Compiler.patchCount = 0;
-                Compiler.labelCount = 0;
+                C.curMi = mi;
+                C.mcLen = 0;
+                C.cpMCount = 0;
+                C.cpMBase = C.cpSz;
+                C.patC = 0;
+                C.lblCount = 0;
 
                 // ALOAD_0, INVOKESPECIAL Object.<init>, RETURN
-                emitByte(0x2A); // ALOAD_0
-                int objInitMi = Compiler.ensureNative(Compiler.N_OBJECT, Compiler.N_INIT);
-                int cpIdx = allocCP(objInitMi);
-                emitByte(0xB7); // INVOKESPECIAL
-                emitShortBE(cpIdx);
-                emitByte(0xB1); // RETURN
+                eb(0x2A); // ALOAD_0
+                int objInitMi = C.ensNat(C.N_OBJECT, C.N_INIT);
+                int cpIdx = aCP(objInitMi);
+                eb(0xB7); // INVOKESPECIAL
+                eSBE(cpIdx);
+                eb(0xB1); // RETURN
 
-                commitMethodCode(mi);
-                Compiler.methodMaxLocals[mi] = 1;
-                Compiler.methodMaxStack[mi] = 1;
+                commitMC(mi);
+                C.mMaxLoc[mi] = 1;
+                C.mMaxStk[mi] = 1;
             }
             // Synthetic <clinit>: only field initializers, no explicit body
-            if (Compiler.methodName[mi] == Compiler.N_CLINIT && !Compiler.methodIsNative[mi] && Compiler.methodBodyStart[mi] == -2) {
-                Compiler.curMethod = mi;
-                Compiler.curClass = Compiler.methodClass[mi];
-                Compiler.curMethodIsStatic = true;
-                Compiler.mcodeLen = 0;
-                Compiler.cpMethodCount = 0;
-                Compiler.cpMethodBase = Compiler.cpSize;
-                Compiler.patchCount = 0;
-                Compiler.labelCount = 0;
-                Compiler.localCount = 0;
-                Compiler.stackDepth = 0;
-                Compiler.maxStack = 0;
+            if (C.mName[mi] == C.N_CLINIT && !C.mNative[mi] && C.mBodyS[mi] == -2) {
+                C.curMi = mi;
+                C.curCi = C.mClass[mi];
+                C.curMStatic = true;
+                C.mcLen = 0;
+                C.cpMCount = 0;
+                C.cpMBase = C.cpSz;
+                C.patC = 0;
+                C.lblCount = 0;
+                C.locCount = 0;
+                C.stkDepth = 0;
+                C.maxStk = 0;
 
                 // Emit field initializers
-                for (int fi = 0; fi < Compiler.fieldCount; fi++) {
-                    if (Compiler.fieldClass[fi] == Compiler.curClass && Compiler.fieldIsStatic[fi] && Compiler.fieldInitPos[fi] >= 0) {
-                        Lexer.pos = Compiler.fieldInitPos[fi];
-                        Lexer.line = Compiler.fieldInitLine[fi];
+                for (int fi = 0; fi < C.fCount; fi++) {
+                    if (C.fClass[fi] == C.curCi && C.fStatic[fi] && C.fInitPos[fi] >= 0) {
+                        Lexer.pos = C.fInitPos[fi];
+                        Lexer.line = C.fInitLn[fi];
                         Lexer.nextToken();
-                        Expr.parseExpression();
-                        int sfSlot = Compiler.fieldSlot[fi];
-                        int cpIdx2 = allocCP(sfSlot);
-                        emitByte(0xB3); // PUTSTATIC
-                        emitShortBE(cpIdx2);
-                        popStack();
+                        Expr.pExpr();
+                        int sfSlot = C.fSlot[fi];
+                        int cpIdx2 = aCP(sfSlot);
+                        eb(0xB3); // PUTSTATIC
+                        eSBE(cpIdx2);
+                        pop();
                     }
                 }
-                emitByte(0xB1); // RETURN
+                eb(0xB1); // RETURN
 
-                commitMethodCode(mi);
-                Compiler.methodMaxLocals[mi] = 1;
-                Compiler.methodMaxStack[mi] = Compiler.maxStack > 0 ? Compiler.maxStack : 1;
+                commitMC(mi);
+                C.mMaxLoc[mi] = 1;
+                C.mMaxStk[mi] = C.maxStk > 0 ? C.maxStk : 1;
             }
         }
     }
 
-    static int parseTypeForLocal() {
+    static int pTypeLoc() {
         // Returns: 0=int, 1=ref, 3=int[], 4=byte[], 5=char[]
         int baseType = 0;
         int elemKind = 0; // 0=int-like, 1=byte, 2=char
-        if (Token.type == Token.TOK_BYTE || Token.type == Token.TOK_BOOLEAN) {
+        if (Tk.type == Tk.BYTE || Tk.type == Tk.BOOLEAN) {
             elemKind = 1; Lexer.nextToken();
-        } else if (Token.type == Token.TOK_CHAR) {
+        } else if (Tk.type == Tk.CHAR) {
             elemKind = 2; Lexer.nextToken();
-        } else if (Token.type == Token.TOK_INT || Token.type == Token.TOK_SHORT) {
+        } else if (Tk.type == Tk.INT || Tk.type == Tk.SHORT) {
             elemKind = 0; Lexer.nextToken();
         } else {
             baseType = 1; // reference
@@ -359,9 +360,9 @@ public class Emit {
         }
         // Array dimensions
         int dimCount = 0;
-        while (Token.type == Token.TOK_LBRACKET) {
+        while (Tk.type == Tk.LBRACKET) {
             Lexer.nextToken();
-            if (Token.type == Token.TOK_RBRACKET) Lexer.nextToken();
+            if (Tk.type == Tk.RBRACKET) Lexer.nextToken();
             dimCount++;
         }
         if (dimCount > 0) {
@@ -374,172 +375,172 @@ public class Emit {
     }
 
 
-    static void emitByte(int b) {
-        Compiler.mcode[Compiler.mcodeLen++] = (byte)(b & 0xFF);
+    static void eb(int b) {
+        C.mcode[C.mcLen++] = (byte)(b & 0xFF);
     }
 
-    static void emitShortBE(int s) {
-        Compiler.mcode[Compiler.mcodeLen++] = (byte)((s >> 8) & 0xFF);
-        Compiler.mcode[Compiler.mcodeLen++] = (byte)(s & 0xFF);
+    static void eSBE(int s) {
+        C.mcode[C.mcLen++] = (byte)((s >> 8) & 0xFF);
+        C.mcode[C.mcLen++] = (byte)(s & 0xFF);
     }
 
-    static void emitIntBE(int v) {
-        Compiler.mcode[Compiler.mcodeLen++] = (byte)((v >> 24) & 0xFF);
-        Compiler.mcode[Compiler.mcodeLen++] = (byte)((v >> 16) & 0xFF);
-        Compiler.mcode[Compiler.mcodeLen++] = (byte)((v >> 8) & 0xFF);
-        Compiler.mcode[Compiler.mcodeLen++] = (byte)(v & 0xFF);
+    static void eIBE(int v) {
+        C.mcode[C.mcLen++] = (byte)((v >> 24) & 0xFF);
+        C.mcode[C.mcLen++] = (byte)((v >> 16) & 0xFF);
+        C.mcode[C.mcLen++] = (byte)((v >> 8) & 0xFF);
+        C.mcode[C.mcLen++] = (byte)(v & 0xFF);
     }
 
-    static int emitBranchPlaceholder() {
-        int loc = Compiler.mcodeLen;
-        emitByte(0);
-        emitByte(0);
+    static int eBrPH() {
+        int loc = C.mcLen;
+        eb(0);
+        eb(0);
         return loc;
     }
 
-    static int newLabel() {
-        return Compiler.labelCount++;
+    static int label() {
+        return C.lblCount++;
     }
 
-    static void setLabel(int lbl) {
-        Compiler.labelAddr[lbl] = Compiler.mcodeLen;
+    static void mark(int lbl) {
+        C.lblAddr[lbl] = C.mcLen;
     }
 
-    static void emitBranch(int opcode, int label) {
-        int branchPC = Compiler.mcodeLen;
-        emitByte(opcode);
-        int loc = emitBranchPlaceholder();
-        Compiler.patchLoc[Compiler.patchCount] = loc;
-        Compiler.patchLabel[Compiler.patchCount] = label;
-        Compiler.patchCount++;
+    static void eBr(int opcode, int label) {
+        int branchPC = C.mcLen;
+        eb(opcode);
+        int loc = eBrPH();
+        C.patLoc[C.patC] = loc;
+        C.patLbl[C.patC] = label;
+        C.patC++;
     }
 
-    static void pushStack() {
-        Compiler.stackDepth++;
-        if (Compiler.stackDepth > Compiler.maxStack) Compiler.maxStack = Compiler.stackDepth;
+    static void push() {
+        C.stkDepth++;
+        if (C.stkDepth > C.maxStk) C.maxStk = C.stkDepth;
     }
 
-    static void popStack() {
-        if (Compiler.stackDepth > 0) Compiler.stackDepth--;
+    static void pop() {
+        if (C.stkDepth > 0) C.stkDepth--;
     }
 
-    static void addLocal(int nm, int type) {
-        Compiler.localName[Compiler.localCount] = nm;
-        Compiler.localSlot[Compiler.localCount] = Compiler.localCount;
-        Compiler.localType[Compiler.localCount] = type;
-        Compiler.localCount++;
-        if (Compiler.localCount > Compiler.localNextSlot) Compiler.localNextSlot = Compiler.localCount;
+    static void aLoc(int nm, int type) {
+        C.locName[C.locCount] = nm;
+        C.locSlot[C.locCount] = C.locCount;
+        C.locType[C.locCount] = type;
+        C.locCount++;
+        if (C.locCount > C.locNext) C.locNext = C.locCount;
     }
 
-    static int findLocal(int nm) {
-        for (int i = Compiler.localCount - 1; i >= 0; i--) {
-            if (Compiler.localName[i] == nm) return i;
+    static int fLoc(int nm) {
+        for (int i = C.locCount - 1; i >= 0; i--) {
+            if (C.locName[i] == nm) return i;
         }
         return -1;
     }
 
-    static int allocCP(int resolvedVal) {
+    static int aCP(int resolvedVal) {
         // Check for existing entry with same value
-        for (int i = 0; i < Compiler.cpMethodCount; i++) {
-            if (Compiler.cpMethodVals[i] == resolvedVal && Compiler.cpMethodKeys[i] == resolvedVal) {
+        for (int i = 0; i < C.cpMCount; i++) {
+            if (C.cpMVals[i] == resolvedVal && C.cpMKeys[i] == resolvedVal) {
                 return i;
             }
         }
-        int idx = Compiler.cpMethodCount++;
-        Compiler.cpMethodVals[idx] = resolvedVal;
-        Compiler.cpMethodKeys[idx] = resolvedVal;
+        int idx = C.cpMCount++;
+        C.cpMVals[idx] = resolvedVal;
+        C.cpMKeys[idx] = resolvedVal;
         return idx;
     }
 
-    static int allocFieldCP(int fieldSlotVal) {
-        return allocCP(fieldSlotVal);
+    static int aFCP(int fieldSlotVal) {
+        return aCP(fieldSlotVal);
     }
 
-    static int allocClassCP(int classId) {
-        return allocCP(classId);
+    static int aCCP(int classId) {
+        return aCP(classId);
     }
 
-    static int allocStringCP(byte[] buf, int len) {
+    static int aSCP(byte[] buf, int len) {
         int strIdx = -1;
-        for (int i = 0; i < Compiler.strConstCount; i++) {
-            if (Compiler.strConstLen[i] == len && Native.memcmp(Compiler.strConsts[i], 0, buf, 0, len) == 0) {
+        for (int i = 0; i < C.strCC; i++) {
+            if (C.strCLen[i] == len && Native.memcmp(C.strC[i], 0, buf, 0, len) == 0) {
                 strIdx = i; break;
             }
         }
         if (strIdx < 0) {
-            strIdx = Compiler.strConstCount++;
-            Compiler.strConsts[strIdx] = new byte[len];
-            Native.arraycopy(buf, 0, Compiler.strConsts[strIdx], 0, len);
-            Compiler.strConstLen[strIdx] = len;
+            strIdx = C.strCC++;
+            C.strC[strIdx] = new byte[len];
+            Native.arraycopy(buf, 0, C.strC[strIdx], 0, len);
+            C.strCLen[strIdx] = len;
         }
-        return allocCP(0x80 | strIdx);
+        return aCP(0x80 | strIdx);
     }
 
-    static int allocIntConstCP(int val) {
+    static int aICP(int val) {
         // Find or add integer constant
         int idx = -1;
-        for (int i = 0; i < Compiler.intConstCount; i++) {
-            if (Compiler.intConsts[i] == val) { idx = i; break; }
+        for (int i = 0; i < C.intCC; i++) {
+            if (C.intC[i] == val) { idx = i; break; }
         }
         if (idx < 0) {
-            idx = Compiler.intConstCount++;
-            Compiler.intConsts[idx] = val;
+            idx = C.intCC++;
+            C.intC[idx] = val;
         }
-        return allocCP(idx);
+        return aCP(idx);
     }
 
 
-    static void emitIntConst(int val) {
+    static void eIC(int val) {
         if (val >= -1 && val <= 5) {
-            emitByte(0x03 + val); // ICONST_M1=0x02 .. ICONST_5=0x08
+            eb(0x03 + val); // ICONST_M1=0x02 .. ICONST_5=0x08
         } else if (val >= -128 && val <= 127) {
-            emitByte(0x10); // BIPUSH
-            emitByte(val & 0xFF);
+            eb(0x10); // BIPUSH
+            eb(val & 0xFF);
         } else if (val >= -32768 && val <= 32767) {
-            emitByte(0x11); // SIPUSH
-            emitShortBE(val);
+            eb(0x11); // SIPUSH
+            eSBE(val);
         } else {
             // LDC with integer constant
-            int cpIdx = allocIntConstCP(val);
-            emitByte(0x12); // LDC
-            emitByte(cpIdx);
+            int cpIdx = aICP(val);
+            eb(0x12); // LDC
+            eb(cpIdx);
         }
     }
 
-    static void emitLoad(int slot, int type) {
+    static void eLd(int slot, int type) {
         if (type != 0) {
             // Reference (type 1=ref, 3=int[], 4=byte[], 5=char[])
-            if (slot <= 3) emitByte(0x2A + slot); // ALOAD_0..3
-            else { emitByte(0x19); emitByte(slot); } // ALOAD
+            if (slot <= 3) eb(0x2A + slot); // ALOAD_0..3
+            else { eb(0x19); eb(slot); } // ALOAD
         } else {
             // Int
-            if (slot <= 3) emitByte(0x1A + slot); // ILOAD_0..3
-            else { emitByte(0x15); emitByte(slot); } // ILOAD
+            if (slot <= 3) eb(0x1A + slot); // ILOAD_0..3
+            else { eb(0x15); eb(slot); } // ILOAD
         }
     }
 
-    static void emitStore(int slot, int type) {
+    static void eSt(int slot, int type) {
         if (type != 0) {
             // Reference (type 1=ref, 3=int[], 4=byte[], 5=char[])
-            if (slot <= 3) emitByte(0x4B + slot); // ASTORE_0..3
-            else { emitByte(0x3A); emitByte(slot); } // ASTORE
+            if (slot <= 3) eb(0x4B + slot); // ASTORE_0..3
+            else { eb(0x3A); eb(slot); } // ASTORE
         } else {
-            if (slot <= 3) emitByte(0x3B + slot); // ISTORE_0..3
-            else { emitByte(0x36); emitByte(slot); } // ISTORE
+            if (slot <= 3) eb(0x3B + slot); // ISTORE_0..3
+            else { eb(0x36); eb(slot); } // ISTORE
         }
     }
 
-    static void emitCompoundOp(int tok) {
-        if (tok == Token.TOK_PLUS_EQ) emitByte(0x60); // IADD
-        else if (tok == Token.TOK_MINUS_EQ) emitByte(0x64); // ISUB
-        else if (tok == Token.TOK_STAR_EQ) emitByte(0x68); // IMUL
-        else if (tok == Token.TOK_SLASH_EQ) emitByte(0x6C); // IDIV
-        else if (tok == Token.TOK_PERCENT_EQ) emitByte(0x70); // IREM
-        else if (tok == Token.TOK_AMP_EQ) emitByte(0x7E); // IAND
-        else if (tok == Token.TOK_PIPE_EQ) emitByte(0x80); // IOR
-        else if (tok == Token.TOK_CARET_EQ) emitByte(0x82); // IXOR
-        else if (tok == Token.TOK_SHL_EQ) emitByte(0x78); // ISHL
-        else if (tok == Token.TOK_SHR_EQ) emitByte(0x7A); // ISHR
-        else if (tok == Token.TOK_USHR_EQ) emitByte(0x7C); // IUSHR
+    static void eCO(int tok) {
+        if (tok == Tk.PLUS_EQ) eb(0x60); // IADD
+        else if (tok == Tk.MINUS_EQ) eb(0x64); // ISUB
+        else if (tok == Tk.STAR_EQ) eb(0x68); // IMUL
+        else if (tok == Tk.SLASH_EQ) eb(0x6C); // IDIV
+        else if (tok == Tk.PERCENT_EQ) eb(0x70); // IREM
+        else if (tok == Tk.AMP_EQ) eb(0x7E); // IAND
+        else if (tok == Tk.PIPE_EQ) eb(0x80); // IOR
+        else if (tok == Tk.CARET_EQ) eb(0x82); // IXOR
+        else if (tok == Tk.SHL_EQ) eb(0x78); // ISHL
+        else if (tok == Tk.SHR_EQ) eb(0x7A); // ISHR
+        else if (tok == Tk.USHR_EQ) eb(0x7C); // IUSHR
     }
 }

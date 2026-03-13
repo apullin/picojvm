@@ -44,13 +44,13 @@ $(BUILDDIR)/classes: $(SRCS)
 # Step 2: Pack into .pjvm using pjvmpack
 $(BUILDDIR)/picojc.pjvm: $(BUILDDIR)/classes
 	$(PYTHON) $(PJVMPACK) \
-		$(BUILDDIR)/classes/Compiler.class \
-		$(BUILDDIR)/classes/Token.class \
+		$(BUILDDIR)/classes/C.class \
+		$(BUILDDIR)/classes/Tk.class \
 		$(BUILDDIR)/classes/Lexer.class \
 		$(BUILDDIR)/classes/Native.class \
 		$(BUILDDIR)/classes/Catalog.class \
 		$(BUILDDIR)/classes/Resolver.class \
-		$(BUILDDIR)/classes/Emit.class \
+		$(BUILDDIR)/classes/E.class \
 		$(BUILDDIR)/classes/Stmt.class \
 		$(BUILDDIR)/classes/Expr.class \
 		$(BUILDDIR)/classes/Linker.class \

@@ -10,7 +10,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define RAW_MEM_SIZE 65536u
+#define RAW_MEM_SIZE 262144u  /* 256KB — supports source files > 64K for self-hosting */
 #define HEAP_MEM_SIZE 524288u
 #define HEAP_BASE 1u
 
@@ -86,12 +86,13 @@ void pjvm_platform_putchar(uint8_t ch) {
     putchar((int)ch);
 }
 
-uint8_t pjvm_platform_peek8(uint16_t a) {
+uint8_t pjvm_platform_peek8(uint32_t a) {
+    if (a >= RAW_MEM_SIZE) return 0;
     return raw_mem[a];
 }
 
-void pjvm_platform_poke8(uint16_t a, uint8_t v) {
-    raw_mem[a] = v;
+void pjvm_platform_poke8(uint32_t a, uint8_t v) {
+    if (a < RAW_MEM_SIZE) raw_mem[a] = v;
 }
 
 void pjvm_platform_out(uint16_t port, uint16_t val) {
@@ -164,10 +165,12 @@ static void preload_raw(const char *spec) {
         exit(1);
     }
     fclose(f);
-    /* Store length at addr-2 as 16-bit LE */
-    if (addr >= 2) {
-        raw_mem[addr - 2] = (uint8_t)(len & 0xFF);
-        raw_mem[addr - 1] = (uint8_t)((len >> 8) & 0xFF);
+    /* Store length at addr-4 as 32-bit LE (supports source > 64K) */
+    if (addr >= 4) {
+        raw_mem[addr - 4] = (uint8_t)(len & 0xFF);
+        raw_mem[addr - 3] = (uint8_t)((len >> 8) & 0xFF);
+        raw_mem[addr - 2] = (uint8_t)((len >> 16) & 0xFF);
+        raw_mem[addr - 1] = (uint8_t)((len >> 24) & 0xFF);
     }
     fprintf(stderr, "PRELOAD | 0x%04lx: %zu bytes from %s\n", addr, len, path);
 }
@@ -249,6 +252,12 @@ int main(int argc, char **argv) {
         }
     }
 
+    const char *dump_raw_path = NULL;
+    for (int i = 2; i < argc; i++) {
+        if (strncmp(argv[i], "--dump-raw=", 11) == 0)
+            dump_raw_path = argv[i] + 11;
+    }
+
     load_pjvm(argv[1]);
 
     fprintf(stderr, "picoJVM | %s | %u methods, %u classes, %u bytes bytecode\n",
@@ -326,10 +335,13 @@ int main(int argc, char **argv) {
         if (colon) {
             unsigned long addr = strtoul(save_spec, NULL, 0);
             const char *spath = colon + 1;
-            /* Read length from addr-2 (16-bit LE) */
-            uint16_t len = 0;
-            if (addr >= 2)
-                len = (uint16_t)raw_mem[addr - 2] | ((uint16_t)raw_mem[addr - 1] << 8);
+            /* Read length from addr-4 (32-bit LE) */
+            uint32_t len = 0;
+            if (addr >= 4)
+                len = (uint32_t)raw_mem[addr - 4] |
+                      ((uint32_t)raw_mem[addr - 3] << 8) |
+                      ((uint32_t)raw_mem[addr - 2] << 16) |
+                      ((uint32_t)raw_mem[addr - 1] << 24);
             if (len > 0 && addr + len <= RAW_MEM_SIZE) {
                 FILE *sf = fopen(spath, "wb");
                 if (sf) {
@@ -339,6 +351,16 @@ int main(int argc, char **argv) {
                             addr, (unsigned)len, spath);
                 }
             }
+        }
+    }
+
+    if (dump_raw_path) {
+        FILE *df = fopen(dump_raw_path, "wb");
+        if (df) {
+            fwrite(raw_mem, 1, RAW_MEM_SIZE, df);
+            fclose(df);
+            fprintf(stderr, "DUMP | raw_mem (%u bytes) to %s\n",
+                    (unsigned)RAW_MEM_SIZE, dump_raw_path);
         }
     }
 

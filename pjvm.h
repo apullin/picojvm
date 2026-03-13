@@ -38,9 +38,9 @@
 typedef struct {
     uint32_t pc;
     uint16_t cb;
+    uint16_t lb;
+    uint16_t so;
     uint8_t  mi;
-    uint8_t  lb;
-    uint8_t  so;
 } PJVMFrame;
 
 #ifdef PJVM_PAGED
@@ -76,10 +76,12 @@ typedef struct {
     PJVMFrame frames[PJVM_MAX_FRAMES];
     uint32_t pc;
     uint16_t cur_cb;
-    uint8_t  sp, lt, cur_mi, cur_lb;
+    uint16_t sp, lt, cur_lb;
+    uint8_t  cur_mi;
     int8_t   fdepth;
     uint16_t heap_ptr;
-    uint8_t  sp_max, lt_max, fdepth_max;
+    uint16_t sp_max, lt_max;
+    uint8_t  fdepth_max;
 #ifdef PJVM_PAGED
     PJVMPager *pager;  /* NULL = non-paged */
 #endif
@@ -115,8 +117,8 @@ void     w8(uint16_t a, uint8_t v);
 uint16_t r16(uint16_t a);
 void     w16(uint16_t a, uint16_t v);
 void     pjvm_platform_putchar(uint8_t ch);
-uint8_t  pjvm_platform_peek8(uint16_t a);
-void     pjvm_platform_poke8(uint16_t a, uint8_t v);
+uint8_t  pjvm_platform_peek8(uint32_t a);
+void     pjvm_platform_poke8(uint32_t a, uint8_t v);
 void     pjvm_platform_trap(uint8_t op, uint16_t pc);
 void     pjvm_platform_out(uint16_t port, uint16_t val);
 

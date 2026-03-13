@@ -48,11 +48,11 @@ static void pjvm_platform_putchar(uint8_t ch) {
     OUTPUT_PORT = ch;
 }
 
-static uint8_t pjvm_platform_peek8(uint16_t a) {
-    return *(uint8_t *)(uintptr_t)a;
+static uint8_t pjvm_platform_peek8(uint32_t a) {
+    return *(uint8_t *)(uintptr_t)(uint16_t)a;
 }
 
-static void pjvm_platform_poke8(uint16_t a, uint8_t v) {
+static void pjvm_platform_poke8(uint32_t a, uint8_t v) {
     *(uint8_t *)(uintptr_t)a = v;
 }
 

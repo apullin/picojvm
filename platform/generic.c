@@ -65,11 +65,11 @@ void pjvm_platform_putchar(uint8_t ch) {
     if (pjvm_putchar_fn) pjvm_putchar_fn(ch);
 }
 
-uint8_t pjvm_platform_peek8(uint16_t a) {
-    return heap_mem[a];
+uint8_t pjvm_platform_peek8(uint32_t a) {
+    return heap_mem[(uint16_t)a];
 }
 
-void pjvm_platform_poke8(uint16_t a, uint8_t v) {
+void pjvm_platform_poke8(uint32_t a, uint8_t v) {
     heap_mem[a] = v;
 }
 

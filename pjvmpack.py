@@ -44,6 +44,10 @@ NATIVE_IDS = {
     "poke": 4,
     "halt": 5,
     "print": 11,
+    "arraycopy": 13,
+    "memcmp": 14,
+    "writeBytes": 15,
+    "stringFromBytes": 16,
 }
 NATIVE_OBJECT_INIT = 6
 

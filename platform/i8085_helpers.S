@@ -8,20 +8,22 @@
  * Offsets below assume sim-build CAP values:
  *   STACK=64, LOCALS=128, STATIC=32, FRAMES=16
  *
- * PJVMCtx field offsets (i8085, PJVMFrame=9 bytes):
+ * PJVMCtx field offsets (i8085, PJVMFrame=11 bytes):
  *   stk_lo   =    0   (64 × 2 = 128 bytes)
  *   stk_hi   =  128   (64 × 2 = 128 bytes)
  *   loc_lo   =  256   (128 × 2 = 256 bytes)
  *   loc_hi   =  512   (128 × 2 = 256 bytes)
- *   frames   =  896   (16 × 9 = 144 bytes)
- *   pc       = 1040   (uint32_t; ASM reads low 16 bits only)
- *   cur_cb   = 1044
- *   sp       = 1046
- *   lt       = 1047
- *   cur_mi   = 1048
- *   cur_lb   = 1049
- *   fdepth   = 1050
- *   heap_ptr = 1051
+ *   sf_lo    =  768   (32 × 2 = 64 bytes)
+ *   sf_hi    =  832   (32 × 2 = 64 bytes)
+ *   frames   =  896   (16 × 11 = 176 bytes)
+ *   pc       = 1072   (uint32_t; ASM reads low 16 bits only)
+ *   cur_cb   = 1076   (uint16_t)
+ *   sp       = 1078   (uint16_t; ASM reads low byte only, max 64)
+ *   lt       = 1080   (uint16_t)
+ *   cur_lb   = 1082   (uint16_t; ASM reads low byte only, max 128)
+ *   cur_mi   = 1084   (uint8_t)
+ *   fdepth   = 1085   (int8_t)
+ *   heap_ptr = 1086   (uint16_t)
  */
 
     .text
@@ -30,10 +32,10 @@
 .set OFF_STK_HI,  128
 .set OFF_LOC_LO,  256
 .set OFF_LOC_HI,  512
-.set OFF_PC,      1040
-.set OFF_CUR_CB,  1044
-.set OFF_SP,      1046
-.set OFF_CUR_LB,  1049
+.set OFF_PC,      1072
+.set OFF_CUR_CB,  1076
+.set OFF_SP,      1078
+.set OFF_CUR_LB,  1082
 
 /* ====================================================================== */
 /*  _spush_bcde — internal entry: push BC=lo, DE=hi onto operand stack    */
@@ -331,3 +333,264 @@ lstore:
     INX H
     MOV M, D                        ; loc_hi[i] = stk_hi[sp]
     RET
+
+/* ====================================================================== */
+/*  Native handler ASM implementations                                    */
+/*                                                                        */
+/*  Each pops its own JVM operand-stack args via spop_lo (skipping the    */
+/*  spop_hi calls since the hi halves are unused for these int args).     */
+/*  On the sim platform, r8/w8 are direct memory access — so inner loops  */
+/*  use LDAX/MOV M,A instead of calling r8/w8.                            */
+/* ====================================================================== */
+
+/* ====================================================================== */
+/*  pjvm_native_arraycopy(void)                                           */
+/*  JVM args: src(ref), srcOff(int), dst(ref), dstOff(int), len(int)      */
+/*  Pops in reverse: len, dstOff, dst, srcOff, src                        */
+/* ====================================================================== */
+    .globl  pjvm_native_arraycopy
+    .type   pjvm_native_arraycopy, @function
+pjvm_native_arraycopy:
+    CALL spop_lo                    ; BC = len
+    PUSH B
+    CALL spop_lo                    ; BC = dstOff
+    PUSH B
+    CALL spop_lo                    ; BC = dst
+    PUSH B
+    CALL spop_lo                    ; BC = srcOff
+    PUSH B
+    CALL spop_lo                    ; BC = src
+
+    /* src_addr = src + 4 + srcOff */
+    POP D                           ; DE = srcOff
+    MOV H, B
+    MOV L, C                        ; HL = src
+    DAD D
+    LXI D, 4
+    DAD D                           ; HL = src + srcOff + 4
+    XCHG                            ; DE = src_addr
+
+    /* dst_addr = dst + 4 + dstOff */
+    POP H                           ; HL = dst
+    POP B                           ; BC = dstOff
+    DAD B
+    LXI B, 4
+    DAD B                           ; HL = dst + dstOff + 4
+    /* HL = dst_addr, DE = src_addr */
+
+    POP B                           ; BC = len
+    MOV A, B
+    ORA C
+    RZ                              ; len == 0 → done
+.Lac_loop:
+    LDAX D                          ; A = *src
+    MOV M, A                        ; *dst = A
+    INX H
+    INX D
+    DCX B
+    MOV A, B
+    ORA C
+    JNZ .Lac_loop
+    RET
+
+/* ====================================================================== */
+/*  pjvm_native_memcmp(void)                                              */
+/*  JVM args: aref, aOff(int), bref, bOff(int), len(int)                 */
+/*  Pops in reverse: len, bOff, bref, aOff, aref                         */
+/*  Pushes int32_t result (sign of first difference) via _spush_bcde.     */
+/* ====================================================================== */
+    .globl  pjvm_native_memcmp
+    .type   pjvm_native_memcmp, @function
+pjvm_native_memcmp:
+    CALL spop_lo                    ; BC = len
+    PUSH B
+    CALL spop_lo                    ; BC = bOff
+    PUSH B
+    CALL spop_lo                    ; BC = bref
+    PUSH B
+    CALL spop_lo                    ; BC = aOff
+    PUSH B
+    CALL spop_lo                    ; BC = aref
+
+    /* a_addr = aref + aOff + 4 */
+    POP D                           ; DE = aOff
+    MOV H, B
+    MOV L, C                        ; HL = aref
+    DAD D
+    LXI D, 4
+    DAD D                           ; HL = a_addr
+    XCHG                            ; DE = a_addr
+
+    /* b_addr = bref + bOff + 4 */
+    POP H                           ; HL = bref
+    POP B                           ; BC = bOff
+    DAD B
+    LXI B, 4
+    DAD B                           ; HL = b_addr
+
+    POP B                           ; BC = len
+    /* DE = a_addr, HL = b_addr, BC = len */
+    MOV A, B
+    ORA C
+    JZ .Lmc_equal                   ; len == 0 → equal
+
+    /* Push len onto HW stack — loop needs BC for temp */
+    PUSH B
+.Lmc_loop:
+    LDAX D                          ; A = *a_ptr
+    CMP M                           ; compare with *b_ptr
+    JNZ .Lmc_diff
+    INX D
+    INX H
+    /* Decrement counter */
+    POP B
+    DCX B
+    MOV A, B
+    ORA C
+    PUSH B
+    JNZ .Lmc_loop
+    POP B                           ; clean counter
+.Lmc_equal:
+    /* result = 0 → spush(0, 0) */
+    LXI B, 0
+    LXI D, 0
+    JMP _spush_bcde
+.Lmc_diff:
+    /* A = av (CMP doesn't modify A on 8085), M = bv */
+    POP B                           ; clean counter
+    SUB M                           ; A = av - bv (signed 8-bit)
+    MOV C, A
+    MVI B, 0
+    JNC .Lmc_pos                    ; if av >= bv, no sign extend
+    MVI B, 0xFF                     ; sign extend negative
+.Lmc_pos:
+    /* BC = (int16_t)(av - bv), DE = sign extend */
+    MOV D, B
+    MOV E, B
+    JMP _spush_bcde
+
+/* ====================================================================== */
+/*  pjvm_native_write_bytes(void)                                         */
+/*  JVM args: ref, off(int), len(int)                                     */
+/*  Pops in reverse: len, off, ref                                        */
+/* ====================================================================== */
+    .globl  pjvm_native_write_bytes
+    .type   pjvm_native_write_bytes, @function
+pjvm_native_write_bytes:
+    CALL spop_lo                    ; BC = len
+    PUSH B
+    CALL spop_lo                    ; BC = off
+    PUSH B
+    CALL spop_lo                    ; BC = ref
+
+    /* addr = ref + off + 4 */
+    POP D                           ; DE = off
+    MOV H, B
+    MOV L, C                        ; HL = ref
+    DAD D
+    LXI D, 4
+    DAD D                           ; HL = addr
+    POP B                           ; BC = len
+
+    MOV A, B
+    ORA C
+    RZ                              ; len == 0 → done
+.Lwb_loop:
+    MOV A, M                        ; A = *ptr
+    INX H                           ; advance ptr
+    PUSH H                          ; save ptr
+    PUSH B                          ; save count
+    /* pjvm_platform_putchar(A) — arg at [SP+2] */
+    MVI H, 0
+    MOV L, A
+    PUSH H                          ; push arg
+    CALL pjvm_platform_putchar
+    POP H                           ; clean arg
+    POP B                           ; restore count
+    POP H                           ; restore ptr
+    DCX B
+    MOV A, B
+    ORA C
+    JNZ .Lwb_loop
+    RET
+
+/* ====================================================================== */
+/*  pjvm_native_string_from_bytes(void)                                   */
+/*  JVM args: src(ref), off(int), len(int)                                */
+/*  Pops in reverse: len, off, src                                        */
+/*  Allocates String object (4-byte header + data), pushes ref.           */
+/* ====================================================================== */
+    .globl  pjvm_native_string_from_bytes
+    .type   pjvm_native_string_from_bytes, @function
+pjvm_native_string_from_bytes:
+    CALL spop_lo                    ; BC = len
+    PUSH B
+    CALL spop_lo                    ; BC = off
+    PUSH B
+    CALL spop_lo                    ; BC = src
+
+    /* src_addr = src + off + 4 */
+    POP D                           ; DE = off
+    MOV H, B
+    MOV L, C                        ; HL = src
+    DAD D
+    LXI D, 4
+    DAD D                           ; HL = src_addr
+    POP B                           ; BC = len
+
+    PUSH B                          ; save len
+    PUSH H                          ; save src_addr
+
+    /* heap_alloc(g_pjvm, len + 4) */
+    MOV H, B
+    MOV L, C
+    LXI D, 4
+    DAD D                           ; HL = len + 4
+    PUSH H                          ; arg: size
+    LHLD g_pjvm
+    PUSH H                          ; arg: j
+    CALL heap_alloc                 ; BC = a (allocated address)
+    POP H                           ; clean j
+    POP H                           ; clean size
+
+    POP D                           ; DE = src_addr
+    POP H                           ; HL = len
+
+    /* Write header: len at a[0..1], 0 at a[2..3] */
+    PUSH B                          ; save a
+    PUSH D                          ; save src_addr
+    PUSH H                          ; save len (need it for header + loop)
+
+    MOV H, B
+    MOV L, C                        ; HL = a
+    POP D                           ; DE = len
+    PUSH D                          ; re-save len
+    MOV M, E                        ; a[0] = len_lo
+    INX H
+    MOV M, D                        ; a[1] = len_hi
+    INX H
+    MVI M, 0                        ; a[2] = 0
+    INX H
+    MVI M, 0                        ; a[3] = 0
+    INX H                           ; HL = a + 4 = dst
+
+    /* Copy loop: DE=src_addr → HL=dst, BC=len */
+    POP B                           ; BC = len
+    POP D                           ; DE = src_addr
+    MOV A, B
+    ORA C
+    JZ .Lsfb_done
+.Lsfb_loop:
+    LDAX D                          ; A = *src
+    MOV M, A                        ; *dst = A
+    INX H
+    INX D
+    DCX B
+    MOV A, B
+    ORA C
+    JNZ .Lsfb_loop
+.Lsfb_done:
+    /* spush(a, 0) */
+    POP B                           ; BC = a
+    LXI D, 0                        ; DE = 0 (hi)
+    JMP _spush_bcde

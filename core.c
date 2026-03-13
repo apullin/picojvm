@@ -5,6 +5,10 @@
  * are provided by the platform .c file linked alongside this.
  */
 #include "pjvm.h"
+#ifdef PJVM_BOUNDS_CHECK
+#include <stdio.h>
+#include <stdlib.h>
+#endif
 
 #define NI __attribute__((noinline))
 
@@ -63,6 +67,10 @@ enum {
     NATIVE_STR_EQUALS = 9, NATIVE_STR_TOSTRING = 10,
     NATIVE_PRINT = 11,
     NATIVE_STR_HASHCODE = 12,
+    NATIVE_ARRAYCOPY = 13,
+    NATIVE_MEMCMP = 14,
+    NATIVE_WRITE_BYTES = 15,
+    NATIVE_STRING_FROM_BYTES = 16,
 };
 
 /* --- globals (extern-declared in pjvm.h) ------------------------------ */
@@ -183,6 +191,11 @@ extern void     lstore(uint8_t slot);
 extern uint8_t  bcread(void);
 extern int16_t  bread(void);
 extern uint8_t  cpread(void);
+/* Native handler ASM implementations */
+extern void     pjvm_native_arraycopy(void);
+extern void     pjvm_native_memcmp(void);
+extern void     pjvm_native_write_bytes(void);
+extern void     pjvm_native_string_from_bytes(void);
 #else
 NI static void spush(uint16_t lo, uint16_t hi) {
     g_pjvm->stk_lo[g_pjvm->sp] = lo;
@@ -201,12 +214,12 @@ NI static uint16_t spop_hi(void) {
 }
 
 NI static void lload(uint8_t slot) {
-    uint8_t i = g_pjvm->cur_lb + slot;
+    uint16_t i = g_pjvm->cur_lb + slot;
     spush(g_pjvm->loc_lo[i], g_pjvm->loc_hi[i]);
 }
 
 NI static void lstore(uint8_t slot) {
-    uint8_t i = g_pjvm->cur_lb + slot;
+    uint16_t i = g_pjvm->cur_lb + slot;
     g_pjvm->sp--;
     g_pjvm->loc_lo[i] = g_pjvm->stk_lo[g_pjvm->sp];
     g_pjvm->loc_hi[i] = g_pjvm->stk_hi[g_pjvm->sp];
@@ -308,7 +321,7 @@ void pjvm_parse(uint8_t *data) {
 static void pjvm_exec(void);
 
 static void pjvm_inv(uint8_t mi) {
-    uint16_t alo, blo;
+    uint16_t alo, ahi, blo;
 
     if (m_fl[mi] & 1) {
         uint8_t nid = m_fl[mi] >> 1;
@@ -328,13 +341,13 @@ static void pjvm_inv(uint8_t mi) {
             break;
         }
         case NATIVE_PEEK:
-            alo = spop_lo();
-            spush(pjvm_platform_peek8(alo), 0);
+            alo = spop_lo(); ahi = spop_hi();
+            spush(pjvm_platform_peek8((uint32_t)alo | ((uint32_t)ahi << 16)), 0);
             break;
         case NATIVE_POKE:
             blo = spop_lo();
-            alo = spop_lo();
-            pjvm_platform_poke8(alo, (uint8_t)blo);
+            alo = spop_lo(); ahi = spop_hi();
+            pjvm_platform_poke8((uint32_t)alo | ((uint32_t)ahi << 16), (uint8_t)blo);
             break;
         case NATIVE_HALT:
             g_pjvm->fdepth = 0; g_pjvm->pc = PJVM_PC_HALT;
@@ -381,6 +394,76 @@ static void pjvm_inv(uint8_t mi) {
             pjvm_push32((int32_t)h);
             break;
         }
+        case NATIVE_ARRAYCOPY:
+#ifdef PJVM_ASM_HELPERS
+            pjvm_native_arraycopy();
+#else
+        {
+            /* arraycopy(byte[] src, int srcOff, byte[] dst, int dstOff, int len)
+             * Copies forward only — src and dst must not overlap with dst > src. */
+            uint16_t len    = spop_lo(); spop_hi();
+            uint16_t dstOff = spop_lo(); spop_hi();
+            uint16_t dst    = spop_lo();
+            uint16_t srcOff = spop_lo(); spop_hi();
+            uint16_t src    = spop_lo();
+            for (uint16_t i = 0; i < len; i++)
+                w8(dst + 4 + dstOff + i, r8(src + 4 + srcOff + i));
+        }
+#endif
+            break;
+        case NATIVE_MEMCMP:
+#ifdef PJVM_ASM_HELPERS
+            pjvm_native_memcmp();
+#else
+        {
+            /* memcmp(byte[] a, int aOff, byte[] b, int bOff, int len)
+             * Returns <0, 0, or >0 (signed difference of first mismatch). */
+            uint16_t len  = spop_lo(); spop_hi();
+            uint16_t bOff = spop_lo(); spop_hi();
+            uint16_t bref = spop_lo();
+            uint16_t aOff = spop_lo(); spop_hi();
+            uint16_t aref = spop_lo();
+            int32_t result = 0;
+            for (uint16_t i = 0; i < len; i++) {
+                uint8_t av = r8(aref + 4 + aOff + i);
+                uint8_t bv = r8(bref + 4 + bOff + i);
+                if (av != bv) { result = (int32_t)av - (int32_t)bv; break; }
+            }
+            pjvm_push32(result);
+        }
+#endif
+            break;
+        case NATIVE_WRITE_BYTES:
+#ifdef PJVM_ASM_HELPERS
+            pjvm_native_write_bytes();
+#else
+        {
+            /* writeBytes(byte[] buf, int off, int len) */
+            uint16_t len = spop_lo(); spop_hi();
+            uint16_t off = spop_lo(); spop_hi();
+            uint16_t ref = spop_lo();
+            for (uint16_t i = 0; i < len; i++)
+                pjvm_platform_putchar(r8(ref + 4 + off + i));
+        }
+#endif
+            break;
+        case NATIVE_STRING_FROM_BYTES:
+#ifdef PJVM_ASM_HELPERS
+            pjvm_native_string_from_bytes();
+#else
+        {
+            /* new String(byte[] src, int off, int len) → String ref */
+            uint16_t len = spop_lo(); spop_hi();
+            uint16_t off = spop_lo(); spop_hi();
+            uint16_t src = spop_lo();
+            uint16_t a = heap_alloc(g_pjvm, (uint16_t)(4 + len));
+            w16(a, len); w16((uint16_t)(a + 2), 0);
+            for (uint16_t i = 0; i < len; i++)
+                w8(a + 4 + i, r8(src + 4 + off + i));
+            spush(a, 0);
+        }
+#endif
+            break;
         default:
             pjvm_platform_trap(0xFF, g_pjvm->pc);
             break;
@@ -390,11 +473,11 @@ static void pjvm_inv(uint8_t mi) {
 
     PJVMFrame *f = &g_pjvm->frames[g_pjvm->fdepth];
     f->pc = g_pjvm->pc; f->mi = g_pjvm->cur_mi; f->lb = g_pjvm->cur_lb;
-    f->so = (uint8_t)(g_pjvm->sp - m_ac[mi]); f->cb = g_pjvm->cur_cb;
+    f->so = (uint16_t)(g_pjvm->sp - m_ac[mi]); f->cb = g_pjvm->cur_cb;
     g_pjvm->fdepth++;
     if (g_pjvm->fdepth > g_pjvm->fdepth_max) g_pjvm->fdepth_max = (uint8_t)g_pjvm->fdepth;
 
-    uint8_t nb = g_pjvm->lt;
+    uint16_t nb = g_pjvm->lt;
     g_pjvm->lt += m_ml[mi];
     if (g_pjvm->lt > g_pjvm->lt_max) g_pjvm->lt_max = g_pjvm->lt;
     for (int8_t i = m_ac[mi] - 1; i >= 0; i--) {
@@ -644,6 +727,15 @@ static void pjvm_exec(void) {
             alo = spop_lo(); ahi = spop_hi();
             blo = spop_lo();
             uint16_t aref = spop_lo();
+            #ifdef PJVM_BOUNDS_CHECK
+            { uint16_t alen = r16(aref);
+              if (blo >= alen) {
+                fprintf(stderr, "BOUNDS | IASTORE oob: aref=%u index=%u len=%u mi=%u pc=%u\n",
+                        (unsigned)aref, (unsigned)blo, (unsigned)alen,
+                        (unsigned)g_pjvm->cur_mi, (unsigned)g_pjvm->pc);
+              }
+            }
+            #endif
             uint16_t addr = aref + 4 + blo * 4;
             w16(addr, alo); w16((uint16_t)(addr + 2), ahi);
             break;
@@ -652,6 +744,15 @@ static void pjvm_exec(void) {
             alo = spop_lo(); spop_hi();
             blo = spop_lo();
             uint16_t aref = spop_lo();
+            #ifdef PJVM_BOUNDS_CHECK
+            { uint16_t alen = r16(aref);
+              if (blo >= alen) {
+                fprintf(stderr, "BOUNDS | BASTORE oob: aref=%u index=%u len=%u mi=%u pc=%u\n",
+                        (unsigned)aref, (unsigned)blo, (unsigned)alen,
+                        (unsigned)g_pjvm->cur_mi, (unsigned)g_pjvm->pc);
+              }
+            }
+            #endif
             w8(aref + 4 + blo, (uint8_t)alo);
             break;
         }
@@ -666,12 +767,12 @@ static void pjvm_exec(void) {
         case OP_POP: g_pjvm->sp--; break;
         case OP_POP2: g_pjvm->sp -= 2; break;
         case OP_DUP: {
-            uint8_t t = g_pjvm->sp - 1;
+            uint16_t t = g_pjvm->sp - 1;
             spush(g_pjvm->stk_lo[t], g_pjvm->stk_hi[t]);
             break;
         }
         case OP_DUP_X1: {
-            uint8_t s1 = g_pjvm->sp - 1, s2 = g_pjvm->sp - 2;
+            uint16_t s1 = g_pjvm->sp - 1, s2 = g_pjvm->sp - 2;
             uint16_t v1l = g_pjvm->stk_lo[s1], v1h = g_pjvm->stk_hi[s1];
             g_pjvm->stk_lo[s1] = g_pjvm->stk_lo[s2]; g_pjvm->stk_hi[s1] = g_pjvm->stk_hi[s2];
             g_pjvm->stk_lo[s2] = v1l; g_pjvm->stk_hi[s2] = v1h;
@@ -679,7 +780,7 @@ static void pjvm_exec(void) {
             break;
         }
         case OP_DUP_X2: {
-            uint8_t s1 = g_pjvm->sp - 1, s2 = g_pjvm->sp - 2, s3 = g_pjvm->sp - 3;
+            uint16_t s1 = g_pjvm->sp - 1, s2 = g_pjvm->sp - 2, s3 = g_pjvm->sp - 3;
             uint16_t v1l = g_pjvm->stk_lo[s1], v1h = g_pjvm->stk_hi[s1];
             g_pjvm->stk_lo[s1] = g_pjvm->stk_lo[s2]; g_pjvm->stk_hi[s1] = g_pjvm->stk_hi[s2];
             g_pjvm->stk_lo[s2] = g_pjvm->stk_lo[s3]; g_pjvm->stk_hi[s2] = g_pjvm->stk_hi[s3];
@@ -688,13 +789,13 @@ static void pjvm_exec(void) {
             break;
         }
         case OP_DUP2: {
-            uint8_t s1 = g_pjvm->sp - 1, s2 = g_pjvm->sp - 2;
+            uint16_t s1 = g_pjvm->sp - 1, s2 = g_pjvm->sp - 2;
             spush(g_pjvm->stk_lo[s2], g_pjvm->stk_hi[s2]);
             spush(g_pjvm->stk_lo[s1], g_pjvm->stk_hi[s1]);
             break;
         }
         case OP_SWAP: {
-            uint8_t t = g_pjvm->sp - 1, u = g_pjvm->sp - 2;
+            uint16_t t = g_pjvm->sp - 1, u = g_pjvm->sp - 2;
             alo = g_pjvm->stk_lo[t]; ahi = g_pjvm->stk_hi[t];
             g_pjvm->stk_lo[t] = g_pjvm->stk_lo[u]; g_pjvm->stk_hi[t] = g_pjvm->stk_hi[u];
             g_pjvm->stk_lo[u] = alo; g_pjvm->stk_hi[u] = ahi;
@@ -737,7 +838,7 @@ static void pjvm_exec(void) {
         case OP_IINC: {
             uint8_t idx = bcread();
             int8_t v = (int8_t)bcread();
-            uint8_t i = g_pjvm->cur_lb + idx;
+            uint16_t i = g_pjvm->cur_lb + idx;
             uint16_t old = g_pjvm->loc_lo[i];
             uint16_t inc = (uint16_t)(int16_t)v;
             uint16_t nlo = old + inc;
@@ -942,6 +1043,13 @@ static void pjvm_exec(void) {
         case OP_PUTSTATIC: {
             uint8_t s = cpread();
             alo = spop_lo(); ahi = spop_hi();
+#ifdef PJVM_TRACE_STATIC
+            if (s == PJVM_TRACE_STATIC) {
+                fprintf(stderr, "PUTSTATIC sf[%u] = %u (hi=%u) mi=%u pc=%u\n",
+                    (unsigned)s, (unsigned)alo, (unsigned)ahi,
+                    (unsigned)g_pjvm->cur_mi, (unsigned)g_pjvm->pc);
+            }
+#endif
             g_pjvm->sf_lo[s] = alo; g_pjvm->sf_hi[s] = ahi; break;
         }
 

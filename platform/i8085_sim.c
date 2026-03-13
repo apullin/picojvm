@@ -8,8 +8,9 @@
 
 #include <stdint.h>
 
-/* Output buffer: putchar writes sequentially starting at 0x0200 */
-static uint16_t output_ptr = 0x0200;
+/* Output buffer: putchar writes sequentially into free RAM above BSS.
+ * BSS ends at ~0x0AE8, stack is near 0x7FB0. 0x7000 is safely between. */
+static uint16_t output_ptr = 0x7000;
 
 /* Embedded .pjvm program data (provided by pjvm_data.c) */
 extern const uint8_t pjvm_program[];
@@ -56,12 +57,17 @@ void pjvm_platform_putchar(uint8_t ch) {
     output_ptr++;
 }
 
-uint8_t pjvm_platform_peek8(uint16_t a) {
-    return *(uint8_t *)(uintptr_t)a;
+uint8_t pjvm_platform_peek8(uint32_t a) {
+    return *(uint8_t *)(uintptr_t)(uint16_t)a;
 }
 
-void pjvm_platform_poke8(uint16_t a, uint8_t v) {
+void pjvm_platform_poke8(uint32_t a, uint8_t v) {
     *(uint8_t *)(uintptr_t)a = v;
+}
+
+void pjvm_platform_out(uint16_t port, uint16_t val) {
+    (void)port;
+    (void)val;
 }
 
 void pjvm_platform_trap(uint8_t op, uint16_t pc) {

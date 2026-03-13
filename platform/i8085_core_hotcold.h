@@ -128,8 +128,8 @@ static uint16_t heap_alloc(PJVMCtx *j, uint16_t size);
 static uint16_t r16(uint16_t a);
 static void w16(uint16_t a, uint16_t v);
 static void pjvm_platform_putchar(uint8_t ch);
-static uint8_t pjvm_platform_peek8(uint16_t a);
-static void pjvm_platform_poke8(uint16_t a, uint8_t v);
+static uint8_t pjvm_platform_peek8(uint32_t a);
+static void pjvm_platform_poke8(uint32_t a, uint8_t v);
 static void pjvm_platform_trap(uint8_t op, uint16_t pc);
 
 #ifdef PJVM_TRACK_STATS
@@ -267,7 +267,7 @@ static void pjvm_inv(PJVMCtx *j, uint8_t mi) {
         case NATIVE_POKE:
             pjvm_pop_b(j, &blo, &bhi);
             pjvm_pop_a(j, &alo, &ahi);
-            pjvm_platform_poke8(alo, (uint8_t)blo);
+            pjvm_platform_poke8((uint32_t)alo | ((uint32_t)ahi << 16), (uint8_t)blo);
             break;
         case NATIVE_HALT:
             hot->fdepth = 0;

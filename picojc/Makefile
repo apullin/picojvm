@@ -13,7 +13,9 @@ TESTDIR = tests
 EXPDIR  = expected
 
 # All compiler source files
-SRCS = $(SRCDIR)/Compiler.java $(SRCDIR)/Token.java $(SRCDIR)/Lexer.java $(SRCDIR)/Native.java
+SRCS = $(SRCDIR)/Compiler.java $(SRCDIR)/Token.java $(SRCDIR)/Lexer.java $(SRCDIR)/Native.java \
+       $(SRCDIR)/Catalog.java $(SRCDIR)/Resolver.java $(SRCDIR)/Emit.java \
+       $(SRCDIR)/Stmt.java $(SRCDIR)/Expr.java $(SRCDIR)/Linker.java
 
 # Test programs
 TESTS = T01_Empty T02_Literal T03_Arithmetic T04_IfElse T05_WhileLoop \
@@ -46,6 +48,12 @@ $(BUILDDIR)/picojc.pjvm: $(BUILDDIR)/classes
 		$(BUILDDIR)/classes/Token.class \
 		$(BUILDDIR)/classes/Lexer.class \
 		$(BUILDDIR)/classes/Native.class \
+		$(BUILDDIR)/classes/Catalog.class \
+		$(BUILDDIR)/classes/Resolver.class \
+		$(BUILDDIR)/classes/Emit.class \
+		$(BUILDDIR)/classes/Stmt.class \
+		$(BUILDDIR)/classes/Expr.class \
+		$(BUILDDIR)/classes/Linker.class \
 		-o $@ -v
 
 # Compile a lib-dependent test: cat lib/*.java + test.java, then compile
@@ -141,7 +149,9 @@ check-javac: $(BUILDDIR)/classes
 # Concatenate compiler sources in the order picojc expects
 $(BUILDDIR)/compiler_src.java: $(SRCS)
 	@mkdir -p $(BUILDDIR)
-	cat $(SRCDIR)/Token.java $(SRCDIR)/Lexer.java $(SRCDIR)/Native.java $(SRCDIR)/Compiler.java > $@
+	cat $(SRCDIR)/Token.java $(SRCDIR)/Lexer.java $(SRCDIR)/Native.java \
+		$(SRCDIR)/Compiler.java $(SRCDIR)/Catalog.java $(SRCDIR)/Resolver.java \
+		$(SRCDIR)/Emit.java $(SRCDIR)/Stmt.java $(SRCDIR)/Expr.java $(SRCDIR)/Linker.java > $@
 
 # gen1: reference picojc compiles itself
 $(BUILDDIR)/gen1.pjvm: $(BUILDDIR)/picojc.pjvm $(BUILDDIR)/compiler_src.java $(PICOJVM)

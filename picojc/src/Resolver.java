@@ -64,20 +64,8 @@ public class Resolver {
                 }
             }
             if (!hasCtor) {
-                // Add default constructor
-                int mi = C.mCount++;
-                C.mClass[mi] = ci;
-                C.mName[mi] = C.N_INIT;
-                C.mArgC[mi] = 1; // 'this'
-                C.mStatic[mi] = false;
-                C.mIsCtor[mi] = true;
-                C.mNative[mi] = false;
-                C.mRetT[mi] = 0;
-                C.mVtSlot[mi] = 0xFF;
-                C.mVmid[mi] = 0xFF;
-                C.mExcC[mi] = 0;
-                C.mBodyS[mi] = -2; // marker for auto-generated
-                C.mBodyE[mi] = -2;
+                int mi = C.initMethod(ci, C.N_INIT, 1, false, true, false, 0);
+                C.mBodyS[mi] = -2; C.mBodyE[mi] = -2;
             }
         }
 
@@ -245,19 +233,10 @@ public class Resolver {
             if (C.cName[ci] == nm) return ci;
         }
 
-        int ci = C.cCount++;
-        C.cName[ci] = nm;
+        int ci = C.initClass(nm);
         C.cParent[ci] = parentNm == -1 ? -1 : fClsByNm(parentNm);
-        C.cIsIface[ci] = false;
-        C.cClinit[ci] = 0xFF;
-        C.cFieldC[ci] = 0;
-        C.cOwnF[ci] = 0;
-        C.cIfaceS[ci] = C.ifListLen;
-        C.cIfaceC[ci] = 0;
         C.vtBase[ci] = vtableLen();
-        C.cVtSize[ci] = 0;
-        C.cBodyS[ci] = -1;
-        C.cBodyE[ci] = -1;
+        C.cBodyS[ci] = -1; C.cBodyE[ci] = -1;
         return ci;
     }
 
@@ -269,6 +248,24 @@ public class Resolver {
                 if (C.fClass[fi] == ci && C.fName[fi] == nm) return fi;
             }
             ci = C.cParent[ci];
+        }
+        return -1;
+    }
+
+    static int fStatField(int ci, int nm) {
+        int best = -1;
+        for (int fi = 0; fi < C.fCount; fi++) {
+            if (C.fName[fi] == nm && C.fStatic[fi]) {
+                if (C.fClass[fi] == ci) return fi;
+                if (best < 0) best = fi;
+            }
+        }
+        return best;
+    }
+
+    static int fInstField(int nm) {
+        for (int fi = 0; fi < C.fCount; fi++) {
+            if (C.fName[fi] == nm && !C.fStatic[fi]) return fi;
         }
         return -1;
     }

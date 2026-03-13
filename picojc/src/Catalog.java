@@ -28,14 +28,8 @@ public class Catalog {
         int nm = C.intern(Tk.strBuf, Tk.strLen);
         Lexer.nextToken();
 
-        int ci = C.cCount++;
-        C.cName[ci] = nm;
-        C.cParent[ci] = -1; // Object by default
+        int ci = C.initClass(nm);
         C.cIsIface[ci] = isIface;
-        C.cClinit[ci] = 0xFF;
-        C.cIfaceS[ci] = C.ifListLen;
-        C.cIfaceC[ci] = 0;
-        C.cOwnF[ci] = 0;
 
         // extends?
         if (Tk.type == Tk.EXTENDS) {
@@ -92,17 +86,7 @@ public class Catalog {
                 // Reuse synthetic <clinit> (created for field initializers)
                 mi = C.cClinit[ci];
             } else {
-                mi = C.mCount++;
-                C.mClass[mi] = ci;
-                C.mName[mi] = C.N_CLINIT;
-                C.mArgC[mi] = 0;
-                C.mStatic[mi] = true;
-                C.mIsCtor[mi] = false;
-                C.mNative[mi] = false;
-                C.mRetT[mi] = 0; // void
-                C.mVtSlot[mi] = 0xFF;
-                C.mVmid[mi] = 0xFF;
-                C.mExcC[mi] = 0;
+                mi = C.initMethod(ci, C.N_CLINIT, 0, true, false, false, 0);
                 C.cClinit[ci] = mi;
             }
             Lexer.nextToken(); // skip {
@@ -198,59 +182,34 @@ public class Catalog {
         }
     }
 
-    static void catField(int ci, int nm, boolean isStat, int retType, int arrKind) {
+    static int initField(int ci, int nm, boolean isStat, int arrKind) {
         int fi = C.fCount++;
-        C.fClass[fi] = ci;
-        C.fName[fi] = nm;
-        C.fStatic[fi] = isStat;
-        C.fArrKind[fi] = arrKind;
-        C.fSlot[fi] = -1;
-        C.fInitPos[fi] = -1;
-        C.fInitLn[fi] = 0;
+        C.fClass[fi] = ci; C.fName[fi] = nm; C.fStatic[fi] = isStat;
+        C.fArrKind[fi] = arrKind; C.fSlot[fi] = -1;
+        C.fInitPos[fi] = -1; C.fInitLn[fi] = 0;
         if (!isStat) C.cOwnF[ci]++;
+        return fi;
+    }
 
-        // Check for initializer
+    static void catField(int ci, int nm, boolean isStat, int retType, int arrKind) {
+        int fi = initField(ci, nm, isStat, arrKind);
+
         if (Tk.type == Tk.ASSIGN && isStat) {
-            // Save position right after '=' (before the value token)
-            // Lexer.pos is already past '=' since ASSIGN was scanned
             C.fInitPos[fi] = Lexer.pos;
             C.fInitLn[fi] = Lexer.line;
-            // Ensure class has a <clinit> for field initializer emission
             if (C.cClinit[ci] == 0xFF) {
-                // Create synthetic <clinit> (bodyStart=-2 = synthetic marker)
-                int smi = C.mCount++;
-                C.mClass[smi] = ci;
-                C.mName[smi] = C.N_CLINIT;
-                C.mArgC[smi] = 0;
-                C.mStatic[smi] = true;
-                C.mIsCtor[smi] = false;
-                C.mNative[smi] = false;
-                C.mRetT[smi] = 0;
-                C.mVtSlot[smi] = 0xFF;
-                C.mVmid[smi] = 0xFF;
-                C.mExcC[smi] = 0;
-                C.mBodyS[smi] = -2; // synthetic: no explicit body
-                C.mBodyE[smi] = -2;
+                int smi = C.initMethod(ci, C.N_CLINIT, 0, true, false, false, 0);
+                C.mBodyS[smi] = -2; C.mBodyE[smi] = -2;
                 C.cClinit[ci] = smi;
             }
         }
 
-        // Skip initializer and comma-separated declarations
         while (Tk.type != Tk.SEMI && Tk.type != Tk.EOF) {
             if (Tk.type == Tk.COMMA) {
                 Lexer.nextToken();
-                // Another field with same type
                 int nm2 = C.intern(Tk.strBuf, Tk.strLen);
                 Lexer.nextToken();
-                int fi2 = C.fCount++;
-                C.fClass[fi2] = ci;
-                C.fName[fi2] = nm2;
-                C.fStatic[fi2] = isStat;
-                C.fArrKind[fi2] = arrKind;
-                C.fSlot[fi2] = -1;
-                C.fInitPos[fi2] = -1;
-                C.fInitLn[fi2] = 0;
-                if (!isStat) C.cOwnF[ci]++;
+                initField(ci, nm2, isStat, arrKind);
             } else {
                 Lexer.nextToken();
             }
@@ -260,16 +219,7 @@ public class Catalog {
 
     static void catMethod(int ci, int nm, boolean isStat, boolean isCtor,
                                boolean isNat, boolean isAbstract, int retType) {
-        int mi = C.mCount++;
-        C.mClass[mi] = ci;
-        C.mName[mi] = isCtor ? C.N_INIT : nm;
-        C.mStatic[mi] = isStat;
-        C.mIsCtor[mi] = isCtor;
-        C.mNative[mi] = isNat;
-        C.mRetT[mi] = retType;
-        C.mVtSlot[mi] = 0xFF;
-        C.mVmid[mi] = 0xFF;
-        C.mExcC[mi] = 0;
+        int mi = C.initMethod(ci, isCtor ? C.N_INIT : nm, 0, isStat, isCtor, isNat, retType);
 
         // Parse parameters
         Lexer.expect(Tk.LPAREN);

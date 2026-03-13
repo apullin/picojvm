@@ -200,20 +200,7 @@ class E {
             int clinitPos = Lexer.pos;
             int clinitLine = Lexer.line;
             int clinitTok = Tk.type;
-            // Emit inline static field initializers first
-            for (int fi = 0; fi < C.fCount; fi++) {
-                if (C.fClass[fi] == C.curCi && C.fStatic[fi] && C.fInitPos[fi] >= 0) {
-                    Lexer.pos = C.fInitPos[fi];
-                    Lexer.line = C.fInitLn[fi];
-                    Lexer.nextToken();
-                    Expr.pExpr();
-                    int sfSlot = C.fSlot[fi];
-                    int cpIdx2 = aCP(sfSlot);
-                    eb(0xB3); // PUTSTATIC
-                    eSBE(cpIdx2);
-                    pop();
-                }
-            }
+            emitStaticInits();
             // Restore lexer to static block body
             Lexer.pos = clinitPos;
             Lexer.line = clinitLine;
@@ -321,25 +308,25 @@ class E {
                 C.stkDepth = 0;
                 C.maxStk = 0;
 
-                // Emit field initializers
-                for (int fi = 0; fi < C.fCount; fi++) {
-                    if (C.fClass[fi] == C.curCi && C.fStatic[fi] && C.fInitPos[fi] >= 0) {
-                        Lexer.pos = C.fInitPos[fi];
-                        Lexer.line = C.fInitLn[fi];
-                        Lexer.nextToken();
-                        Expr.pExpr();
-                        int sfSlot = C.fSlot[fi];
-                        int cpIdx2 = aCP(sfSlot);
-                        eb(0xB3); // PUTSTATIC
-                        eSBE(cpIdx2);
-                        pop();
-                    }
-                }
+                emitStaticInits();
                 eb(0xB1); // RETURN
 
                 commitMC(mi);
                 C.mMaxLoc[mi] = 1;
                 C.mMaxStk[mi] = C.maxStk > 0 ? C.maxStk : 1;
+            }
+        }
+    }
+
+    static void emitStaticInits() {
+        for (int fi = 0; fi < C.fCount; fi++) {
+            if (C.fClass[fi] == C.curCi && C.fStatic[fi] && C.fInitPos[fi] >= 0) {
+                Lexer.pos = C.fInitPos[fi];
+                Lexer.line = C.fInitLn[fi];
+                Lexer.nextToken();
+                Expr.pExpr();
+                int cpIdx = aCP(C.fSlot[fi]);
+                eb(0xB3); eSBE(cpIdx); pop(); // PUTSTATIC
             }
         }
     }
@@ -374,6 +361,16 @@ class E {
         return baseType; // 0=int, 1=ref
     }
 
+
+    // Bytecode emission shortcuts
+    static void ic0() { eb(0x03); push(); } // ICONST_0
+    static void ic1() { eb(0x04); push(); } // ICONST_1
+    static void edup() { eb(0x59); push(); } // DUP
+    static void cmpBool(int op) {
+        int lbl = label(); int lblEnd = label();
+        eBr(op, lbl); ic0(); eBr(0xA7, lblEnd);
+        mark(lbl); ic1(); mark(lblEnd);
+    }
 
     static void eb(int b) {
         C.mcode[C.mcLen++] = (byte)(b & 0xFF);

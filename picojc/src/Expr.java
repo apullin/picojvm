@@ -32,8 +32,7 @@ public class Expr {
             int lblTrue = E.label();
             int lblEnd = E.label();
             // Short-circuit: if left is true, skip right
-            E.eb(0x59); // DUP
-            E.push();
+            E.edup();
             E.eBr(0x9A, lblTrue); // IFNE → true
             E.pop();
             E.eb(0x57); // POP
@@ -52,8 +51,7 @@ public class Expr {
             Lexer.nextToken();
             int lblFalse = E.label();
             int lblEnd = E.label();
-            E.eb(0x59); // DUP
-            E.push();
+            E.edup();
             E.eBr(0x99, lblFalse); // IFEQ → false
             E.pop();
             E.eb(0x57); // POP
@@ -106,28 +104,10 @@ public class Expr {
             Lexer.nextToken();
             int rtype = pCmp();
             E.pop(); E.pop();
-            if (type == 2 || rtype == 2) {
-                // Reference comparison
-                int lbl = E.label();
-                int lblEnd = E.label();
-                E.eBr(op == Tk.EQ ? 0xA5 : 0xA6, lbl); // IF_ACMPEQ/NE
-                E.eb(0x03); // ICONST_0
-                E.push();
-                E.eBr(0xA7, lblEnd);
-                E.mark(lbl);
-                E.eb(0x04); // ICONST_1
-                E.push();
-                E.mark(lblEnd);
-            } else {
-                int lbl = E.label();
-                int lblEnd = E.label();
-                E.eBr(op == Tk.EQ ? 0x9F : 0xA0, lbl); // IF_ICMPEQ/NE
-                E.eb(0x03); E.push();
-                E.eBr(0xA7, lblEnd);
-                E.mark(lbl);
-                E.eb(0x04); E.push();
-                E.mark(lblEnd);
-            }
+            if (type == 2 || rtype == 2)
+                E.cmpBool(op == Tk.EQ ? 0xA5 : 0xA6); // IF_ACMPEQ/NE
+            else
+                E.cmpBool(op == Tk.EQ ? 0x9F : 0xA0); // IF_ICMPEQ/NE
             type = 1;
         }
         return type;
@@ -161,15 +141,7 @@ public class Expr {
             else if (op == Tk.GE) branchOp = 0xA2; // IF_ICMPGE
             else if (op == Tk.GT) branchOp = 0xA3; // IF_ICMPGT
             else branchOp = 0xA4; // IF_ICMPLE
-
-            int lbl = E.label();
-            int lblEnd = E.label();
-            E.eBr(branchOp, lbl);
-            E.eb(0x03); E.push(); // ICONST_0
-            E.eBr(0xA7, lblEnd);
-            E.mark(lbl);
-            E.eb(0x04); E.push(); // ICONST_1
-            E.mark(lblEnd);
+            E.cmpBool(branchOp);
             type = 1;
         }
         return type;
@@ -242,16 +214,8 @@ public class Expr {
         if (Tk.type == Tk.BANG) {
             Lexer.nextToken();
             pUnary();
-            // !x: if x == 0, push 1, else push 0
             E.pop();
-            int lbl = E.label();
-            int lblEnd = E.label();
-            E.eBr(0x99, lbl); // IFEQ
-            E.eb(0x03); E.push(); // ICONST_0
-            E.eBr(0xA7, lblEnd);
-            E.mark(lbl);
-            E.eb(0x04); E.push(); // ICONST_1
-            E.mark(lblEnd);
+            E.cmpBool(0x99); // IFEQ: !x
             return 1;
         }
         if (Tk.type == Tk.INC || Tk.type == Tk.DEC) {
@@ -265,10 +229,10 @@ public class Expr {
                 // Pre-increment: load, add/sub 1, dup, store
                 E.eLd(slot, 0);
                 E.push();
-                E.eb(0x04); E.push(); // ICONST_1
+                E.ic1();
                 E.eb(op == Tk.INC ? 0x60 : 0x64); // IADD/ISUB
                 E.pop();
-                E.eb(0x59); E.push(); // DUP
+                E.edup();
                 E.eSt(slot, 0);
                 E.pop();
                 return 1;
@@ -361,7 +325,7 @@ public class Expr {
                     else E.eb(0x2E);                  // IALOAD
                     E.pop(); // IALOAD consumes dup'd pair, pushes value: net -1
                     E.eb(0x5B); E.push(); // DUP_X2: old value below arrRef,idx,new
-                    E.eb(0x04); E.push(); // ICONST_1
+                    E.ic1();
                     E.eb(op == Tk.INC ? 0x60 : 0x64); E.pop(); // IADD/ISUB
                     if (type == 4) E.eb(0x54);       // BASTORE
                     else if (type == 5) E.eb(0x55);  // CASTORE
@@ -414,18 +378,8 @@ public class Expr {
             E.push();
             return 2; // reference
         }
-        if (Tk.type == Tk.TRUE) {
-            Lexer.nextToken();
-            E.eb(0x04); // ICONST_1
-            E.push();
-            return 1;
-        }
-        if (Tk.type == Tk.FALSE) {
-            Lexer.nextToken();
-            E.eb(0x03); // ICONST_0
-            E.push();
-            return 1;
-        }
+        if (Tk.type == Tk.TRUE) { Lexer.nextToken(); E.ic1(); return 1; }
+        if (Tk.type == Tk.FALSE) { Lexer.nextToken(); E.ic0(); return 1; }
         if (Tk.type == Tk.NULL) {
             Lexer.nextToken();
             E.eb(0x01); // ACONST_NULL
@@ -474,7 +428,7 @@ public class Expr {
                 if (Tk.type == Tk.ASSIGN) {
                     Lexer.nextToken();
                     pExpr();
-                    E.eb(0x59); E.push(); // DUP (keep value on stack)
+                    E.edup();
                     E.eSt(slot, ltype);
                     E.pop();
                     return ltype == 1 ? 2 : 1;
@@ -487,7 +441,7 @@ public class Expr {
                     pExpr();
                     E.eCO(op);
                     E.pop();
-                    E.eb(0x59); E.push(); // DUP
+                    E.edup();
                     E.eSt(slot, ltype);
                     E.pop();
                     return 1;
@@ -542,7 +496,7 @@ public class Expr {
                         E.eLd(0, 1); E.push(); // ALOAD_0 again
                         E.eLd(0, 1); E.push(); // ALOAD_0 again
                         E.eb(0xB4); E.eSBE(cpIdx); // GETFIELD again
-                        E.eb(0x04); E.push(); // ICONST_1
+                        E.ic1();
                         E.eb(op == Tk.INC ? 0x60 : 0x64); E.pop(); // IADD/ISUB
                         E.eb(0xB5); E.eSBE(cpIdx); // PUTFIELD
                         E.pop(); E.pop(); // obj + value consumed by PUTFIELD
@@ -575,19 +529,12 @@ public class Expr {
 
             // Check for static field (prefer current class first)
             {
-                int sfi = -1;
-                for (int fi2 = 0; fi2 < C.fCount; fi2++) {
-                    if (C.fName[fi2] == nm && C.fStatic[fi2]) {
-                        if (C.fClass[fi2] == C.curCi) { sfi = fi2; break; }
-                        if (sfi < 0) sfi = fi2;
-                    }
-                }
-                if (sfi >= 0) {
-                    int fi = sfi;
+                int fi = Resolver.fStatField(C.curCi, nm);
+                if (fi >= 0) {
                     if (Tk.type == Tk.ASSIGN) {
                         Lexer.nextToken();
                         pExpr();
-                        E.eb(0x59); E.push(); // DUP
+                        E.edup();
                         int cpIdx = E.aFCP(C.fSlot[fi]);
                         E.eb(0xB3); // PUTSTATIC
                         E.eSBE(cpIdx);
@@ -604,7 +551,7 @@ public class Expr {
                         pExpr();
                         E.eCO(op);
                         E.pop();
-                        E.eb(0x59); E.push(); // DUP
+                        E.edup();
                         E.eb(0xB3); // PUTSTATIC
                         E.eSBE(cpIdx);
                         E.pop();
@@ -617,9 +564,8 @@ public class Expr {
                         E.eb(0xB2); // GETSTATIC
                         E.eSBE(cpIdx);
                         E.push();
-                        // Post: value before inc/dec is on stack
-                        E.eb(0x59); E.push(); // DUP
-                        E.eb(0x04); E.push(); // ICONST_1
+                        E.edup();
+                        E.ic1();
                         E.eb(op == Tk.INC ? 0x60 : 0x64); E.pop(); // IADD/ISUB
                         E.eb(0xB3); // PUTSTATIC
                         E.eSBE(cpIdx);
@@ -749,18 +695,10 @@ public class Expr {
         E.eb(0xBB); // NEW
         E.eSBE(cpIdx);
         E.push();
-        E.eb(0x59); // DUP
-        E.push();
+        E.edup();
 
-        // Parse constructor arguments
         Lexer.expect(Tk.LPAREN);
-        int argc = 1; // 'this' counts
-        while (Tk.type != Tk.RPAREN && Tk.type != Tk.EOF) {
-            pExpr();
-            argc++;
-            if (Tk.type == Tk.COMMA) Lexer.nextToken();
-        }
-        Lexer.expect(Tk.RPAREN);
+        int argc = pArgs(1); // 'this' counts
 
         // Find constructor
         int ctorMi = -1;
@@ -801,13 +739,7 @@ public class Expr {
         // First check native methods
         int nativeMi = C.ensNat(classNm, methodNm);
         if (nativeMi >= 0) {
-            int argc = 0;
-            while (Tk.type != Tk.RPAREN && Tk.type != Tk.EOF) {
-                pExpr();
-                argc++;
-                if (Tk.type == Tk.COMMA) Lexer.nextToken();
-            }
-            Lexer.expect(Tk.RPAREN);
+            int argc = pArgs(0);
             int cpIdx = E.aCP(nativeMi);
             E.eb(0xB8); // INVOKESTATIC
             E.eSBE(cpIdx);
@@ -829,13 +761,7 @@ public class Expr {
             }
         }
 
-        int argc = 0;
-        while (Tk.type != Tk.RPAREN && Tk.type != Tk.EOF) {
-            pExpr();
-            argc++;
-            if (Tk.type == Tk.COMMA) Lexer.nextToken();
-        }
-        Lexer.expect(Tk.RPAREN);
+        int argc = pArgs(0);
 
         if (mi < 0) {
             Lexer.error(204); // Undefined method
@@ -858,13 +784,7 @@ public class Expr {
         // Check for String methods
         int nativeMi = C.ensNat(C.N_STRING, methodNm);
 
-        int argc = 1; // 'this' already on stack
-        while (Tk.type != Tk.RPAREN && Tk.type != Tk.EOF) {
-            pExpr();
-            argc++;
-            if (Tk.type == Tk.COMMA) Lexer.nextToken();
-        }
-        Lexer.expect(Tk.RPAREN);
+        int argc = pArgs(1); // 'this' already on stack
 
         if (nativeMi >= 0) {
             int cpIdx = E.aCP(nativeMi);
@@ -919,15 +839,7 @@ public class Expr {
     // ==================== FIELD ACCESS ====================
 
     static int eFldAcc(int fieldNm, boolean isStore) {
-        // Object ref is on stack
-        // Find field
-        int fi = -1;
-        for (int f = 0; f < C.fCount; f++) {
-            if (C.fName[f] == fieldNm && !C.fStatic[f]) {
-                fi = f;
-                break;
-            }
-        }
+        int fi = Resolver.fInstField(fieldNm);
         if (fi < 0) {
             Lexer.error(206);
             return 0;
@@ -945,7 +857,7 @@ public class Expr {
         if (Tk.type >= Tk.PLUS_EQ && Tk.type <= Tk.USHR_EQ) {
             int op = Tk.type;
             Lexer.nextToken();
-            E.eb(0x59); E.push(); // DUP obj ref
+            E.edup(); // DUP obj ref
             int cpIdx = E.aFCP(C.fSlot[fi]);
             E.eb(0xB4); // GETFIELD
             E.eSBE(cpIdx);
@@ -967,13 +879,7 @@ public class Expr {
     }
 
     static int eSFldAcc(int ci, int fieldNm) {
-        int fi = -1;
-        for (int f = 0; f < C.fCount; f++) {
-            if (C.fName[f] == fieldNm && C.fStatic[f]) {
-                if (C.fClass[f] == ci) { fi = f; break; }
-                if (fi < 0) fi = f;
-            }
-        }
+        int fi = Resolver.fStatField(ci, fieldNm);
         if (fi < 0) {
             Lexer.error(207);
             return 0;
@@ -998,7 +904,7 @@ public class Expr {
             pExpr();
             E.eCO(op);
             E.pop();
-            E.eb(0x59); E.push(); // DUP
+            E.edup();
             E.eb(0xB3); // PUTSTATIC
             E.eSBE(cpIdx);
             E.pop();
@@ -1011,8 +917,8 @@ public class Expr {
             E.eb(0xB2); // GETSTATIC
             E.eSBE(cpIdx);
             E.push();
-            E.eb(0x59); E.push(); // DUP
-            E.eb(0x04); E.push(); // ICONST_1
+            E.edup();
+            E.ic1();
             E.eb(op == Tk.INC ? 0x60 : 0x64); E.pop(); // IADD/ISUB
             E.eb(0xB3); // PUTSTATIC
             E.eSBE(cpIdx);
@@ -1029,10 +935,15 @@ public class Expr {
     }
 
 
-    // ==================== EMIT HELPERS ====================
-
-
-
+    static int pArgs(int start) {
+        int argc = start;
+        while (Tk.type != Tk.RPAREN && Tk.type != Tk.EOF) {
+            pExpr(); argc++;
+            if (Tk.type == Tk.COMMA) Lexer.nextToken();
+        }
+        Lexer.expect(Tk.RPAREN);
+        return argc;
+    }
 
 
 }

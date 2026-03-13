@@ -251,46 +251,43 @@ class C {
         return a == b;
     }
 
+    // ==================== HELPERS ====================
+
+    static int initMethod(int ci, int nm, int argc, boolean isStat,
+                          boolean isCtor, boolean isNat, int retType) {
+        int mi = mCount++;
+        mClass[mi] = ci; mName[mi] = nm; mArgC[mi] = argc;
+        mStatic[mi] = isStat; mIsCtor[mi] = isCtor; mNative[mi] = isNat;
+        mRetT[mi] = retType; mVtSlot[mi] = 0xFF; mVmid[mi] = 0xFF; mExcC[mi] = 0;
+        return mi;
+    }
+
+    static int initClass(int nm) {
+        int ci = cCount++;
+        cName[ci] = nm; cParent[ci] = -1; cIsIface[ci] = false;
+        cClinit[ci] = 0xFF; cIfaceS[ci] = ifListLen; cIfaceC[ci] = 0; cOwnF[ci] = 0;
+        return ci;
+    }
+
     // ==================== BUILTIN CLASSES/METHODS ====================
 
     static void initBuiltins() {
-        cCount = 0;
-        mCount = 0;
-        fCount = 0;
-        // Note: built-in classes (Object, String, Native) are NOT added to class table
-        // They are implicit. Native methods are added to the method table on-demand.
+        cCount = 0; mCount = 0; fCount = 0;
     }
 
-    // Add a native method, returns method index
-    static int addNat(int classNameIdx, int methodNameIdx, int argCount,
-                               int nativeId, boolean isStatic, int retType) {
-        // Check if already added
+    static int addNat(int classNm, int methodNm, int argCount,
+                      int nativeId, boolean isStatic, int retType) {
         for (int i = 0; i < mCount; i++) {
-            if (mNative[i] && mName[i] == methodNameIdx &&
-                mClass[i] == classNameIdx) {
+            if (mNative[i] && mName[i] == methodNm && mClass[i] == classNm) {
                 mFlags[i] = (nativeId << 1) | 1;
                 return i;
             }
         }
-        int mi = mCount++;
-        mClass[mi] = classNameIdx;
-        mName[mi] = methodNameIdx;
-        mArgC[mi] = argCount;
+        int mi = initMethod(classNm, methodNm, argCount, isStatic, false, true, retType);
         mMaxLoc[mi] = argCount;
         mMaxStk[mi] = argCount > 0 ? argCount : 1;
         mFlags[mi] = (nativeId << 1) | 1;
-        mCodeOff[mi] = 0;
-        mCpBase[mi] = 0;
-        mVtSlot[mi] = 0xFF;
-        mVmid[mi] = 0xFF;
-        mExcC[mi] = 0;
-        mExcIdx[mi] = 0;
-        mStatic[mi] = isStatic;
-        mIsCtor[mi] = false;
-        mNative[mi] = true;
-        mBodyS[mi] = -1;
-        mBodyE[mi] = -1;
-        mRetT[mi] = retType;
+        mBodyS[mi] = -1; mBodyE[mi] = -1;
         return mi;
     }
 

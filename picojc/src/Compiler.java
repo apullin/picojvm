@@ -219,32 +219,12 @@ public class Compiler {
         N_ARGS       = internStr("args");
     }
 
+    static byte[] internTmp = new byte[256];
+
     static int internStr(String s) {
         int len = s.length();
-        // Check existing
-        for (int i = 0; i < nameCount; i++) {
-            if (nameLen[i] == len) {
-                boolean match = true;
-                for (int j = 0; j < len; j++) {
-                    if (namePool[nameOff[i] + j] != (byte)s.charAt(j)) {
-                        match = false;
-                        break;
-                    }
-                }
-                if (match) return i;
-            }
-        }
-        if (nameCount >= MAX_NAMES || namePoolLen + len > 10240) {
-            Lexer.error(250); // name pool overflow
-            return 0;
-        }
-        int idx = nameCount++;
-        nameOff[idx] = namePoolLen;
-        nameLen[idx] = len;
-        for (int i = 0; i < len; i++) {
-            namePool[namePoolLen++] = (byte)s.charAt(i);
-        }
-        return idx;
+        for (int i = 0; i < len; i++) internTmp[i] = (byte) s.charAt(i);
+        return internBuf(internTmp, len);
     }
 
     static int internBuf(byte[] buf, int len) {
@@ -1199,22 +1179,21 @@ public class Compiler {
             mcode[loc + 1] = (byte) (offset & 0xFF);
         }
 
-        // Copy method bytecodes to global
+        commitMethodCode(mi);
+        methodMaxLocals[mi] = localNextSlot > 0 ? localNextSlot : 1;
+        methodMaxStack[mi] = maxStack > 0 ? maxStack : 1;
+    }
+
+    static void commitMethodCode(int mi) {
         methodCodeOff[mi] = codeLen;
         for (int i = 0; i < mcodeLen; i++) {
             Native.poke(codeBase + codeLen, mcode[i] & 0xFF); codeLen++;
         }
-
-        // Store CP
         methodCpBase[mi] = cpMethodBase;
         for (int i = 0; i < cpMethodCount; i++) {
             cpEntries[cpMethodBase + i] = (byte) cpMethodVals[i];
         }
         cpSize = cpMethodBase + cpMethodCount;
-
-        // Store metrics
-        methodMaxLocals[mi] = localNextSlot > 0 ? localNextSlot : 1;
-        methodMaxStack[mi] = maxStack > 0 ? maxStack : 1;
     }
 
     static boolean autoCtorsEmitted;
@@ -1241,15 +1220,7 @@ public class Compiler {
                 emitShortBE(cpIdx);
                 emitByte(0xB1); // RETURN
 
-                methodCodeOff[mi] = codeLen;
-                for (int i = 0; i < mcodeLen; i++) {
-                    Native.poke(codeBase + codeLen, mcode[i] & 0xFF); codeLen++;
-                }
-                methodCpBase[mi] = cpMethodBase;
-                for (int i = 0; i < cpMethodCount; i++) {
-                    cpEntries[cpMethodBase + i] = (byte) cpMethodVals[i];
-                }
-                cpSize = cpMethodBase + cpMethodCount;
+                commitMethodCode(mi);
                 methodMaxLocals[mi] = 1;
                 methodMaxStack[mi] = 1;
             }
@@ -1283,15 +1254,7 @@ public class Compiler {
                 }
                 emitByte(0xB1); // RETURN
 
-                methodCodeOff[mi] = codeLen;
-                for (int i = 0; i < mcodeLen; i++) {
-                    Native.poke(codeBase + codeLen, mcode[i] & 0xFF); codeLen++;
-                }
-                methodCpBase[mi] = cpMethodBase;
-                for (int i = 0; i < cpMethodCount; i++) {
-                    cpEntries[cpMethodBase + i] = (byte) cpMethodVals[i];
-                }
-                cpSize = cpMethodBase + cpMethodCount;
+                commitMethodCode(mi);
                 methodMaxLocals[mi] = 1;
                 methodMaxStack[mi] = maxStack > 0 ? maxStack : 1;
             }

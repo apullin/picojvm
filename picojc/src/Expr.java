@@ -1,12 +1,19 @@
 public class Expr {
     // Returns: 0=void, 1=int, 2=ref
 
+    // Lvalue descriptor for unified assign/compound/inc-dec/load
+    static int lvK;      // 0=local, 1=this_field, 2=static, 3=obj_field
+    static int lvI;      // slot (local) or cpIdx (field)
+    static int lvT;      // local type (0=int, 1=ref, 3+=array)
+    static int lvArr;    // field array kind
+    static boolean lvRV; // assign DUPs and returns value
+
     static int pExpr() {
         return pTern();
     }
 
     static int pTern() {
-        int type = pOr();
+        int type = pBin(1);
         if (Tk.type == Tk.QUESTION) {
             Lexer.nextToken();
             E.pop();
@@ -25,163 +32,78 @@ public class Expr {
         return type;
     }
 
-    static int pOr() {
-        int type = pAnd();
-        while (Tk.type == Tk.OR) {
-            Lexer.nextToken();
-            int lblTrue = E.label();
-            int lblEnd = E.label();
-            // Short-circuit: if left is true, skip right
-            E.edup();
-            E.eBr(0x9A, lblTrue); // IFNE → true
-            E.pop();
-            E.epop();
-            pAnd();
-            E.eBr(0xA7, lblEnd);
-            E.mark(lblTrue);
-            E.mark(lblEnd);
-        }
-        return type;
+    static int binInfo(int tok) {
+        if (tok == Tk.OR) return 0x100;
+        if (tok == Tk.AND) return 0x200;
+        if (tok == Tk.PIPE) return 0x380;    // IOR
+        if (tok == Tk.CARET) return 0x482;   // IXOR
+        if (tok == Tk.AMP) return 0x57E;     // IAND
+        if (tok == Tk.EQ) return 0x69F;      // IF_ICMPEQ
+        if (tok == Tk.NE) return 0x6A0;      // IF_ICMPNE
+        if (tok == Tk.LT) return 0x7A1;      // IF_ICMPLT
+        if (tok == Tk.GE) return 0x7A2;      // IF_ICMPGE
+        if (tok == Tk.GT) return 0x7A3;      // IF_ICMPGT
+        if (tok == Tk.LE) return 0x7A4;      // IF_ICMPLE
+        if (tok == Tk.INSTANCEOF) return 0x7C1;
+        if (tok == Tk.SHL) return 0x878;     // ISHL
+        if (tok == Tk.SHR) return 0x87A;     // ISHR
+        if (tok == Tk.USHR) return 0x87C;    // IUSHR
+        if (tok == Tk.PLUS) return 0x960;    // IADD
+        if (tok == Tk.MINUS) return 0x964;   // ISUB
+        if (tok == Tk.STAR) return 0xA68;    // IMUL
+        if (tok == Tk.SLASH) return 0xA6C;   // IDIV
+        if (tok == Tk.PERCENT) return 0xA70; // IREM
+        return -1;
     }
 
-    static int pAnd() {
-        int type = pBOr();
-        while (Tk.type == Tk.AND) {
+    static int pBin(int minPrec) {
+        int type = pUnary();
+        while (true) {
+            int info = binInfo(Tk.type);
+            if (info < 0) break;
+            int prec = info >> 8;
+            if (prec < minPrec) break;
+            int opcode = info & 0xFF;
+            int tok = Tk.type;
             Lexer.nextToken();
-            int lblFalse = E.label();
-            int lblEnd = E.label();
-            E.edup();
-            E.eBr(0x99, lblFalse); // IFEQ → false
-            E.pop();
-            E.epop();
-            pBOr();
-            E.eBr(0xA7, lblEnd);
-            E.mark(lblFalse);
-            E.mark(lblEnd);
-        }
-        return type;
-    }
-
-    static int pBOr() {
-        int type = pBXor();
-        while (Tk.type == Tk.PIPE) {
-            Lexer.nextToken();
-            pBXor();
-            E.eb(0x80); // IOR
-            E.pop();
-        }
-        return type;
-    }
-
-    static int pBXor() {
-        int type = pBAnd();
-        while (Tk.type == Tk.CARET) {
-            Lexer.nextToken();
-            pBAnd();
-            E.eb(0x82); // IXOR
-            E.pop();
-        }
-        return type;
-    }
-
-    static int pBAnd() {
-        int type = pEq();
-        while (Tk.type == Tk.AMP) {
-            Lexer.nextToken();
-            pEq();
-            E.eb(0x7E); // IAND
-            E.pop();
-        }
-        return type;
-    }
-
-    static int pEq() {
-        int type = pCmp();
-        while (Tk.type == Tk.EQ || Tk.type == Tk.NE) {
-            int op = Tk.type;
-            Lexer.nextToken();
-            int rtype = pCmp();
-            E.pop(); E.pop();
-            if (type == 2 || rtype == 2)
-                E.cmpBool(op == Tk.EQ ? 0xA5 : 0xA6); // IF_ACMPEQ/NE
-            else
-                E.cmpBool(op == Tk.EQ ? 0x9F : 0xA0); // IF_ICMPEQ/NE
-            type = 1;
-        }
-        return type;
-    }
-
-    static int pCmp() {
-        int type = pShift();
-        while (Tk.type == Tk.LT || Tk.type == Tk.GT ||
-               Tk.type == Tk.LE || Tk.type == Tk.GE ||
-               Tk.type == Tk.INSTANCEOF) {
-            if (Tk.type == Tk.INSTANCEOF) {
-                Lexer.nextToken();
+            if (prec <= 2) {
+                // Short-circuit: || (prec 1) or && (prec 2)
+                int lbl1 = E.label(); int lbl2 = E.label();
+                E.edup();
+                E.eBr(prec == 1 ? 0x9A : 0x99, lbl1); // IFNE : IFEQ
+                E.pop(); E.epop();
+                pBin(prec + 1);
+                E.eBr(0xA7, lbl2);
+                E.mark(lbl1); E.mark(lbl2);
+            } else if (prec == 6) {
+                // Equality: ==, !=
+                int rtype = pBin(prec + 1);
+                E.pop(); E.pop();
+                if (type == 2 || rtype == 2)
+                    E.cmpBool(tok == Tk.EQ ? 0xA5 : 0xA6);
+                else
+                    E.cmpBool(tok == Tk.EQ ? 0x9F : 0xA0);
+                type = 1;
+            } else if (tok == Tk.INSTANCEOF) {
                 int classNm = C.intern(Tk.strBuf, Tk.strLen);
                 Lexer.nextToken();
                 E.pop();
                 int ci = Resolver.fClsByNm(classNm);
                 int cpIdx = E.aCCP(ci >= 0 ? ci : 0);
-                E.eOp(0xC1, cpIdx); // INSTANCEOF
-                E.push();
+                E.eOp(0xC1, cpIdx); E.push();
                 type = 1;
-                continue;
+            } else if (prec == 7) {
+                // Comparison: <, >, <=, >=
+                pBin(prec + 1);
+                E.pop(); E.pop();
+                E.cmpBool(opcode);
+                type = 1;
+            } else {
+                // Standard: |, ^, &, <<, >>, >>>, +, -, *, /, %
+                pBin(prec + 1);
+                E.pop();
+                E.eb(opcode);
             }
-            int op = Tk.type;
-            Lexer.nextToken();
-            pShift();
-            E.pop(); E.pop();
-
-            int branchOp;
-            if (op == Tk.LT) branchOp = 0xA1; // IF_ICMPLT
-            else if (op == Tk.GE) branchOp = 0xA2; // IF_ICMPGE
-            else if (op == Tk.GT) branchOp = 0xA3; // IF_ICMPGT
-            else branchOp = 0xA4; // IF_ICMPLE
-            E.cmpBool(branchOp);
-            type = 1;
-        }
-        return type;
-    }
-
-    static int pShift() {
-        int type = pAdd();
-        while (Tk.type == Tk.SHL || Tk.type == Tk.SHR ||
-               Tk.type == Tk.USHR) {
-            int op = Tk.type;
-            Lexer.nextToken();
-            pAdd();
-            E.pop();
-            if (op == Tk.SHL) E.eb(0x78); // ISHL
-            else if (op == Tk.SHR) E.eb(0x7A); // ISHR
-            else E.eb(0x7C); // IUSHR
-        }
-        return type;
-    }
-
-    static int pAdd() {
-        int type = pMul();
-        while (Tk.type == Tk.PLUS || Tk.type == Tk.MINUS) {
-            int op = Tk.type;
-            Lexer.nextToken();
-            pMul();
-            E.pop();
-            E.eb(op == Tk.PLUS ? 0x60 : 0x64); // IADD / ISUB
-        }
-        return type;
-    }
-
-    static int pMul() {
-        int type = pUnary();
-        while (Tk.type == Tk.STAR || Tk.type == Tk.SLASH ||
-               Tk.type == Tk.PERCENT) {
-            int op = Tk.type;
-            Lexer.nextToken();
-            pUnary();
-            E.pop();
-            if (op == Tk.STAR) E.eb(0x68); // IMUL
-            else if (op == Tk.SLASH) E.eb(0x6C); // IDIV
-            else E.eb(0x70); // IREM
         }
         return type;
     }
@@ -289,7 +211,7 @@ public class Expr {
                     type = eMethCall(type, memberNm, false);
                 } else {
                     // Field access
-                    type = eFldAcc(memberNm, false);
+                    type = eFldAcc(memberNm);
                 }
             }
             else if (Tk.type == Tk.LBRACKET) {
@@ -409,7 +331,11 @@ public class Expr {
                         return eStatCall(nm, memberNm);
                     } else {
                         // Static field access
-                        return eSFldAcc(ci, memberNm);
+                        int fi = Resolver.fStatField(ci, memberNm);
+                        if (fi < 0) { Lexer.error(207); return 0; }
+                        // ClassName.field — no return value on assign
+                        lvK = 2; lvI = E.aFCP(C.fSlot[fi]); lvArr = C.fArrKind[fi]; lvRV = false;
+                        return lvOps();
                     }
                 }
             }
@@ -417,101 +343,18 @@ public class Expr {
             // Check for local variable
             int li = E.fLoc(nm);
             if (li >= 0) {
-                int slot = C.locSlot[li];
-                int ltype = C.locType[li];
-
-                // Check for assignment
-                if (Tk.type == Tk.ASSIGN) {
-                    Lexer.nextToken();
-                    pExpr();
-                    E.edup();
-                    E.eSt(slot, ltype);
-                    E.pop();
-                    return ltype == 1 ? 2 : 1;
-                }
-                if (Tk.type >= Tk.PLUS_EQ && Tk.type <= Tk.USHR_EQ) {
-                    int op = Tk.type;
-                    Lexer.nextToken();
-                    E.eLd(slot, ltype);
-                    E.push();
-                    pExpr();
-                    E.eCO(op);
-                    E.pop();
-                    E.edup();
-                    E.eSt(slot, ltype);
-                    E.pop();
-                    return 1;
-                }
-                if (Tk.type == Tk.INC || Tk.type == Tk.DEC) {
-                    // Post-increment: load value, then increment
-                    E.eLd(slot, 0);
-                    E.push();
-                    int op = Tk.type;
-                    Lexer.nextToken();
-                    // Use IINC for efficiency
-                    E.eb(0x84); // IINC
-                    E.eb(slot);
-                    E.eb(op == Tk.INC ? 1 : 0xFF); // +1 or -1
-                    return 1;
-                }
-
-                E.eLd(slot, ltype);
-                E.push();
-                // Map local type to expression type
-                // 0=int→1, 1=ref→2, 3=int[]→3, 4=byte[]→4, 5=char[]→5
-                if (ltype >= 3) return ltype;
-                return ltype == 1 ? 2 : 1;
+                // Local var lvalue
+                lvK = 0; lvI = C.locSlot[li]; lvT = C.locType[li]; lvArr = 0; lvRV = true;
+                return lvOps();
             }
 
             // Check for instance field (implicit this)
             if (!C.curMStatic) {
                 int fi = Resolver.fField(C.curCi, nm);
                 if (fi >= 0 && !C.fStatic[fi]) {
-                    // Check for assignment
-                    if (Tk.type == Tk.ASSIGN) {
-                        Lexer.nextToken();
-                        E.ethis();
-                        pExpr();
-                        int cpIdx = E.aFCP(C.fSlot[fi]);
-                        E.eOp(0xB5, cpIdx); // PUTFIELD
-                        E.pop(); E.pop();
-                        return 0;
-                    }
-                    if (Tk.type == Tk.INC || Tk.type == Tk.DEC) {
-                        int op = Tk.type;
-                        Lexer.nextToken();
-                        int cpIdx = E.aFCP(C.fSlot[fi]);
-                        E.ethis();
-                        E.eOp(0xB4, cpIdx); // GETFIELD (old value)
-                        E.ethis();
-                        E.ethis();
-                        E.eOp(0xB4, cpIdx); // GETFIELD again
-                        E.ic1();
-                        E.eb(op == Tk.INC ? 0x60 : 0x64); E.pop(); // IADD/ISUB
-                        E.eOp(0xB5, cpIdx); // PUTFIELD
-                        E.pop(); E.pop();
-                        return 1;
-                    }
-                    if (Tk.type >= Tk.PLUS_EQ && Tk.type <= Tk.USHR_EQ) {
-                        int op = Tk.type;
-                        Lexer.nextToken();
-                        int cpIdx = E.aFCP(C.fSlot[fi]);
-                        E.ethis();
-                        E.ethis();
-                        E.eOp(0xB4, cpIdx); // GETFIELD
-                        pExpr();
-                        E.eCO(op);
-                        E.pop();
-                        E.eOp(0xB5, cpIdx); // PUTFIELD
-                        E.pop(); E.pop();
-                        return 0;
-                    }
-                    E.ethis();
-                    int cpIdx = E.aFCP(C.fSlot[fi]);
-                    E.eOp(0xB4, cpIdx); // GETFIELD
-                    // stack: -1 (obj) +1 (value) = net 0
-                    if (C.fArrKind[fi] != 0) return C.fArrKind[fi];
-                    return 1;
+                    // Implicit this.field lvalue
+                    lvK = 1; lvI = E.aFCP(C.fSlot[fi]); lvArr = C.fArrKind[fi]; lvRV = false;
+                    return lvOps();
                 }
             }
 
@@ -519,47 +362,9 @@ public class Expr {
             {
                 int fi = Resolver.fStatField(C.curCi, nm);
                 if (fi >= 0) {
-                    if (Tk.type == Tk.ASSIGN) {
-                        Lexer.nextToken();
-                        pExpr();
-                        E.edup();
-                        int cpIdx = E.aFCP(C.fSlot[fi]);
-                        E.eOp(0xB3, cpIdx); // PUTSTATIC
-                        E.pop();
-                        return 1;
-                    }
-                    if (Tk.type >= Tk.PLUS_EQ && Tk.type <= Tk.USHR_EQ) {
-                        int op = Tk.type;
-                        Lexer.nextToken();
-                        int cpIdx = E.aFCP(C.fSlot[fi]);
-                        E.eOp(0xB2, cpIdx); // GETSTATIC
-                        E.push();
-                        pExpr();
-                        E.eCO(op);
-                        E.pop();
-                        E.edup();
-                        E.eOp(0xB3, cpIdx); // PUTSTATIC
-                        E.pop();
-                        return 1;
-                    }
-                    if (Tk.type == Tk.INC || Tk.type == Tk.DEC) {
-                        int op = Tk.type;
-                        Lexer.nextToken();
-                        int cpIdx = E.aFCP(C.fSlot[fi]);
-                        E.eOp(0xB2, cpIdx); // GETSTATIC
-                        E.push();
-                        E.edup();
-                        E.ic1();
-                        E.eb(op == Tk.INC ? 0x60 : 0x64); E.pop(); // IADD/ISUB
-                        E.eOp(0xB3, cpIdx); // PUTSTATIC
-                        E.pop();
-                        return 1;
-                    }
-                    int cpIdx = E.aFCP(C.fSlot[fi]);
-                    E.eOp(0xB2, cpIdx); // GETSTATIC
-                    E.push();
-                    if (C.fArrKind[fi] != 0) return C.fArrKind[fi];
-                    return 1;
+                    // Static field lvalue (in-class, returns value on assign)
+                    lvK = 2; lvI = E.aFCP(C.fSlot[fi]); lvArr = C.fArrKind[fi]; lvRV = true;
+                    return lvOps();
                 }
             }
 
@@ -802,91 +607,76 @@ public class Expr {
         return retType;
     }
 
-    // ==================== FIELD ACCESS ====================
+    // ==================== LVALUE OPS ====================
 
-    static int eFldAcc(int fieldNm, boolean isStore) {
-        int fi = Resolver.fInstField(fieldNm);
-        if (fi < 0) {
-            Lexer.error(206);
-            return 0;
-        }
-
+    // Snapshot descriptors into locals — pExpr() may recurse into lvOps
+    static int lvOps() {
+        int k = lvK, i = lvI, t = lvT, arr = lvArr; boolean rv = lvRV;
         if (Tk.type == Tk.ASSIGN) {
             Lexer.nextToken();
+            if (k == 1) E.ethis();
             pExpr();
-            int cpIdx = E.aFCP(C.fSlot[fi]);
-            E.eOp(0xB5, cpIdx); // PUTFIELD
-            E.pop(); E.pop();
-            return 0;
+            if (k == 0) { E.edup(); E.eSt(i, t); E.pop(); return t == 1 ? 2 : 1; }
+            if (k == 2) {
+                if (rv) { E.edup(); E.eOp(0xB3, i); E.pop(); return 1; }
+                E.eOp(0xB3, i); E.pop(); return 0;
+            }
+            E.eOp(0xB5, i); E.pop(); E.pop(); return 0; // PUTFIELD
         }
         if (Tk.type >= Tk.PLUS_EQ && Tk.type <= Tk.USHR_EQ) {
-            int op = Tk.type;
-            Lexer.nextToken();
-            E.edup(); // DUP obj ref
-            int cpIdx = E.aFCP(C.fSlot[fi]);
-            E.eOp(0xB4, cpIdx); // GETFIELD
-            pExpr();
-            E.eCO(op);
-            E.pop();
-            E.eOp(0xB5, cpIdx); // PUTFIELD
-            E.pop(); E.pop();
-            return 0;
-        }
-
-        int cpIdx = E.aFCP(C.fSlot[fi]);
-        E.eOp(0xB4, cpIdx); // GETFIELD
-        if (C.fArrKind[fi] != 0) return C.fArrKind[fi];
-        return 1;
-    }
-
-    static int eSFldAcc(int ci, int fieldNm) {
-        int fi = Resolver.fStatField(ci, fieldNm);
-        if (fi < 0) {
-            Lexer.error(207);
-            return 0;
-        }
-
-        if (Tk.type == Tk.ASSIGN) {
-            Lexer.nextToken();
-            pExpr();
-            int cpIdx = E.aFCP(C.fSlot[fi]);
-            E.eOp(0xB3, cpIdx); // PUTSTATIC
-            E.pop();
-            return 0;
-        }
-        if (Tk.type >= Tk.PLUS_EQ && Tk.type <= Tk.USHR_EQ) {
-            int op = Tk.type;
-            Lexer.nextToken();
-            int cpIdx = E.aFCP(C.fSlot[fi]);
-            E.eOp(0xB2, cpIdx); // GETSTATIC
-            E.push();
-            pExpr();
-            E.eCO(op);
-            E.pop();
-            E.edup();
-            E.eOp(0xB3, cpIdx); // PUTSTATIC
-            E.pop();
-            return 1;
+            int op = Tk.type; Lexer.nextToken();
+            if (k == 0) {
+                E.eLd(i, t); E.push(); pExpr(); E.eCO(op); E.pop();
+                E.edup(); E.eSt(i, t); E.pop(); return 1;
+            }
+            if (k == 1) {
+                E.ethis(); E.ethis(); E.eOp(0xB4, i);
+                pExpr(); E.eCO(op); E.pop();
+                E.eOp(0xB5, i); E.pop(); E.pop(); return 0;
+            }
+            if (k == 2) {
+                E.eOp(0xB2, i); E.push(); pExpr(); E.eCO(op); E.pop();
+                E.edup(); E.eOp(0xB3, i); E.pop(); return 1;
+            }
+            // k == 3: obj already on stack
+            E.edup(); E.eOp(0xB4, i); pExpr(); E.eCO(op); E.pop();
+            E.eOp(0xB5, i); E.pop(); E.pop(); return 0;
         }
         if (Tk.type == Tk.INC || Tk.type == Tk.DEC) {
-            int op = Tk.type;
-            Lexer.nextToken();
-            int cpIdx = E.aFCP(C.fSlot[fi]);
-            E.eOp(0xB2, cpIdx); // GETSTATIC
-            E.push();
-            E.edup();
-            E.ic1();
-            E.eb(op == Tk.INC ? 0x60 : 0x64); E.pop(); // IADD/ISUB
-            E.eOp(0xB3, cpIdx); // PUTSTATIC
-            E.pop();
-            return 1;
+            int op = Tk.type; Lexer.nextToken();
+            if (k == 0) {
+                E.eLd(i, 0); E.push();
+                E.eb(0x84); E.eb(i); E.eb(op == Tk.INC ? 1 : 0xFF); return 1;
+            }
+            if (k == 1) {
+                E.ethis(); E.eOp(0xB4, i);
+                E.ethis(); E.ethis(); E.eOp(0xB4, i);
+                E.ic1(); E.eb(op == Tk.INC ? 0x60 : 0x64); E.pop();
+                E.eOp(0xB5, i); E.pop(); E.pop(); return 1;
+            }
+            // k == 2: GETSTATIC + DUP + 1 + op + PUTSTATIC
+            E.eOp(0xB2, i); E.push(); E.edup();
+            E.ic1(); E.eb(op == Tk.INC ? 0x60 : 0x64); E.pop();
+            E.eOp(0xB3, i); E.pop(); return 1;
+            // k == 3: not supported, falls through to load
         }
+        // Load
+        if (k == 0) {
+            E.eLd(i, t); E.push();
+            if (t >= 3) return t; return t == 1 ? 2 : 1;
+        }
+        if (k == 1) { E.ethis(); E.eOp(0xB4, i); }
+        else if (k == 2) { E.eOp(0xB2, i); E.push(); }
+        else { E.eOp(0xB4, i); }
+        if (arr != 0) return arr; return 1;
+    }
 
-        int cpIdx = E.aFCP(C.fSlot[fi]);
-        E.eOp(0xB2, cpIdx); // GETSTATIC
-        E.push();
-        if (C.fArrKind[fi] != 0) return C.fArrKind[fi];
-        return 1;
+    // Explicit obj.field lvalue (obj already on stack)
+    static int eFldAcc(int fieldNm) {
+        int fi = Resolver.fInstField(fieldNm);
+        if (fi < 0) { Lexer.error(206); return 0; }
+        lvK = 3; lvI = E.aFCP(C.fSlot[fi]); lvArr = C.fArrKind[fi]; lvRV = false;
+        return lvOps();
     }
 
 

@@ -1,264 +1,264 @@
 public class Resolver {
-    static void resolve() {
-        // Resolve parent class references (name → class index)
-        // Save cCount: synthExcCls (called via fClsByNm)
-        // may add new classes whose cParent is ALREADY a class index.
-        int origClassCount = C.cCount;
-        for (int ci = 0; ci < origClassCount; ci++) {
-            if (C.cParent[ci] != -1) {
-                int parentNm = C.cParent[ci]; // currently a name index
-                int pid = fClsByNm(parentNm);
-                C.cParent[ci] = pid; // now a class index, -1 if not found (Object)
-            }
-        }
+	static void resolve() {
+		// Resolve parent class references (name → class index)
+		// Save cCount: synthExcCls (called via fClsByNm)
+		// may add new classes whose cParent is ALREADY a class index.
+		int origClassCount = C.cCount;
+		for (int ci = 0; ci < origClassCount; ci++) {
+			if (C.cParent[ci] != -1) {
+				int parentNm = C.cParent[ci]; // currently a name index
+				int pid = fClsByNm(parentNm);
+				C.cParent[ci] = pid; // now a class index, -1 if not found (Object)
+			}
+		}
 
-        // Resolve interface references
-        for (int ci = 0; ci < C.cCount; ci++) {
-            int start = C.cIfaceS[ci];
-            for (int j = 0; j < C.cIfaceC[ci]; j++) {
-                int ifNm = C.ifList[start + j]; // name index
-                int ifId = fClsByNm(ifNm);
-                C.ifList[start + j] = ifId; // now class index
-            }
-        }
+		// Resolve interface references
+		for (int ci = 0; ci < C.cCount; ci++) {
+			int start = C.cIfaceS[ci];
+			for (int j = 0; j < C.cIfaceC[ci]; j++) {
+				int ifNm = C.ifList[start + j]; // name index
+				int ifId = fClsByNm(ifNm);
+				C.ifList[start + j] = ifId; // now class index
+			}
+		}
 
-        // Compute instance field counts (including inherited)
-        for (int ci = 0; ci < C.cCount; ci++) {
-            int inherited = 0;
-            if (C.cParent[ci] >= 0) {
-                inherited = C.cFieldC[C.cParent[ci]];
-            }
-            C.cFieldC[ci] = inherited + C.cOwnF[ci];
-        }
+		// Compute instance field counts (including inherited)
+		for (int ci = 0; ci < C.cCount; ci++) {
+			int inherited = 0;
+			if (C.cParent[ci] >= 0) {
+				inherited = C.cFieldC[C.cParent[ci]];
+			}
+			C.cFieldC[ci] = inherited + C.cOwnF[ci];
+		}
 
-        // Assign field slots
-        C.sfCount = 0;
-        for (int fi = 0; fi < C.fCount; fi++) {
-            if (C.fStatic[fi]) {
-                C.fSlot[fi] = C.sfCount++;
-            } else {
-                // Instance field: slot = parent field count + own offset
-                int ci = C.fClass[fi];
-                int inherited = 0;
-                if (C.cParent[ci] >= 0) {
-                    inherited = C.cFieldC[C.cParent[ci]];
-                }
-                int ownIdx = 0;
-                for (int fj = 0; fj < fi; fj++) {
-                    if (!C.fStatic[fj] && C.fClass[fj] == ci) {
-                        ownIdx++;
-                    }
-                }
-                C.fSlot[fi] = inherited + ownIdx;
-            }
-        }
+		// Assign field slots
+		C.sfCount = 0;
+		for (int fi = 0; fi < C.fCount; fi++) {
+			if (C.fStatic[fi]) {
+				C.fSlot[fi] = C.sfCount++;
+			} else {
+				// Instance field: slot = parent field count + own offset
+				int ci = C.fClass[fi];
+				int inherited = 0;
+				if (C.cParent[ci] >= 0) {
+					inherited = C.cFieldC[C.cParent[ci]];
+				}
+				int ownIdx = 0;
+				for (int fj = 0; fj < fi; fj++) {
+					if (!C.fStatic[fj] && C.fClass[fj] == ci) {
+						ownIdx++;
+					}
+				}
+				C.fSlot[fi] = inherited + ownIdx;
+			}
+		}
 
-        // Ensure all user classes have a default constructor if none declared
-        for (int ci = C.uClsStart; ci < C.cCount; ci++) {
-            if (C.cIsIface[ci]) continue;
-            boolean hasCtor = false;
-            for (int mi = 0; mi < C.mCount; mi++) {
-                if (C.mClass[mi] == ci && C.mIsCtor[mi]) {
-                    hasCtor = true;
-                    break;
-                }
-            }
-            if (!hasCtor) {
-                int mi = C.initMethod(ci, C.N_INIT, 1, false, true, false, 0);
-                C.mBodyS[mi] = -2; C.mBodyE[mi] = -2;
-            }
-        }
+		// Ensure all user classes have a default constructor if none declared
+		for (int ci = C.uClsStart; ci < C.cCount; ci++) {
+			if (C.cIsIface[ci]) continue;
+			boolean hasCtor = false;
+			for (int mi = 0; mi < C.mCount; mi++) {
+				if (C.mClass[mi] == ci && C.mIsCtor[mi]) {
+					hasCtor = true;
+					break;
+				}
+			}
+			if (!hasCtor) {
+				int mi = C.initMethod(ci, C.N_INIT, 1, false, true, false, 0);
+				C.mBodyS[mi] = -2; C.mBodyE[mi] = -2;
+			}
+		}
 
-        // Ensure Object.<init> exists
-        C.ensNat(C.N_OBJECT, C.N_INIT);
+		// Ensure Object.<init> exists
+		C.ensNat(C.N_OBJECT, C.N_INIT);
 
-        // Build vtables
-        for (int ci = 0; ci < C.cCount; ci++) {
-            if (C.cIsIface[ci]) continue;
-            C.vtBase[ci] = vtableLen();
-            int parentVtSize = 0;
-            if (C.cParent[ci] >= 0) {
-                // Copy parent vtable
-                int pid = C.cParent[ci];
-                parentVtSize = C.cVtSize[pid];
-                int pBase = C.vtBase[pid];
-                for (int j = 0; j < parentVtSize; j++) {
-                    C.vtable[C.vtBase[ci] + j] = C.vtable[pBase + j];
-                }
-            }
-            C.cVtSize[ci] = parentVtSize;
+		// Build vtables
+		for (int ci = 0; ci < C.cCount; ci++) {
+			if (C.cIsIface[ci]) continue;
+			C.vtBase[ci] = vtableLen();
+			int parentVtSize = 0;
+			if (C.cParent[ci] >= 0) {
+				// Copy parent vtable
+				int pid = C.cParent[ci];
+				parentVtSize = C.cVtSize[pid];
+				int pBase = C.vtBase[pid];
+				for (int j = 0; j < parentVtSize; j++) {
+					C.vtable[C.vtBase[ci] + j] = C.vtable[pBase + j];
+				}
+			}
+			C.cVtSize[ci] = parentVtSize;
 
-            // Add/override methods
-            for (int mi = 0; mi < C.mCount; mi++) {
-                if (C.mClass[mi] != ci) continue;
-                if (C.mStatic[mi] || C.mNative[mi]) continue;
-                if (C.mIsCtor[mi]) continue;
+			// Add/override methods
+			for (int mi = 0; mi < C.mCount; mi++) {
+				if (C.mClass[mi] != ci) continue;
+				if (C.mStatic[mi] || C.mNative[mi]) continue;
+				if (C.mIsCtor[mi]) continue;
 
-                // Check if this overrides a parent method
-                int slot = -1;
-                for (int j = 0; j < C.cVtSize[ci]; j++) {
-                    int existingMi = C.vtable[C.vtBase[ci] + j];
-                    if (C.mName[existingMi] == C.mName[mi]) {
-                        slot = j;
-                        break;
-                    }
-                }
-                if (slot >= 0) {
-                    C.vtable[C.vtBase[ci] + slot] = mi;
-                    C.mVtSlot[mi] = slot;
-                } else {
-                    slot = C.cVtSize[ci]++;
-                    C.vtable[C.vtBase[ci] + slot] = mi;
-                    C.mVtSlot[mi] = slot;
-                }
-            }
-        }
+				// Check if this overrides a parent method
+				int slot = -1;
+				for (int j = 0; j < C.cVtSize[ci]; j++) {
+					int existingMi = C.vtable[C.vtBase[ci] + j];
+					if (C.mName[existingMi] == C.mName[mi]) {
+						slot = j;
+						break;
+					}
+				}
+				if (slot >= 0) {
+					C.vtable[C.vtBase[ci] + slot] = mi;
+					C.mVtSlot[mi] = slot;
+				} else {
+					slot = C.cVtSize[ci]++;
+					C.vtable[C.vtBase[ci] + slot] = mi;
+					C.mVtSlot[mi] = slot;
+				}
+			}
+		}
 
-        // Assign vmids for interface methods
-        int nextVmid = 0;
-        for (int ci = 0; ci < C.cCount; ci++) {
-            if (!C.cIsIface[ci]) continue;
-            for (int mi = 0; mi < C.mCount; mi++) {
-                if (C.mClass[mi] != ci) continue;
-                C.mVmid[mi] = nextVmid++;
-            }
-        }
-        // Copy vmids to implementing class methods
-        for (int ci = 0; ci < C.cCount; ci++) {
-            if (C.cIsIface[ci]) continue;
-            int start = C.cIfaceS[ci];
-            for (int j = 0; j < C.cIfaceC[ci]; j++) {
-                int ifId = C.ifList[start + j];
-                if (ifId < 0) continue;
-                for (int imi = 0; imi < C.mCount; imi++) {
-                    if (C.mClass[imi] != ifId) continue;
-                    // Find matching method in implementing class
-                    for (int cmi = 0; cmi < C.mCount; cmi++) {
-                        if (C.mClass[cmi] != ci) continue;
-                        if (C.mName[cmi] == C.mName[imi]) {
-                            C.mVmid[cmi] = C.mVmid[imi];
-                        }
-                    }
-                }
-            }
-        }
+		// Assign vmids for interface methods
+		int nextVmid = 0;
+		for (int ci = 0; ci < C.cCount; ci++) {
+			if (!C.cIsIface[ci]) continue;
+			for (int mi = 0; mi < C.mCount; mi++) {
+				if (C.mClass[mi] != ci) continue;
+				C.mVmid[mi] = nextVmid++;
+			}
+		}
+		// Copy vmids to implementing class methods
+		for (int ci = 0; ci < C.cCount; ci++) {
+			if (C.cIsIface[ci]) continue;
+			int start = C.cIfaceS[ci];
+			for (int j = 0; j < C.cIfaceC[ci]; j++) {
+				int ifId = C.ifList[start + j];
+				if (ifId < 0) continue;
+				for (int imi = 0; imi < C.mCount; imi++) {
+					if (C.mClass[imi] != ifId) continue;
+					// Find matching method in implementing class
+					for (int cmi = 0; cmi < C.mCount; cmi++) {
+						if (C.mClass[cmi] != ci) continue;
+						if (C.mName[cmi] == C.mName[imi]) {
+							C.mVmid[cmi] = C.mVmid[imi];
+						}
+					}
+				}
+			}
+		}
 
-        // Ensure all cataloged native methods have their flags set
-        for (int mi = 0; mi < C.mCount; mi++) {
-            if (C.mNative[mi] && C.mFlags[mi] == 0) {
-                int nm = C.mName[mi];
-                int nid = -1;
-                if (nm == C.N_PUTCHAR)      nid = 0;
-                else if (nm == C.N_IN)      nid = 1;
-                else if (nm == C.N_OUT)     nid = 2;
-                else if (nm == C.N_PEEK)    nid = 3;
-                else if (nm == C.N_POKE)    nid = 4;
-                else if (nm == C.N_HALT)    nid = 5;
-                else if (nm == C.N_INIT)    nid = 6;
-                else if (nm == C.N_LENGTH)  nid = 7;
-                else if (nm == C.N_CHARAT)  nid = 8;
-                else if (nm == C.N_EQUALS)  nid = 9;
-                else if (nm == C.N_TOSTRING) nid = 10;
-                else if (nm == C.N_PRINT)   nid = 11;
-                else if (nm == C.N_HASHCODE) nid = 12;
-                else if (nm == C.N_ARRAYCOPY)       nid = 13;
-                else if (nm == C.N_MEMCMP)          nid = 14;
-                else if (nm == C.N_WRITE_BYTES)     nid = 15;
-                else if (nm == C.N_STRING_FROM_BYTES) nid = 16;
-                if (nid >= 0) C.mFlags[mi] = (nid << 1) | 1;
-            }
-        }
+		// Ensure all cataloged native methods have their flags set
+		for (int mi = 0; mi < C.mCount; mi++) {
+			if (C.mNative[mi] && C.mFlags[mi] == 0) {
+				int nm = C.mName[mi];
+				int nid = -1;
+				if (nm == C.N_PUTCHAR)      nid = 0;
+				else if (nm == C.N_IN)      nid = 1;
+				else if (nm == C.N_OUT)     nid = 2;
+				else if (nm == C.N_PEEK)    nid = 3;
+				else if (nm == C.N_POKE)    nid = 4;
+				else if (nm == C.N_HALT)    nid = 5;
+				else if (nm == C.N_INIT)    nid = 6;
+				else if (nm == C.N_LENGTH)  nid = 7;
+				else if (nm == C.N_CHARAT)  nid = 8;
+				else if (nm == C.N_EQUALS)  nid = 9;
+				else if (nm == C.N_TOSTRING) nid = 10;
+				else if (nm == C.N_PRINT)   nid = 11;
+				else if (nm == C.N_HASHCODE) nid = 12;
+				else if (nm == C.N_ARRAYCOPY)       nid = 13;
+				else if (nm == C.N_MEMCMP)          nid = 14;
+				else if (nm == C.N_WRITE_BYTES)     nid = 15;
+				else if (nm == C.N_STRING_FROM_BYTES) nid = 16;
+				if (nid >= 0) C.mFlags[mi] = (nid << 1) | 1;
+			}
+		}
 
-        // Find main method
-        C.mainMi = -1;
-        for (int mi = 0; mi < C.mCount; mi++) {
-            if (C.mName[mi] == C.N_MAIN && C.mStatic[mi] && !C.mNative[mi]) {
-                C.mainMi = mi;
-                break;
-            }
-        }
-        if (C.mainMi < 0) {
-            Lexer.error(200); // No main method found
-        }
-        // picoJVM calls main without pushing arguments, so arg_count must be 0
-        if (C.mainMi >= 0) {
-            C.mArgC[C.mainMi] = 0;
-        }
-    }
+		// Find main method
+		C.mainMi = -1;
+		for (int mi = 0; mi < C.mCount; mi++) {
+			if (C.mName[mi] == C.N_MAIN && C.mStatic[mi] && !C.mNative[mi]) {
+				C.mainMi = mi;
+				break;
+			}
+		}
+		if (C.mainMi < 0) {
+			Lexer.error(200); // No main method found
+		}
+		// picoJVM calls main without pushing arguments, so arg_count must be 0
+		if (C.mainMi >= 0) {
+			C.mArgC[C.mainMi] = 0;
+		}
+	}
 
-    static int vtableLen() {
-        // Sum of all vtable sizes so far
-        int total = 0;
-        for (int ci = 0; ci < C.cCount; ci++) {
-            total += C.cVtSize[ci];
-        }
-        return total;
-    }
+	static int vtableLen() {
+		// Sum of all vtable sizes so far
+		int total = 0;
+		for (int ci = 0; ci < C.cCount; ci++) {
+			total += C.cVtSize[ci];
+		}
+		return total;
+	}
 
-    static int fClsByNm(int nm) {
-        for (int ci = 0; ci < C.cCount; ci++) {
-            if (C.cName[ci] == nm) return ci;
-        }
-        // Check well-known names
-        if (nm == C.N_THROWABLE || nm == C.N_EXCEPTION || nm == C.N_RUNTIME_EX) {
-            // Synthesize exception class
-            return synthExcCls(nm);
-        }
-        return -1;
-    }
+	static int fClsByNm(int nm) {
+		for (int ci = 0; ci < C.cCount; ci++) {
+			if (C.cName[ci] == nm) return ci;
+		}
+		// Check well-known names
+		if (nm == C.N_THROWABLE || nm == C.N_EXCEPTION || nm == C.N_RUNTIME_EX) {
+			// Synthesize exception class
+			return synthExcCls(nm);
+		}
+		return -1;
+	}
 
-    static int synthExcCls(int nm) {
-        // Ensure parent hierarchy exists
-        int parentNm;
-        if (nm == C.N_THROWABLE) parentNm = -1; // Object
-        else if (nm == C.N_EXCEPTION) {
-            parentNm = C.N_THROWABLE;
-            synthExcCls(C.N_THROWABLE); // ensure parent exists
-        }
-        else { // RuntimeException
-            parentNm = C.N_EXCEPTION;
-            synthExcCls(C.N_EXCEPTION); // ensure parent exists
-        }
+	static int synthExcCls(int nm) {
+		// Ensure parent hierarchy exists
+		int parentNm;
+		if (nm == C.N_THROWABLE) parentNm = -1; // Object
+		else if (nm == C.N_EXCEPTION) {
+			parentNm = C.N_THROWABLE;
+			synthExcCls(C.N_THROWABLE); // ensure parent exists
+		}
+		else { // RuntimeException
+			parentNm = C.N_EXCEPTION;
+			synthExcCls(C.N_EXCEPTION); // ensure parent exists
+		}
 
-        // Check if already exists
-        for (int ci = 0; ci < C.cCount; ci++) {
-            if (C.cName[ci] == nm) return ci;
-        }
+		// Check if already exists
+		for (int ci = 0; ci < C.cCount; ci++) {
+			if (C.cName[ci] == nm) return ci;
+		}
 
-        int ci = C.initClass(nm);
-        C.cParent[ci] = parentNm == -1 ? -1 : fClsByNm(parentNm);
-        C.vtBase[ci] = vtableLen();
-        C.cBodyS[ci] = -1; C.cBodyE[ci] = -1;
-        return ci;
-    }
+		int ci = C.initClass(nm);
+		C.cParent[ci] = parentNm == -1 ? -1 : fClsByNm(parentNm);
+		C.vtBase[ci] = vtableLen();
+		C.cBodyS[ci] = -1; C.cBodyE[ci] = -1;
+		return ci;
+	}
 
 
-    static int fField(int ci, int nm) {
-        // Search this class and parents
-        while (ci >= 0) {
-            for (int fi = 0; fi < C.fCount; fi++) {
-                if (C.fClass[fi] == ci && C.fName[fi] == nm) return fi;
-            }
-            ci = C.cParent[ci];
-        }
-        return -1;
-    }
+	static int fField(int ci, int nm) {
+		// Search this class and parents
+		while (ci >= 0) {
+			for (int fi = 0; fi < C.fCount; fi++) {
+				if (C.fClass[fi] == ci && C.fName[fi] == nm) return fi;
+			}
+			ci = C.cParent[ci];
+		}
+		return -1;
+	}
 
-    static int fStatField(int ci, int nm) {
-        int best = -1;
-        for (int fi = 0; fi < C.fCount; fi++) {
-            if (C.fName[fi] == nm && C.fStatic[fi]) {
-                if (C.fClass[fi] == ci) return fi;
-                if (best < 0) best = fi;
-            }
-        }
-        return best;
-    }
+	static int fStatField(int ci, int nm) {
+		int best = -1;
+		for (int fi = 0; fi < C.fCount; fi++) {
+			if (C.fName[fi] == nm && C.fStatic[fi]) {
+				if (C.fClass[fi] == ci) return fi;
+				if (best < 0) best = fi;
+			}
+		}
+		return best;
+	}
 
-    static int fInstField(int nm) {
-        for (int fi = 0; fi < C.fCount; fi++) {
-            if (C.fName[fi] == nm && !C.fStatic[fi]) return fi;
-        }
-        return -1;
-    }
+	static int fInstField(int nm) {
+		for (int fi = 0; fi < C.fCount; fi++) {
+			if (C.fName[fi] == nm && !C.fStatic[fi]) return fi;
+		}
+		return -1;
+	}
 }

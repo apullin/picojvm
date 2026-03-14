@@ -15,7 +15,8 @@ EXPDIR  = expected
 # All compiler source files
 SRCS = $(SRCDIR)/Compiler.java $(SRCDIR)/Token.java $(SRCDIR)/Lexer.java $(SRCDIR)/Native.java \
        $(SRCDIR)/Catalog.java $(SRCDIR)/Resolver.java $(SRCDIR)/Emit.java \
-       $(SRCDIR)/Stmt.java $(SRCDIR)/Expr.java $(SRCDIR)/Linker.java
+       $(SRCDIR)/Stmt.java $(SRCDIR)/Expr.java $(SRCDIR)/Linker.java \
+       $(SRCDIR)/DiskMain.java
 
 # Test programs
 TESTS = T01_Empty T02_Literal T03_Arithmetic T04_IfElse T05_WhileLoop \
@@ -176,13 +177,70 @@ endef
 
 test-disk: $(PICOJVM) $(BUILDDIR)/picojc-disk.pjvm
 	@mkdir -p $(BUILDDIR)/disk_test
-	$(call disk_test,T01_Empty)
-	$(call disk_test,T03_Arithmetic)
-	$(call disk_test,T27_Fib)
-	$(call disk_test,T05_WhileLoop)
-	$(call disk_test,T29_StringTest)
-	@echo ""
-	@echo "=== Disk I/O compile: ALL PASSED ==="
+	@rm -f $(BUILDDIR)/disk_test/sources.lst
+	@pass=0; fail=0; \
+	for t in $(TESTS); do \
+		echo "--- $$t (disk) ---"; \
+		cp $(TESTDIR)/$$t.java $(BUILDDIR)/disk_test/input.java; \
+		cd $(BUILDDIR)/disk_test && $(DISK_PICOJVM) $(DISK_COMPILER) > $$t.pjvm \
+			2> $${t}_compile.log; \
+		cd $(CURDIR); \
+		$(PICOJVM) $(BUILDDIR)/disk_test/$$t.pjvm > $(BUILDDIR)/disk_test/$$t.out \
+			2> $(BUILDDIR)/disk_test/$${t}_run.log || true; \
+		if diff -q $(BUILDDIR)/disk_test/$$t.out $(EXPDIR)/$$t.txt > /dev/null 2>&1; then \
+			echo "PASS: $$t (disk)"; \
+			pass=$$((pass + 1)); \
+		else \
+			echo "FAIL: $$t (disk)"; \
+			echo "  Expected:"; cat $(EXPDIR)/$$t.txt | head -3; \
+			echo "  Got:"; cat $(BUILDDIR)/disk_test/$$t.out | head -3; \
+			fail=$$((fail + 1)); \
+		fi; \
+	done; \
+	echo ""; \
+	echo "Disk single-file: $$pass passed, $$fail failed"; \
+	test $$fail -eq 0
+
+# Multi-file disk test: compile T40 with platform libs via sources.lst
+test-disk-multi: $(PICOJVM) $(BUILDDIR)/picojc-disk.pjvm
+	@mkdir -p $(BUILDDIR)/disk_multi_test
+	@cp ../lib/Console.java $(BUILDDIR)/disk_multi_test/
+	@cp ../lib/Arrays.java $(BUILDDIR)/disk_multi_test/
+	@cp ../lib/IO.java $(BUILDDIR)/disk_multi_test/
+	@cp $(TESTDIR)/T40_PlatformPkg.java $(BUILDDIR)/disk_multi_test/
+	@printf 'Console.java\nArrays.java\nIO.java\nT40_PlatformPkg.java\n' > $(BUILDDIR)/disk_multi_test/sources.lst
+	@echo "--- T40_PlatformPkg (disk multi-file) ---"
+	@cd $(BUILDDIR)/disk_multi_test && $(DISK_PICOJVM) $(DISK_COMPILER) > T40.pjvm \
+		2> T40_compile.log
+	@$(PICOJVM) $(BUILDDIR)/disk_multi_test/T40.pjvm > $(BUILDDIR)/disk_multi_test/T40.out \
+		2> $(BUILDDIR)/disk_multi_test/T40_run.log || true
+	@if diff -q $(BUILDDIR)/disk_multi_test/T40.out $(EXPDIR)/T40_PlatformPkg.txt > /dev/null 2>&1; then \
+		echo "PASS: T40_PlatformPkg (disk multi-file)"; \
+	else \
+		echo "FAIL: T40_PlatformPkg (disk multi-file)"; \
+		echo "  Expected:"; cat $(EXPDIR)/T40_PlatformPkg.txt | head -3; \
+		echo "  Got:"; cat $(BUILDDIR)/disk_multi_test/T40.out | head -3; \
+		false; \
+	fi
+
+# Disk selfhost: compile compiler sources via sources.lst, verify byte-identical to memory mode
+test-disk-selfhost: $(PICOJVM) $(BUILDDIR)/picojc-disk.pjvm $(BUILDDIR)/gen1.pjvm
+	@mkdir -p $(BUILDDIR)/disk_selfhost
+	@for f in Token Lexer Native Compiler Catalog Resolver Emit Stmt Expr Linker; do \
+		cp $(SRCDIR)/$$f.java $(BUILDDIR)/disk_selfhost/; \
+	done
+	@printf 'Token.java\nLexer.java\nNative.java\nCompiler.java\nCatalog.java\nResolver.java\nEmit.java\nStmt.java\nExpr.java\nLinker.java\n' > $(BUILDDIR)/disk_selfhost/sources.lst
+	@echo "--- Disk multi-file selfhost ---"
+	@cd $(BUILDDIR)/disk_selfhost && $(DISK_PICOJVM) $(DISK_COMPILER) > gen1_disk.pjvm \
+		2> gen1_disk.log
+	@if cmp -s $(BUILDDIR)/disk_selfhost/gen1_disk.pjvm $(BUILDDIR)/gen1.pjvm; then \
+		echo "PASS: disk multi-file gen1 == memory gen1 ($$(wc -c < $(BUILDDIR)/disk_selfhost/gen1_disk.pjvm | tr -d ' ') bytes)"; \
+	else \
+		echo "FAIL: disk multi-file gen1 != memory gen1"; \
+		echo "  disk: $$(wc -c < $(BUILDDIR)/disk_selfhost/gen1_disk.pjvm | tr -d ' ') bytes"; \
+		echo "  mem:  $$(wc -c < $(BUILDDIR)/gen1.pjvm | tr -d ' ') bytes"; \
+		false; \
+	fi
 
 # Quick compile check: just build picojc.pjvm
 build: $(BUILDDIR)/picojc.pjvm
@@ -296,7 +354,7 @@ test-selfhost: test-selfhost-fixpoint test-binmatch test-gen1
 clean:
 	rm -rf $(BUILDDIR)
 
-.PHONY: all test build check-javac clean test-disk
+.PHONY: all test build check-javac clean test-disk test-disk-multi test-disk-selfhost
 .PHONY: test-selfhost test-selfhost-fixpoint test-binmatch test-gen1
 .PRECIOUS: $(BUILDDIR)/%.pjvm $(BUILDDIR)/%.out
 .PRECIOUS: $(BUILDDIR)/gen1_%.pjvm $(BUILDDIR)/gen1_%.out

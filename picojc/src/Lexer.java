@@ -6,16 +6,176 @@ public class Lexer {
 	static int savedPos;
 	static int savedLine;
 
+	// Disk streaming mode
+	static boolean diskMode;
+	static byte[] dBuf;     // sector buffer (256 bytes = 2 sectors)
+	static int dBase;       // file offset of dBuf[0]
+	static int dLen;        // valid bytes in buffer
+	static boolean dEof;    // true when file is exhausted
+	static boolean dSaved;  // true between save() and restore()
+
+	// Multi-file support
+	static byte[][] dFiles;    // file list (max 16)
+	static int[] dFileLens;    // filename lengths
+	static int dFileCount;     // number of source files
+	static int dFileCur;       // current file index
+
 	static void init(int base, int length) {
 		srcBase = base;
 		srcLen = length;
 		pos = 0;
 		line = 1;
+		diskMode = false;
+	}
+
+	static void initDisk(byte[] fname, int nameLen) {
+		int r = Native.fileOpen(fname, nameLen, 1);
+		if (r != 0) {
+			Native.putchar('E');
+			Native.putchar('F');
+			Native.halt();
+			return;
+		}
+		diskMode = true;
+		if (dBuf == null) dBuf = new byte[256];
+		dBase = 0;
+		dLen = 0;
+		dEof = false;
+		dSaved = false;
+		srcLen = 0x7FFFFFFF; // effectively infinite for pos < srcLen guards
+		pos = 0;
+		line = 1;
+		dFill();
+	}
+
+	static void rewindDisk() {
+		Native.fileClose();
+		// Reopen same file — caller must set up fname again or use REWIND
+		// For now, close and reopen is handled by the caller
+		dBase = 0;
+		dLen = 0;
+		dEof = false;
+		dSaved = false;
+		pos = 0;
+		line = 1;
+	}
+
+	static void closeDisk() {
+		Native.fileClose();
+		diskMode = false;
+	}
+
+	// Multi-file: open a list of source files as one continuous stream
+	static void initDiskFiles(byte[][] files, int[] lens, int count) {
+		dFiles = files;
+		dFileLens = lens;
+		dFileCount = count;
+		dFileCur = 0;
+		int r = Native.fileOpen(files[0], lens[0], 1);
+		if (r != 0) { Native.putchar('E'); Native.putchar('F'); Native.halt(); return; }
+		diskMode = true;
+		if (dBuf == null) dBuf = new byte[256];
+		dBase = 0;
+		dLen = 0;
+		dEof = false;
+		dSaved = false;
+		srcLen = 0x7FFFFFFF;
+		pos = 0;
+		line = 1;
+		dFill();
+	}
+
+	// Multi-file: rewind to first file for re-streaming (Pass 3)
+	static void rewindDiskFiles() {
+		Native.fileClose();
+		dFileCur = 0;
+		int r = Native.fileOpen(dFiles[0], dFileLens[0], 1);
+		if (r != 0) { Native.putchar('E'); Native.putchar('F'); Native.halt(); return; }
+		dBase = 0;
+		dLen = 0;
+		dEof = false;
+		dSaved = false;
+		pos = 0;
+		line = 1;
+		dFill();
+	}
+
+	// Multi-file: advance to next file, return false if no more
+	static boolean advanceFile() {
+		Native.fileClose();
+		dFileCur++;
+		if (dFileCur >= dFileCount) return false;
+		int r = Native.fileOpen(dFiles[dFileCur], dFileLens[dFileCur], 1);
+		if (r != 0) { Native.putchar('E'); Native.putchar('F'); Native.halt(); return false; }
+		dBase = pos; // new file's byte 0 maps to current global pos
+		dLen = 0;
+		dEof = false;
+		dFill();
+		return true;
+	}
+
+	// Fill buffer from disk (128B sector read)
+	static void dFill() {
+		if (dEof) return;
+		int space = 256 - dLen;
+		if (space < 128) return;
+		int n = Native.fileRead(dBuf, dLen, 128);
+		if (n <= 0) { dEof = true; return; }
+		dLen += n;
+	}
+
+	// Compact buffer: discard consumed data before the keep point
+	static void dCompact() {
+		int keep = pos;
+		if (dSaved && savedPos < keep) keep = savedPos;
+		int shift = keep - dBase;
+		if (shift <= 0) return;
+		int rem = dLen - shift;
+		if (rem > 0) Native.arraycopy(dBuf, shift, dBuf, 0, rem);
+		dBase += shift;
+		dLen = rem;
 	}
 
 	static int ch() {
+		if (diskMode) {
+			int bi = pos - dBase;
+			if (bi >= 0 && bi < dLen) return dBuf[bi] & 0xFF;
+			if (dEof) {
+				if (dFileCount > 0 && advanceFile()) {
+					bi = pos - dBase;
+					if (bi >= 0 && bi < dLen) return dBuf[bi] & 0xFF;
+				}
+				return -1;
+			}
+			dCompact();
+			dFill();
+			bi = pos - dBase;
+			if (bi >= 0 && bi < dLen) return dBuf[bi] & 0xFF;
+			// dFill may have set dEof — try next file
+			if (dEof && dFileCount > 0 && advanceFile()) {
+				bi = pos - dBase;
+				if (bi >= 0 && bi < dLen) return dBuf[bi] & 0xFF;
+			}
+			return -1;
+		}
 		if (pos >= srcLen) return -1;
 		return Native.peek(srcBase + pos) & 0xFF;
+	}
+
+	// Peek at pos+1 without advancing
+	static int chNext() {
+		if (diskMode) {
+			int bi = (pos + 1) - dBase;
+			if (bi >= 0 && bi < dLen) return dBuf[bi] & 0xFF;
+			if (dEof) return -1;
+			dCompact();
+			dFill();
+			bi = (pos + 1) - dBase;
+			if (bi >= 0 && bi < dLen) return dBuf[bi] & 0xFF;
+			return -1;
+		}
+		if (pos + 1 >= srcLen) return -1;
+		return Native.peek(srcBase + pos + 1) & 0xFF;
 	}
 
 	static void advance() {
@@ -25,39 +185,47 @@ public class Lexer {
 	static void save() {
 		savedPos = pos;
 		savedLine = line;
+		if (diskMode) dSaved = true;
 	}
 
 	static void restore() {
 		pos = savedPos;
 		line = savedLine;
+		if (diskMode) dSaved = false;
+	}
+
+	// Discard saved position without restoring (e.g., constructor lookahead succeeded)
+	static void discardSave() {
+		dSaved = false;
 	}
 
 	static void skipWhitespaceAndComments() {
-		while (pos < srcLen) {
+		while (true) {
 			int c = ch();
+			if (c < 0) return;
 			if (c == ' ' || c == '\t' || c == '\r') {
 				advance();
 			} else if (c == '\n') {
 				advance();
 				line++;
 			} else if (c == '/') {
-				int next = (pos + 1 < srcLen) ? (Native.peek(srcBase + pos + 1) & 0xFF) : -1;
+				int next = chNext();
 				if (next == '/') {
 					// Single-line comment
 					advance(); advance();
-					while (pos < srcLen && ch() != '\n') advance();
+					int sc = ch();
+					while (sc >= 0 && sc != '\n') { advance(); sc = ch(); }
 				} else if (next == '*') {
 					// Multi-line comment
 					advance(); advance();
-					while (pos < srcLen) {
-						if (ch() == '*') {
+					while (true) {
+						int mc = ch();
+						if (mc < 0) break;
+						if (mc == '*') {
 							advance();
-							if (pos < srcLen && ch() == '/') {
-								advance();
-								break;
-							}
+							if (ch() == '/') { advance(); break; }
 						} else {
-							if (ch() == '\n') line++;
+							if (mc == '\n') line++;
 							advance();
 						}
 					}
@@ -155,25 +323,27 @@ public class Lexer {
 
 	static void readIdentifier() {
 		Tk.strLen = 0;
-		while (pos < srcLen && isAlphaNum(ch())) {
+		int c = ch();
+		while (c >= 0 && isAlphaNum(c)) {
 			if (Tk.strLen < 255) {
-				Tk.strBuf[Tk.strLen] = (byte) ch();
+				Tk.strBuf[Tk.strLen] = (byte) c;
 				Tk.strLen++;
 			}
 			advance();
+			c = ch();
 		}
 		Tk.type = lookupKeyword();
 	}
 
 	static void readNumber() {
 		int c = ch();
-		if (c == '0' && pos + 1 < srcLen) {
-			int next = Native.peek(srcBase + pos + 1) & 0xFF;
+		if (c == '0') {
+			int next = chNext();
 			if (next == 'x' || next == 'X') {
 				// Hex literal
 				advance(); advance();
 				int val = 0;
-				while (pos < srcLen) {
+				while (true) {
 					c = ch();
 					if (c >= '0' && c <= '9') { val = val * 16 + (c - '0'); advance(); }
 					else if (c >= 'a' && c <= 'f') { val = val * 16 + (c - 'a' + 10); advance(); }
@@ -187,7 +357,7 @@ public class Lexer {
 				// Binary literal
 				advance(); advance();
 				int val = 0;
-				while (pos < srcLen) {
+				while (true) {
 					c = ch();
 					if (c == '0' || c == '1') { val = val * 2 + (c - '0'); advance(); }
 					else break;
@@ -199,12 +369,14 @@ public class Lexer {
 		}
 		// Decimal literal
 		int val = 0;
-		while (pos < srcLen && isDigit(ch())) {
-			val = val * 10 + (ch() - '0');
+		c = ch();
+		while (c >= 0 && isDigit(c)) {
+			val = val * 10 + (c - '0');
 			advance();
+			c = ch();
 		}
 		// Skip L/l suffix if present
-		if (pos < srcLen && (ch() == 'L' || ch() == 'l')) advance();
+		if (c == 'L' || c == 'l') advance();
 		Tk.type = Tk.INT_LIT;
 		Tk.intValue = val;
 	}
@@ -240,25 +412,26 @@ public class Lexer {
 	static void readStringLiteral() {
 		advance(); // skip opening "
 		Tk.strLen = 0;
-		while (pos < srcLen && ch() != '"') {
-			int c;
-			if (ch() == '\\') {
+		int c = ch();
+		while (c >= 0 && c != '"') {
+			if (c == '\\') {
 				c = readEscape();
 			} else {
-				c = ch();
 				advance();
 			}
 			if (Tk.strLen < 255) {
 				Tk.strBuf[Tk.strLen] = (byte) c;
 				Tk.strLen++;
 			}
+			c = ch();
 		}
-		if (pos < srcLen) advance(); // skip closing "
+		if (c >= 0) advance(); // skip closing "
 		Tk.type = Tk.STR_LIT;
 	}
 
 	static boolean matchChar(int expected) {
-		if (pos < srcLen && ch() == expected) {
+		int c = ch();
+		if (c >= 0 && c == expected) {
 			advance();
 			return true;
 		}
@@ -269,12 +442,11 @@ public class Lexer {
 		skipWhitespaceAndComments();
 		Tk.line = line;
 
-		if (pos >= srcLen) {
+		int c = ch();
+		if (c < 0) {
 			Tk.type = Tk.EOF;
 			return;
 		}
-
-		int c = ch();
 
 		if (isAlpha(c)) {
 			readIdentifier();

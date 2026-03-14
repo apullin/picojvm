@@ -170,6 +170,7 @@ public class Expr {
 				Lexer.nextToken();
 				if (Tk.type == Tk.RPAREN) {
 					// It's a cast
+					Lexer.discardSave();
 					Lexer.nextToken();
 					pUnary();
 					// Emit cast instruction

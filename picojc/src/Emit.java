@@ -115,6 +115,7 @@ class E {
 				Lexer.save();
 				Lexer.nextToken();
 				if (Tk.type == Tk.LPAREN) {
+					Lexer.discardSave();
 					int mi = fCtor(ci);
 					if (mi >= 0) eMBody(mi);
 					else skipMDecl();

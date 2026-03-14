@@ -112,6 +112,7 @@ public class Catalog {
 				Lexer.nextToken();
 				if (Tk.type == Tk.LPAREN) {
 					// It's a constructor
+					Lexer.discardSave();
 					isCtor = true;
 					retType = 0; // void
 					catMethod(ci, nm, isStat, isCtor, isNat, isAbstract, retType);

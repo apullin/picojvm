@@ -6,8 +6,8 @@ class E {
 	// Per-class clinit accumulation buffer (field inits + static blocks)
 	static byte[] cinitBuf = new byte[1024];
 	static int cinitLen;
-	static int[] cinitCpV = new int[128];
-	static int[] cinitCpK = new int[128];
+	static byte[] cinitCpL = new byte[128]; // CP staging lo bytes
+	static byte[] cinitCpH = new byte[128]; // CP staging hi bytes
 	static int cinitCpC;
 	static int cinitMaxStk;
 	static int cinitMaxLoc;
@@ -62,8 +62,8 @@ class E {
 				C.mcLen = cinitLen;
 				C.cpMCount = cinitCpC;
 				for (int i = 0; i < cinitCpC; i++) {
-					C.cpMVals[i] = cinitCpV[i];
-					C.cpMKeys[i] = cinitCpK[i];
+					C.cpEnt[C.cpMBase + i] = cinitCpL[i];
+					C.cpEntH[C.cpMBase + i] = cinitCpH[i];
 				}
 				eb(0xB1); // RETURN
 				commitMC(mi);
@@ -174,13 +174,13 @@ class E {
 
 	// Parse a single static field initializer expression into clinit buffer
 	static void eStatFieldInit(int ci, int nm) {
-		// Set up temp method context (free between eMBody calls)
+		// Set up temp method context — load clinit CP staging into cpEnt/cpEntH
 		C.mcLen = 0;
+		C.cpMBase = C.cpSz;
 		C.cpMCount = cinitCpC;
-		C.cpMBase = 0;
 		for (int i = 0; i < cinitCpC; i++) {
-			C.cpMVals[i] = cinitCpV[i];
-			C.cpMKeys[i] = cinitCpK[i];
+			C.cpEnt[C.cpMBase + i] = cinitCpL[i];
+			C.cpEntH[C.cpMBase + i] = cinitCpH[i];
 		}
 		C.stkDepth = 0; C.maxStk = 0;
 		C.curMStatic = true;
@@ -211,11 +211,11 @@ class E {
 		}
 		cinitLen = cinitLen + C.mcLen;
 
-		// Update clinit CP
+		// Save clinit CP back to staging
 		cinitCpC = C.cpMCount;
 		for (int i = 0; i < cinitCpC; i++) {
-			cinitCpV[i] = C.cpMVals[i];
-			cinitCpK[i] = C.cpMKeys[i];
+			cinitCpL[i] = C.cpEnt[C.cpMBase + i];
+			cinitCpH[i] = C.cpEntH[C.cpMBase + i];
 		}
 		if (C.maxStk > cinitMaxStk) cinitMaxStk = C.maxStk;
 	}
@@ -223,11 +223,11 @@ class E {
 	// Accumulate explicit static { } block into clinit buffer
 	static void eStatBlock() {
 		C.mcLen = 0;
+		C.cpMBase = C.cpSz;
 		C.cpMCount = cinitCpC;
-		C.cpMBase = 0;
 		for (int i = 0; i < cinitCpC; i++) {
-			C.cpMVals[i] = cinitCpV[i];
-			C.cpMKeys[i] = cinitCpK[i];
+			C.cpEnt[C.cpMBase + i] = cinitCpL[i];
+			C.cpEntH[C.cpMBase + i] = cinitCpH[i];
 		}
 		C.stkDepth = 0; C.maxStk = 0;
 		C.curMStatic = true;
@@ -256,8 +256,8 @@ class E {
 
 		cinitCpC = C.cpMCount;
 		for (int i = 0; i < cinitCpC; i++) {
-			cinitCpV[i] = C.cpMVals[i];
-			cinitCpK[i] = C.cpMKeys[i];
+			cinitCpL[i] = C.cpEnt[C.cpMBase + i];
+			cinitCpH[i] = C.cpEntH[C.cpMBase + i];
 		}
 		if (C.maxStk > cinitMaxStk) cinitMaxStk = C.maxStk;
 		if (C.locNext > cinitMaxLoc) cinitMaxLoc = C.locNext;
@@ -381,11 +381,9 @@ class E {
 			}
 		}
 		C.mCpBase[mi] = C.cpMBase;
-		for (int i = 0; i < C.cpMCount; i++) {
-			C.cpEnt[C.cpMBase + i] = (byte)(C.cpMVals[i] & 0xFF);
-			C.cpEntH[C.cpMBase + i] = (byte)((C.cpMVals[i] >> 8) & 0xFF);
-		}
-		C.cpSz = C.cpMBase + C.cpMCount;
+		// Entries already in cpEnt/cpEntH — just advance cpSz
+		int end = C.cpMBase + C.cpMCount;
+		if (end > C.cpSz) C.cpSz = end;
 	}
 
 	static boolean autoCtorsEmitted;
@@ -543,15 +541,17 @@ class E {
 	}
 
 	static int aCP(int resolvedVal) {
-		// Check for existing entry with same value
+		// Check for existing entry with same value (stored as byte pairs)
+		byte lo = (byte)(resolvedVal & 0xFF);
+		byte hi = (byte)((resolvedVal >> 8) & 0xFF);
 		for (int i = 0; i < C.cpMCount; i++) {
-			if (C.cpMVals[i] == resolvedVal && C.cpMKeys[i] == resolvedVal) {
+			if (C.cpEnt[C.cpMBase + i] == lo && C.cpEntH[C.cpMBase + i] == hi) {
 				return i;
 			}
 		}
 		int idx = C.cpMCount++;
-		C.cpMVals[idx] = resolvedVal;
-		C.cpMKeys[idx] = resolvedVal;
+		C.cpEnt[C.cpMBase + idx] = lo;
+		C.cpEntH[C.cpMBase + idx] = hi;
 		return idx;
 	}
 

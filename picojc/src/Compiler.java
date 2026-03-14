@@ -87,8 +87,7 @@ class C {
 	static int cpSz;
 
 	// --- Per-method CP (during emit) ---
-	static int[] cpMVals = new int[1280]; // resolved values
-	static int[] cpMKeys = new int[1280]; // hash keys for dedup
+	// Entries written directly to cpEnt/cpEntH[cpMBase..cpMBase+cpMCount]
 	static int cpMCount;
 	static int cpMBase; // global offset
 

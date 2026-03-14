@@ -19,9 +19,9 @@ public class Expr {
 			E.pop();
 			int lblFalse = E.label();
 			int lblEnd = E.label();
-			E.eBr(0x99, lblFalse); // IFEQ → false
+			E.eBr(E.IFEQ, lblFalse); // IFEQ → false
 			int tType = pExpr();
-			E.eBr(0xA7, lblEnd); // GOTO end
+			E.eBr(E.GOTO, lblEnd); // GOTO end
 			E.pop();
 			Lexer.expect(Tk.COLON);
 			E.mark(lblFalse);
@@ -70,10 +70,10 @@ public class Expr {
 				// Short-circuit: || (prec 1) or && (prec 2)
 				int lbl1 = E.label(); int lbl2 = E.label();
 				E.edup();
-				E.eBr(prec == 1 ? 0x9A : 0x99, lbl1); // IFNE : IFEQ
+				E.eBr(prec == 1 ? E.IFNE : E.IFEQ, lbl1);
 				E.pop(); E.epop();
 				pBin(prec + 1);
-				E.eBr(0xA7, lbl2);
+				E.eBr(E.GOTO, lbl2);
 				E.mark(lbl1); E.mark(lbl2);
 			} else if (prec == 6) {
 				// Equality: ==, !=

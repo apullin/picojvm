@@ -1,5 +1,7 @@
 // Emit -> E (size)
 class E {
+	// Branch opcodes
+	static int IFEQ = 0x99, IFNE = 0x9A, GOTO = 0xA7;
 	static void emit() {
 		C.cdLen = 0;
 		C.cpSz = 0;
@@ -348,7 +350,7 @@ class E {
 	static void edup() { eb(0x59); push(); } // DUP
 	static void cmpBool(int op) {
 		int lbl = label(); int lblEnd = label();
-		eBr(op, lbl); ic0(); eBr(0xA7, lblEnd);
+		eBr(op, lbl); ic0(); eBr(GOTO, lblEnd);
 		mark(lbl); ic1(); mark(lblEnd);
 	}
 	static void eOp(int op, int cp) { eb(op); eSBE(cp); }

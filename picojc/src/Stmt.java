@@ -32,14 +32,14 @@ public class Stmt {
 			Lexer.nextToken();
 			Lexer.expect(Tk.SEMI);
 			if (C.lpDepth > 0) {
-				E.eBr(0xA7, C.lpBrkLbl[C.lpDepth - 1]); // GOTO break
+				E.eBr(E.GOTO, C.lpBrkLbl[C.lpDepth - 1]); // GOTO break
 			}
 		}
 		else if (Tk.type == Tk.CONTINUE) {
 			Lexer.nextToken();
 			Lexer.expect(Tk.SEMI);
 			if (C.lpDepth > 0) {
-				E.eBr(0xA7, C.lpContLbl[C.lpDepth - 1]); // GOTO continue
+				E.eBr(E.GOTO, C.lpContLbl[C.lpDepth - 1]); // GOTO continue
 			}
 		}
 		else if (Tk.type == Tk.SWITCH) {
@@ -132,13 +132,13 @@ public class Stmt {
 		E.pop();
 
 		int lblElse = E.label();
-		E.eBr(0x99, lblElse); // IFEQ → else
+		E.eBr(E.IFEQ, lblElse); // IFEQ → else
 
 		pStmt();
 
 		if (Tk.type == Tk.ELSE) {
 			int lblEnd = E.label();
-			E.eBr(0xA7, lblEnd); // GOTO end
+			E.eBr(E.GOTO, lblEnd); // GOTO end
 			E.mark(lblElse);
 			Lexer.nextToken(); // skip 'else'
 			pStmt();
@@ -159,13 +159,13 @@ public class Stmt {
 		Expr.pExpr();
 		Lexer.expect(Tk.RPAREN);
 		E.pop();
-		E.eBr(0x99, lblEnd); // IFEQ → end
+		E.eBr(E.IFEQ, lblEnd); // IFEQ → end
 
 		E.pushLp(lblEnd, lblCont);
 		pStmt();
 		E.popLp();
 
-		E.eBr(0xA7, lblTop); // GOTO top
+		E.eBr(E.GOTO, lblTop); // GOTO top
 		E.mark(lblEnd);
 	}
 
@@ -186,7 +186,7 @@ public class Stmt {
 		Expr.pExpr();
 		Lexer.expect(Tk.RPAREN);
 		E.pop();
-		E.eBr(0x9A, lblTop); // IFNE → top
+		E.eBr(E.IFNE, lblTop); // IFNE → top
 		E.mark(lblEnd);
 		Lexer.expect(Tk.SEMI);
 	}
@@ -210,73 +210,49 @@ public class Stmt {
 			Lexer.nextToken(); // skip ;
 		}
 
-		int lblTop = E.label();
+		// Forward-only layout: cond → GOTO body → update → GOTO cond → body → GOTO update
+		// No re-lexing: everything parsed in source order.
+		int lblCond = E.label();
 		int lblEnd = E.label();
 		int lblUpdate = E.label();
-		E.mark(lblTop);
+		int lblBody = E.label();
 
 		// Condition
+		E.mark(lblCond);
+		boolean hasUpdate = false;
 		if (Tk.type != Tk.SEMI) {
 			Expr.pExpr();
 			E.pop();
-			E.eBr(0x99, lblEnd); // IFEQ → end
+			E.eBr(E.IFEQ, lblEnd); // IFEQ → end
 		}
-		// Save update expression position BEFORE consuming the semicolon
-		// Lexer.pos is right after ';', before the update tokens
-		int updateStart = Lexer.pos;
-		int updateLine = Lexer.line;
 		Lexer.expect(Tk.SEMI);
 
-		// Skip update for now — emit it after body
-		int parenDepth = 0;
-		while (Tk.type != Tk.EOF) {
-			if (Tk.type == Tk.LPAREN) parenDepth++;
-			else if (Tk.type == Tk.RPAREN) {
-				if (parenDepth == 0) break;
-				parenDepth--;
-			}
-			Lexer.nextToken();
+		// Update (parsed in source order, right after condition)
+		if (Tk.type != Tk.RPAREN) {
+			hasUpdate = true;
+			E.eBr(E.GOTO, lblBody); // GOTO body (skip update on first iteration)
+			E.mark(lblUpdate);
+			int type = Expr.pExpr();
+			if (type != 0) E.epop();
+			E.eBr(E.GOTO, lblCond); // GOTO cond
+		} else {
+			// No update — lblUpdate is same as lblCond
+			E.mark(lblUpdate);
+			// No GOTO needed; fall through handled by body's GOTO
 		}
 		Lexer.expect(Tk.RPAREN);
 
 		// Body
+		E.mark(lblBody);
 		E.pushLp(lblEnd, lblUpdate);
 		pStmt();
 		E.popLp();
 
-		// Update
-		E.mark(lblUpdate);
-		if (updateStart < Lexer.pos) {
-			// Save full lexer + token state
-			int savePos = Lexer.pos;
-			int saveLine = Lexer.line;
-			int saveTokType = Tk.type;
-			int saveTokInt = Tk.intValue;
-			int saveTokLine = Tk.line;
-			int saveTokStrLen = Tk.strLen;
-			byte[] saveTokStr = new byte[saveTokStrLen];
-			Native.arraycopy(Tk.strBuf, 0, saveTokStr, 0, saveTokStrLen);
-
-			// Re-lex the update expression
-			Lexer.pos = updateStart;
-			Lexer.line = updateLine;
-			Lexer.nextToken();
-			if (Tk.type != Tk.RPAREN) {
-				int type = Expr.pExpr();
-				if (type != 0) E.epop();
-			}
-
-			// Restore full lexer + token state
-			Lexer.pos = savePos;
-			Lexer.line = saveLine;
-			Tk.type = saveTokType;
-			Tk.intValue = saveTokInt;
-			Tk.line = saveTokLine;
-			Tk.strLen = saveTokStrLen;
-			Native.arraycopy(saveTokStr, 0, Tk.strBuf, 0, saveTokStrLen);
+		if (hasUpdate) {
+			E.eBr(E.GOTO, lblUpdate); // GOTO update
+		} else {
+			E.eBr(E.GOTO, lblCond); // GOTO cond (no update to run)
 		}
-
-		E.eBr(0xA7, lblTop); // GOTO top
 		E.mark(lblEnd);
 
 		C.locCount = savedLocalCount;
@@ -452,7 +428,7 @@ public class Stmt {
 		Lexer.expect(Tk.RBRACE);
 
 		int endPC = C.mcLen;
-		E.eBr(0xA7, lblEnd); // GOTO after handlers
+		E.eBr(E.GOTO, lblEnd); // GOTO after handlers
 
 		// Catch clauses
 		while (Tk.type == Tk.CATCH) {
@@ -491,21 +467,22 @@ public class Stmt {
 			pBlock();
 			Lexer.expect(Tk.RBRACE);
 
-			E.eBr(0xA7, lblEnd); // GOTO end
+			E.eBr(E.GOTO, lblEnd); // GOTO end
 		}
 
-		// Finally clause
-		int finallyBodyPos = -1;
-		int finallyBodyLine = -1;
+		// Finally clause — emit body once, use flag variable for normal vs exceptional
 		if (Tk.type == Tk.FINALLY) {
 			Lexer.nextToken();
 
-			int handlerPC = C.mcLen;
+			int lblFinally = E.label();
 			int excSlot = C.locCount;
 			E.aLoc(C.iStr("$finally"), 1);
-			E.eSt(excSlot, 1); // ASTORE exception
 
-			// Record catch-all handler
+			// Catch-all handler: store exception, goto finally
+			int handlerPC = C.mcLen;
+			E.eSt(excSlot, 1); // ASTORE exception (from JVM stack)
+			E.eBr(E.GOTO, lblFinally);
+
 			C.excSPc[C.excC] = startPC;
 			C.excEPc[C.excC] = endPC;
 			C.excHPc[C.excC] = handlerPC;
@@ -513,35 +490,33 @@ public class Stmt {
 			C.excC++;
 			C.mExcC[C.curMi]++;
 
-			// Save position for re-lexing on normal path (before { is consumed)
-			finallyBodyPos = Lexer.pos;
-			finallyBodyLine = Lexer.line;
+			// Normal path: null means no exception
+			E.mark(lblEnd);
+			E.eb(0x01); // ACONST_NULL
+			E.push();
+			E.eSt(excSlot, 1); // ASTORE null
+			E.pop();
+
+			// Finally body (emitted ONCE, parsed in source order)
+			E.mark(lblFinally);
 			Lexer.expect(Tk.LBRACE);
 			pBlock();
 			Lexer.expect(Tk.RBRACE);
 
-			// Re-throw
-			E.eLd(excSlot, 1); // ALOAD
+			// If exception was caught, re-throw
+			E.eLd(excSlot, 1); // ALOAD excSlot
+			E.push();
+			int lblDone = E.label();
+			E.eBr(E.IFEQ, lblDone); // if null, skip ATHROW
+			E.pop();
+			E.eLd(excSlot, 1); // ALOAD again
 			E.push();
 			E.eb(0xBF); // ATHROW
 			E.pop();
-		}
-
-		E.mark(lblEnd);
-
-		// Emit finally body on normal path too (duplicate via re-lex)
-		if (finallyBodyPos >= 0) {
-			int savedPos = Lexer.pos;
-			int savedLine = Lexer.line;
-			int savedTok = Tk.type;
-			Lexer.pos = finallyBodyPos;
-			Lexer.line = finallyBodyLine;
-			Lexer.nextToken();
-			pBlock();
-			// Restore lexer to after the finally block
-			Lexer.pos = savedPos;
-			Lexer.line = savedLine;
-			Tk.type = savedTok;
+			E.mark(lblDone);
+			E.pop();
+		} else {
+			E.mark(lblEnd);
 		}
 	}
 

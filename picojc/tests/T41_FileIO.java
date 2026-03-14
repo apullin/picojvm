@@ -19,7 +19,7 @@ public class T41_FileIO {
 		msg[8]=(byte)'l'; msg[9]=(byte)'e'; msg[10]=(byte)' '; msg[11]=(byte)'I';
 		msg[12]=(byte)'O';
 		Native.fileWrite(msg, 0, 13);
-		Native.fileClose();
+		Native.fileClose(0);
 
 		// Read it back
 		r = Native.fileOpen(name, 8, 1); // mode 1 = read
@@ -30,7 +30,7 @@ public class T41_FileIO {
 
 		byte[] buf = new byte[64];
 		int n = Native.fileRead(buf, 0, 64);
-		Native.fileClose();
+		Native.fileClose(0);
 
 		// Print what we read
 		for (int i = 0; i < n; i++) {
@@ -46,7 +46,7 @@ public class T41_FileIO {
 			count++;
 			ch = Native.fileReadByte();
 		}
-		Native.fileClose();
+		Native.fileClose(0);
 
 		// Print byte count
 		Native.print("Bytes: ");

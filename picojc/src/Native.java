@@ -16,5 +16,6 @@ public class Native {
 	public static native void fileWriteByte(int b);
 	public static native int  fileRead(byte[] buf, int off, int len);  // returns bytes read
 	public static native void fileWrite(byte[] buf, int off, int len);
-	public static native void fileClose();
+	public static native void fileClose(int mode); // 0=both, 1=read, 2=write
+	public static native int  fileDelete(byte[] name, int nameLen); // returns 0=ok, -1=error
 }

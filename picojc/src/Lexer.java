@@ -49,7 +49,7 @@ public class Lexer {
 	}
 
 	static void rewindDisk() {
-		Native.fileClose();
+		Native.fileClose(1);
 		// Reopen same file — caller must set up fname again or use REWIND
 		// For now, close and reopen is handled by the caller
 		dBase = 0;
@@ -61,7 +61,7 @@ public class Lexer {
 	}
 
 	static void closeDisk() {
-		Native.fileClose();
+		Native.fileClose(0); // close both read and write
 		diskMode = false;
 	}
 
@@ -87,7 +87,7 @@ public class Lexer {
 
 	// Multi-file: rewind to first file for re-streaming (Pass 3)
 	static void rewindDiskFiles() {
-		Native.fileClose();
+		Native.fileClose(1);
 		dFileCur = 0;
 		int r = Native.fileOpen(dFiles[0], dFileLens[0], 1);
 		if (r != 0) { Native.putchar('E'); Native.putchar('F'); Native.halt(); return; }
@@ -102,7 +102,7 @@ public class Lexer {
 
 	// Multi-file: advance to next file, return false if no more
 	static boolean advanceFile() {
-		Native.fileClose();
+		Native.fileClose(1);
 		dFileCur++;
 		if (dFileCur >= dFileCount) return false;
 		int r = Native.fileOpen(dFiles[dFileCur], dFileLens[dFileCur], 1);

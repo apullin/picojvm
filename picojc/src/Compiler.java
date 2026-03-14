@@ -26,7 +26,7 @@ class C {
 	static int N_PUTCHAR, N_IN, N_OUT, N_PEEK, N_POKE, N_HALT, N_PRINT;
 	static int N_ARRAYCOPY, N_MEMCMP, N_WRITE_BYTES, N_STRING_FROM_BYTES;
 	static int N_FILE_OPEN, N_FILE_READ_BYTE, N_FILE_WRITE_BYTE;
-	static int N_FILE_READ, N_FILE_WRITE, N_FILE_CLOSE;
+	static int N_FILE_READ, N_FILE_WRITE, N_FILE_CLOSE, N_FILE_DELETE;
 	static int N_LENGTH, N_CHARAT, N_EQUALS, N_TOSTRING, N_HASHCODE;
 	static int N_ARGS;
 
@@ -93,9 +93,11 @@ class C {
 	static int cpMBase; // global offset
 
 	// --- Bytecodes ---
-	// Bytecodes stored in raw memory beyond source (not on heap)
+	// Bytecodes stored in raw memory beyond source (not on heap),
+	// or spilled to disk file when diskSpill=true
 	static int cdBase; // set at runtime to SRC_BASE + srcLen
 	static int cdLen;
+	static boolean diskSpill; // true = write bytecodes to disk file
 	static byte[] mcode = new byte[2048]; // current method bytecodes
 	static int mcLen;
 
@@ -223,6 +225,7 @@ class C {
 		N_FILE_READ       = iStr("fileRead");
 		N_FILE_WRITE      = iStr("fileWrite");
 		N_FILE_CLOSE      = iStr("fileClose");
+		N_FILE_DELETE     = iStr("fileDelete");
 		N_LENGTH     = iStr("length");
 		N_CHARAT     = iStr("charAt");
 		N_EQUALS     = iStr("equals");
@@ -323,7 +326,8 @@ class C {
 			if (methodNm == N_FILE_WRITE_BYTE) return addNat(N_NATIVE, N_FILE_WRITE_BYTE, 1, 19, true, 0);
 			if (methodNm == N_FILE_READ)       return addNat(N_NATIVE, N_FILE_READ, 3, 20, true, 1);
 			if (methodNm == N_FILE_WRITE)      return addNat(N_NATIVE, N_FILE_WRITE, 3, 21, true, 0);
-			if (methodNm == N_FILE_CLOSE)      return addNat(N_NATIVE, N_FILE_CLOSE, 0, 22, true, 0);
+			if (methodNm == N_FILE_CLOSE)      return addNat(N_NATIVE, N_FILE_CLOSE, 1, 22, true, 0);
+			if (methodNm == N_FILE_DELETE)     return addNat(N_NATIVE, N_FILE_DELETE, 2, 23, true, 1);
 		}
 		// String methods
 		if (classNm == N_STRING) {

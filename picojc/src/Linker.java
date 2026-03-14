@@ -88,8 +88,15 @@ public class Linker {
 		}
 
 		// Bytecodes
-		for (int i = 0; i < C.cdLen; i++) {
-			wB(Native.peek(C.cdBase + i) & 0xFF);
+		if (C.diskSpill) {
+			// Read bytecodes back from spill file
+			for (int i = 0; i < C.cdLen; i++) {
+				wB(Native.fileReadByte());
+			}
+		} else {
+			for (int i = 0; i < C.cdLen; i++) {
+				wB(Native.peek(C.cdBase + i) & 0xFF);
+			}
 		}
 
 		// Exception table (7 bytes per entry)

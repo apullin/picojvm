@@ -118,8 +118,21 @@ void pjvm_platform_file_write_byte(uint8_t b) {
     io_out(0xF0, 0x04);    /* WRITE_BYTE command */
 }
 
-void pjvm_platform_file_close(void) {
+void pjvm_platform_file_close(uint8_t mode) {
+    io_out(0xF1, mode);    /* 0=both, 1=read, 2=write */
     io_out(0xF0, 0x05);    /* CLOSE command */
+}
+
+int32_t pjvm_platform_file_delete(const uint8_t *name, uint8_t nameLen) {
+    uint8_t *fname_buf = (uint8_t *)(uintptr_t)0x6F00;
+    for (uint8_t i = 0; i < nameLen; i++)
+        fname_buf[i] = name[i];
+    io_out(0xF2, 0x00);  /* addr lo */
+    io_out(0xF3, 0x6F);  /* addr hi → 0x6F00 */
+    io_out(0xF1, nameLen);
+    io_out(0xF0, 0x06);  /* DELETE command */
+    uint8_t status = io_in(0xF0);
+    return status == 0 ? 0 : -1;
 }
 
 int main(void) {

@@ -138,17 +138,26 @@ void pjvm_platform_file_write_byte(uint8_t b) {
     else putchar(b);  /* fallback to stdout */
 }
 
-void pjvm_platform_file_close(void) {
-    if (file_read_fp) {
+void pjvm_platform_file_close(uint8_t mode) {
+    if (mode != 2 && file_read_fp) {
         fclose(file_read_fp);
         fprintf(stderr, "FILE | closed read\n");
         file_read_fp = NULL;
     }
-    if (file_write_fp) {
+    if (mode != 1 && file_write_fp) {
         fclose(file_write_fp);
         fprintf(stderr, "FILE | closed write\n");
         file_write_fp = NULL;
     }
+}
+
+int32_t pjvm_platform_file_delete(const uint8_t *name, uint8_t nameLen) {
+    char path[256];
+    if (nameLen > 254) nameLen = 254;
+    memcpy(path, name, nameLen);
+    path[nameLen] = '\0';
+    fprintf(stderr, "FILE | delete '%s'\n", path);
+    return remove(path) == 0 ? 0 : -1;
 }
 
 #ifdef PJVM_PAGED

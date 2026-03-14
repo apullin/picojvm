@@ -126,6 +126,7 @@ void     pjvm_platform_out(uint16_t port, uint16_t val);
 int32_t  pjvm_platform_file_open(const uint8_t *name, uint8_t nameLen, uint8_t mode);
 int32_t  pjvm_platform_file_read_byte(void);
 void     pjvm_platform_file_write_byte(uint8_t b);
-void     pjvm_platform_file_close(void);
+void     pjvm_platform_file_close(uint8_t mode); /* 0=both, 1=read, 2=write */
+int32_t  pjvm_platform_file_delete(const uint8_t *name, uint8_t nameLen);
 
 #endif /* PJVM_H */

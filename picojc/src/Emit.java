@@ -371,8 +371,14 @@ class E {
 
 	static void commitMC(int mi) {
 		C.mCodeOff[mi] = C.cdLen;
-		for (int i = 0; i < C.mcLen; i++) {
-			Native.poke(C.cdBase + C.cdLen, C.mcode[i] & 0xFF); C.cdLen++;
+		if (C.diskSpill) {
+			for (int i = 0; i < C.mcLen; i++) {
+				Native.fileWriteByte(C.mcode[i] & 0xFF); C.cdLen++;
+			}
+		} else {
+			for (int i = 0; i < C.mcLen; i++) {
+				Native.poke(C.cdBase + C.cdLen, C.mcode[i] & 0xFF); C.cdLen++;
+			}
 		}
 		C.mCpBase[mi] = C.cpMBase;
 		for (int i = 0; i < C.cpMCount; i++) {

@@ -54,6 +54,7 @@ NATIVE_IDS = {
     "fileRead": 20,
     "fileWrite": 21,
     "fileClose": 22,
+    "fileDelete": 23,
 }
 NATIVE_OBJECT_INIT = 6
 

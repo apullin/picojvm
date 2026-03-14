@@ -20,6 +20,9 @@ public class DiskMain {
 	static int[] fileNameLens;
 	static int fileCount;
 
+	// Bytecode spill file name: "bc.spill"
+	static byte[] spillName = new byte[8];
+
 	public static void main(String[] args) {
 		// "input.java" fallback name
 		fname[0] = (byte)'i'; fname[1] = (byte)'n'; fname[2] = (byte)'p';
@@ -27,8 +30,13 @@ public class DiskMain {
 		fname[6] = (byte)'j'; fname[7] = (byte)'a'; fname[8] = (byte)'v';
 		fname[9] = (byte)'a';
 
-		// Bytecodes stored at 0xC000 (source is on disk, not in memory)
-		C.cdBase = C.SRC_BASE;
+		// "bc.spill" spill file name
+		spillName[0]=(byte)'b'; spillName[1]=(byte)'c'; spillName[2]=(byte)'.';
+		spillName[3]=(byte)'s'; spillName[4]=(byte)'p'; spillName[5]=(byte)'i';
+		spillName[6]=(byte)'l'; spillName[7]=(byte)'l';
+
+		// Disk mode: spill bytecodes to file instead of storing in RAM
+		C.diskSpill = true;
 
 		Lexer.initKeywords();
 		C.initNames();
@@ -46,9 +54,12 @@ public class DiskMain {
 			Resolver.resolve();
 
 			// Pass 3: Emit (rewind and re-stream all files)
+			// Open spill file for bytecodes (write handle, won't disturb read)
+			Native.fileOpen(spillName, 8, 2);
 			Lexer.rewindDiskFiles();
 			Lexer.nextToken();
 			E.emit();
+			Native.fileClose(2); // close write handle
 		} else {
 			// Single-file fallback
 			Lexer.initDisk(fname, 10);
@@ -57,16 +68,27 @@ public class DiskMain {
 
 			Resolver.resolve();
 
+			// Open spill file for bytecodes
+			Native.fileOpen(spillName, 8, 2);
 			Lexer.rewindDisk();
 			Lexer.initDisk(fname, 10);
 			Lexer.nextToken();
 			E.emit();
+			Native.fileClose(2); // close write handle
 		}
 
-		// Pass 4: Link (write .pjvm to stdout)
-		Linker.writeOut();
-
+		// Close source read handle before Link
 		Lexer.closeDisk();
+
+		// Pass 4: Link (write .pjvm to stdout)
+		// Reopen spill file for reading bytecodes
+		Native.fileOpen(spillName, 8, 1);
+		Linker.writeOut();
+		Native.fileClose(1);
+
+		// Clean up spill file
+		Native.fileDelete(spillName, 8);
+
 		Native.halt();
 	}
 
@@ -114,7 +136,7 @@ public class DiskMain {
 			}
 		}
 
-		Native.fileClose();
+		Native.fileClose(1);
 		return fileCount > 0;
 	}
 

@@ -77,6 +77,7 @@ enum {
     NATIVE_FILE_READ = 20,
     NATIVE_FILE_WRITE = 21,
     NATIVE_FILE_CLOSE = 22,
+    NATIVE_FILE_DELETE = 23,
 };
 
 /* --- globals (extern-declared in pjvm.h) ------------------------------ */
@@ -540,10 +541,25 @@ static void pjvm_inv(uint8_t mi) {
                 pjvm_platform_file_write_byte(r8(ref + 4 + off + i));
             break;
         }
-        case NATIVE_FILE_CLOSE:
-            /* fileClose() */
-            pjvm_platform_file_close();
+        case NATIVE_FILE_CLOSE: {
+            /* fileClose(int mode) — 0=both, 1=read, 2=write */
+            uint16_t cmode = spop_lo(); spop_hi();
+            pjvm_platform_file_close((uint8_t)cmode);
             break;
+        }
+        case NATIVE_FILE_DELETE: {
+            /* fileDelete(byte[] name, int nameLen) → int status */
+            uint16_t nameLen = spop_lo(); spop_hi();
+            uint16_t nameRef = spop_lo();
+            uint8_t nameBuf[64];
+            uint16_t nl = nameLen > 63 ? 63 : nameLen;
+            for (uint16_t i = 0; i < nl; i++)
+                nameBuf[i] = r8(nameRef + 4 + i);
+            nameBuf[nl] = 0;
+            int32_t result = pjvm_platform_file_delete(nameBuf, (uint8_t)nl);
+            pjvm_push32(result);
+            break;
+        }
         default:
             pjvm_platform_trap(0xFF, g_pjvm->pc);
             break;

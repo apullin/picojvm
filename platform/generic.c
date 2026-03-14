@@ -87,7 +87,8 @@ int32_t pjvm_platform_file_open(const uint8_t *name, uint8_t nameLen, uint8_t mo
 
 int32_t pjvm_platform_file_read_byte(void) { return -1; }
 void pjvm_platform_file_write_byte(uint8_t b) { (void)b; }
-void pjvm_platform_file_close(void) {}
+void pjvm_platform_file_close(uint8_t mode) { (void)mode; }
+int32_t pjvm_platform_file_delete(const uint8_t *name, uint8_t nameLen) { (void)name; (void)nameLen; return -1; }
 
 /*
  * Entry point for generic platform.

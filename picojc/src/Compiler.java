@@ -25,6 +25,8 @@ class C {
 	static int N_THROWABLE, N_EXCEPTION, N_RUNTIME_EX;
 	static int N_PUTCHAR, N_IN, N_OUT, N_PEEK, N_POKE, N_HALT, N_PRINT;
 	static int N_ARRAYCOPY, N_MEMCMP, N_WRITE_BYTES, N_STRING_FROM_BYTES;
+	static int N_FILE_OPEN, N_FILE_READ_BYTE, N_FILE_WRITE_BYTE;
+	static int N_FILE_READ, N_FILE_WRITE, N_FILE_CLOSE;
 	static int N_LENGTH, N_CHARAT, N_EQUALS, N_TOSTRING, N_HASHCODE;
 	static int N_ARGS;
 
@@ -214,6 +216,12 @@ class C {
 		N_MEMCMP          = iStr("memcmp");
 		N_WRITE_BYTES     = iStr("writeBytes");
 		N_STRING_FROM_BYTES = iStr("stringFromBytes");
+		N_FILE_OPEN       = iStr("fileOpen");
+		N_FILE_READ_BYTE  = iStr("fileReadByte");
+		N_FILE_WRITE_BYTE = iStr("fileWriteByte");
+		N_FILE_READ       = iStr("fileRead");
+		N_FILE_WRITE      = iStr("fileWrite");
+		N_FILE_CLOSE      = iStr("fileClose");
 		N_LENGTH     = iStr("length");
 		N_CHARAT     = iStr("charAt");
 		N_EQUALS     = iStr("equals");
@@ -309,6 +317,12 @@ class C {
 			if (methodNm == N_MEMCMP)          return addNat(N_NATIVE, N_MEMCMP, 5, 14, true, 1);
 			if (methodNm == N_WRITE_BYTES)     return addNat(N_NATIVE, N_WRITE_BYTES, 3, 15, true, 0);
 			if (methodNm == N_STRING_FROM_BYTES) return addNat(N_NATIVE, N_STRING_FROM_BYTES, 3, 16, true, 2);
+			if (methodNm == N_FILE_OPEN)       return addNat(N_NATIVE, N_FILE_OPEN, 3, 17, true, 1);
+			if (methodNm == N_FILE_READ_BYTE)  return addNat(N_NATIVE, N_FILE_READ_BYTE, 0, 18, true, 1);
+			if (methodNm == N_FILE_WRITE_BYTE) return addNat(N_NATIVE, N_FILE_WRITE_BYTE, 1, 19, true, 0);
+			if (methodNm == N_FILE_READ)       return addNat(N_NATIVE, N_FILE_READ, 3, 20, true, 1);
+			if (methodNm == N_FILE_WRITE)      return addNat(N_NATIVE, N_FILE_WRITE, 3, 21, true, 0);
+			if (methodNm == N_FILE_CLOSE)      return addNat(N_NATIVE, N_FILE_CLOSE, 0, 22, true, 0);
 		}
 		// String methods
 		if (classNm == N_STRING) {

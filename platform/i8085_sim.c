@@ -76,6 +76,52 @@ void pjvm_platform_trap(uint8_t op, uint16_t pc) {
     __asm__ volatile("hlt");
 }
 
+/* --- File I/O via disk emulator ports (0xF0-0xF3) -------------------- */
+static inline void io_out(uint8_t port, uint8_t val) {
+    __asm__ volatile("out %0" : : "iN"(port), "a"(val));
+}
+
+static inline uint8_t io_in(uint8_t port) {
+    uint8_t val;
+    __asm__ volatile("in %1" : "=a"(val) : "iN"(port));
+    return val;
+}
+
+int32_t pjvm_platform_file_open(const uint8_t *name, uint8_t nameLen, uint8_t mode) {
+    /* Copy filename into a known memory location for disk emu */
+    uint8_t *fname_buf = (uint8_t *)(uintptr_t)0x6F00;
+    for (uint8_t i = 0; i < nameLen; i++)
+        fname_buf[i] = name[i];
+    /* Set address to filename buffer */
+    io_out(0xF2, 0x00);  /* addr lo = 0x00 */
+    io_out(0xF3, 0x6F);  /* addr hi = 0x6F → 0x6F00 */
+    /* Set filename length */
+    io_out(0xF1, nameLen);
+    /* Issue OPEN command */
+    io_out(0xF0, mode);   /* 1=OPEN_READ, 2=OPEN_WRITE */
+    /* Check status */
+    uint8_t status = io_in(0xF0);
+    return status == 0 ? 0 : -1;
+}
+
+int32_t pjvm_platform_file_read_byte(void) {
+    /* Issue READ_BYTE command */
+    io_out(0xF0, 0x03);
+    uint8_t status = io_in(0xF0);
+    if (status == 0x01) return -1;  /* EOF */
+    if (status != 0x00) return -1;  /* error */
+    return (int32_t)(uint8_t)io_in(0xF1);
+}
+
+void pjvm_platform_file_write_byte(uint8_t b) {
+    io_out(0xF1, b);       /* set data byte */
+    io_out(0xF0, 0x04);    /* WRITE_BYTE command */
+}
+
+void pjvm_platform_file_close(void) {
+    io_out(0xF0, 0x05);    /* CLOSE command */
+}
+
 int main(void) {
     static PJVMCtx ctx;  /* BSS — auto-zeroed by CRT */
 

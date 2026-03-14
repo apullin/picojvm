@@ -56,11 +56,23 @@ void pjvm_platform_poke8(uint32_t a, uint8_t v) {
     *(uint8_t *)(uintptr_t)a = v;
 }
 
+void pjvm_platform_out(uint16_t port, uint16_t val) {
+    (void)port; (void)val;
+}
+
 void pjvm_platform_trap(uint8_t op, uint16_t pc) {
     (void)op;
     (void)pc;
     __asm__ volatile("hlt");
 }
+
+int32_t pjvm_platform_file_open(const uint8_t *name, uint8_t nameLen, uint8_t mode) {
+    (void)name; (void)nameLen; (void)mode;
+    return -1;
+}
+int32_t pjvm_platform_file_read_byte(void) { return -1; }
+void pjvm_platform_file_write_byte(uint8_t b) { (void)b; }
+void pjvm_platform_file_close(void) {}
 
 static void pjvm_load(void) {
     pjvm_prog = PJVM_DATA;

@@ -71,6 +71,12 @@ enum {
     NATIVE_MEMCMP = 14,
     NATIVE_WRITE_BYTES = 15,
     NATIVE_STRING_FROM_BYTES = 16,
+    NATIVE_FILE_OPEN = 17,
+    NATIVE_FILE_READ_BYTE = 18,
+    NATIVE_FILE_WRITE_BYTE = 19,
+    NATIVE_FILE_READ = 20,
+    NATIVE_FILE_WRITE = 21,
+    NATIVE_FILE_CLOSE = 22,
 };
 
 /* --- globals (extern-declared in pjvm.h) ------------------------------ */
@@ -463,6 +469,60 @@ static void pjvm_inv(uint8_t mi) {
             spush(a, 0);
         }
 #endif
+            break;
+        case NATIVE_FILE_OPEN: {
+            /* fileOpen(byte[] name, int nameLen, int mode) → int status */
+            uint16_t mode    = spop_lo(); spop_hi();
+            uint16_t nameLen = spop_lo(); spop_hi();
+            uint16_t nameRef = spop_lo();
+            uint8_t nameBuf[64];
+            uint16_t nl = nameLen > 63 ? 63 : nameLen;
+            for (uint16_t i = 0; i < nl; i++)
+                nameBuf[i] = r8(nameRef + 4 + i);
+            nameBuf[nl] = 0;
+            int32_t result = pjvm_platform_file_open(nameBuf, (uint8_t)nl, (uint8_t)mode);
+            pjvm_push32(result);
+            break;
+        }
+        case NATIVE_FILE_READ_BYTE: {
+            /* fileReadByte() → int (-1 on EOF) */
+            int32_t ch = pjvm_platform_file_read_byte();
+            pjvm_push32(ch);
+            break;
+        }
+        case NATIVE_FILE_WRITE_BYTE: {
+            /* fileWriteByte(int b) */
+            alo = spop_lo();
+            pjvm_platform_file_write_byte((uint8_t)alo);
+            break;
+        }
+        case NATIVE_FILE_READ: {
+            /* fileRead(byte[] buf, int off, int len) → int bytesRead */
+            uint16_t len = spop_lo(); spop_hi();
+            uint16_t off = spop_lo(); spop_hi();
+            uint16_t ref = spop_lo();
+            int32_t total = 0;
+            for (uint16_t i = 0; i < len; i++) {
+                int32_t ch = pjvm_platform_file_read_byte();
+                if (ch < 0) break;
+                w8(ref + 4 + off + i, (uint8_t)ch);
+                total++;
+            }
+            pjvm_push32(total);
+            break;
+        }
+        case NATIVE_FILE_WRITE: {
+            /* fileWrite(byte[] buf, int off, int len) */
+            uint16_t len = spop_lo(); spop_hi();
+            uint16_t off = spop_lo(); spop_hi();
+            uint16_t ref = spop_lo();
+            for (uint16_t i = 0; i < len; i++)
+                pjvm_platform_file_write_byte(r8(ref + 4 + off + i));
+            break;
+        }
+        case NATIVE_FILE_CLOSE:
+            /* fileClose() */
+            pjvm_platform_file_close();
             break;
         default:
             pjvm_platform_trap(0xFF, g_pjvm->pc);

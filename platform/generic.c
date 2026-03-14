@@ -80,6 +80,15 @@ void pjvm_platform_trap(uint8_t op, uint16_t pc) {
     for (;;) {}
 }
 
+int32_t pjvm_platform_file_open(const uint8_t *name, uint8_t nameLen, uint8_t mode) {
+    (void)name; (void)nameLen; (void)mode;
+    return -1;  /* not supported on generic platform */
+}
+
+int32_t pjvm_platform_file_read_byte(void) { return -1; }
+void pjvm_platform_file_write_byte(uint8_t b) { (void)b; }
+void pjvm_platform_file_close(void) {}
+
 /*
  * Entry point for generic platform.
  * Call with a pointer to the .pjvm binary data (already in memory).

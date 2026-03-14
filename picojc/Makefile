@@ -26,7 +26,7 @@ TESTS = T01_Empty T02_Literal T03_Arithmetic T04_IfElse T05_WhileLoop \
         T24_Exception T25_TypeConversion \
         T27_Fib T28_BubbleSort T29_StringTest T30_MultiClass \
         T31_Shapes T32_ExceptionTest T33_Counter T34_StaticInit T35_ByteArray \
-        T36_CharArray T37_Recursion T38_LinkedList T39_NativeOps
+        T36_CharArray T37_Recursion T38_LinkedList T39_NativeOps T41_FileIO
 # TODO: T23_StringSwitch (needs hashCode/equals pattern), T26_Interface (vmid dispatch)
 
 # Tests requiring lib/ (platform package)
@@ -134,6 +134,55 @@ test: $(PICOJVM) $(BUILDDIR)/picojc.pjvm
 	total=$$((pass + fail)); \
 	echo "Results: $$pass passed, $$fail failed out of $$total tests"; \
 	test $$fail -eq 0
+
+# --- Disk-backed compiler ---
+# picojc-disk.pjvm: same compiler, but reads "input.java" from disk instead of --preload
+
+$(BUILDDIR)/picojc-disk.pjvm: $(BUILDDIR)/classes
+	$(PYTHON) $(PJVMPACK) \
+		$(BUILDDIR)/classes/DiskMain.class \
+		$(BUILDDIR)/classes/C.class \
+		$(BUILDDIR)/classes/Tk.class \
+		$(BUILDDIR)/classes/Lexer.class \
+		$(BUILDDIR)/classes/Native.class \
+		$(BUILDDIR)/classes/Catalog.class \
+		$(BUILDDIR)/classes/Resolver.class \
+		$(BUILDDIR)/classes/E.class \
+		$(BUILDDIR)/classes/Stmt.class \
+		$(BUILDDIR)/classes/Expr.class \
+		$(BUILDDIR)/classes/Linker.class \
+		-o $@ -v
+
+# End-to-end disk test: compile a test program via disk I/O, run it, verify output
+DISK_PICOJVM = $(abspath $(PICOJVM))
+DISK_COMPILER = $(abspath $(BUILDDIR)/picojc-disk.pjvm)
+
+define disk_test
+	@echo "--- Disk compile: $(1) ---"
+	@cp $(TESTDIR)/$(1).java $(BUILDDIR)/disk_test/input.java
+	@cd $(BUILDDIR)/disk_test && $(DISK_PICOJVM) $(DISK_COMPILER) > $(1).pjvm \
+		2> $(1)_compile.log
+	@$(PICOJVM) $(BUILDDIR)/disk_test/$(1).pjvm > $(BUILDDIR)/disk_test/$(1).out \
+		2> $(BUILDDIR)/disk_test/$(1)_run.log || true
+	@if diff -q $(BUILDDIR)/disk_test/$(1).out $(EXPDIR)/$(1).txt > /dev/null 2>&1; then \
+		echo "PASS: $(1) (disk)"; \
+	else \
+		echo "FAIL: $(1) (disk)"; \
+		echo "  Expected:"; cat $(EXPDIR)/$(1).txt | head -3; \
+		echo "  Got:"; cat $(BUILDDIR)/disk_test/$(1).out | head -3; \
+		false; \
+	fi
+endef
+
+test-disk: $(PICOJVM) $(BUILDDIR)/picojc-disk.pjvm
+	@mkdir -p $(BUILDDIR)/disk_test
+	$(call disk_test,T01_Empty)
+	$(call disk_test,T03_Arithmetic)
+	$(call disk_test,T27_Fib)
+	$(call disk_test,T05_WhileLoop)
+	$(call disk_test,T29_StringTest)
+	@echo ""
+	@echo "=== Disk I/O compile: ALL PASSED ==="
 
 # Quick compile check: just build picojc.pjvm
 build: $(BUILDDIR)/picojc.pjvm
@@ -247,7 +296,7 @@ test-selfhost: test-selfhost-fixpoint test-binmatch test-gen1
 clean:
 	rm -rf $(BUILDDIR)
 
-.PHONY: all test build check-javac clean
+.PHONY: all test build check-javac clean test-disk
 .PHONY: test-selfhost test-selfhost-fixpoint test-binmatch test-gen1
 .PRECIOUS: $(BUILDDIR)/%.pjvm $(BUILDDIR)/%.out
 .PRECIOUS: $(BUILDDIR)/gen1_%.pjvm $(BUILDDIR)/gen1_%.out

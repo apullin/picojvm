@@ -122,4 +122,10 @@ void     pjvm_platform_poke8(uint32_t a, uint8_t v);
 void     pjvm_platform_trap(uint8_t op, uint16_t pc);
 void     pjvm_platform_out(uint16_t port, uint16_t val);
 
+/* --- file I/O callbacks (implemented by each platform .c) ------------- */
+int32_t  pjvm_platform_file_open(const uint8_t *name, uint8_t nameLen, uint8_t mode);
+int32_t  pjvm_platform_file_read_byte(void);
+void     pjvm_platform_file_write_byte(uint8_t b);
+void     pjvm_platform_file_close(void);
+
 #endif /* PJVM_H */

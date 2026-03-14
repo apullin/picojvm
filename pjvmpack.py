@@ -48,6 +48,12 @@ NATIVE_IDS = {
     "memcmp": 14,
     "writeBytes": 15,
     "stringFromBytes": 16,
+    "fileOpen": 17,
+    "fileReadByte": 18,
+    "fileWriteByte": 19,
+    "fileRead": 20,
+    "fileWrite": 21,
+    "fileClose": 22,
 }
 NATIVE_OBJECT_INIT = 6
 

@@ -10,4 +10,11 @@ public class Native {
 	public static native int  memcmp(byte[] a, int aOff, byte[] b, int bOff, int len);
 	public static native void writeBytes(byte[] buf, int off, int len);
 	public static native String stringFromBytes(byte[] src, int off, int len);
+	// File I/O — mode: 1=read, 2=write; returns 0=ok, -1=error
+	public static native int  fileOpen(byte[] name, int nameLen, int mode);
+	public static native int  fileReadByte();  // returns byte or -1 on EOF
+	public static native void fileWriteByte(int b);
+	public static native int  fileRead(byte[] buf, int off, int len);  // returns bytes read
+	public static native void fileWrite(byte[] buf, int off, int len);
+	public static native void fileClose();
 }

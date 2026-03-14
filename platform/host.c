@@ -101,6 +101,56 @@ void pjvm_platform_out(uint16_t port, uint16_t val) {
     }
 }
 
+/* --- File I/O -------------------------------------------------------- */
+static FILE *file_read_fp;
+static FILE *file_write_fp;
+
+int32_t pjvm_platform_file_open(const uint8_t *name, uint8_t nameLen, uint8_t mode) {
+    char path[256];
+    if (nameLen > 254) nameLen = 254;
+    memcpy(path, name, nameLen);
+    path[nameLen] = '\0';
+    if (mode == 1) {
+        if (file_read_fp) fclose(file_read_fp);
+        file_read_fp = fopen(path, "rb");
+        if (!file_read_fp) return -1;
+        fprintf(stderr, "FILE | open read '%s'\n", path);
+    } else if (mode == 2) {
+        if (file_write_fp) fclose(file_write_fp);
+        file_write_fp = fopen(path, "wb");
+        if (!file_write_fp) return -1;
+        fprintf(stderr, "FILE | open write '%s'\n", path);
+    } else {
+        return -1;
+    }
+    return 0;
+}
+
+int32_t pjvm_platform_file_read_byte(void) {
+    if (!file_read_fp) return -1;
+    int ch = fgetc(file_read_fp);
+    if (ch == EOF) return -1;
+    return (int32_t)(uint8_t)ch;
+}
+
+void pjvm_platform_file_write_byte(uint8_t b) {
+    if (file_write_fp) fputc(b, file_write_fp);
+    else putchar(b);  /* fallback to stdout */
+}
+
+void pjvm_platform_file_close(void) {
+    if (file_read_fp) {
+        fclose(file_read_fp);
+        fprintf(stderr, "FILE | closed read\n");
+        file_read_fp = NULL;
+    }
+    if (file_write_fp) {
+        fclose(file_write_fp);
+        fprintf(stderr, "FILE | closed write\n");
+        file_write_fp = NULL;
+    }
+}
+
 #ifdef PJVM_PAGED
 static FILE *pjvm_file_handle;
 

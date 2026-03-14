@@ -20,7 +20,7 @@
 #define PJVM_VTABLE_CAP 256
 #endif
 #ifndef PJVM_STATIC_CAP
-#define PJVM_STATIC_CAP 256
+#define PJVM_STATIC_CAP 1024
 #endif
 #ifndef PJVM_MAX_STACK
 #define PJVM_MAX_STACK 256

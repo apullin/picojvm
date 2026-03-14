@@ -262,7 +262,7 @@ static void load_pjvm(const char *path) {
     fclose(f);
 #endif
 
-    if (prog_data[0] != 0x85 || (prog_data[1] != 0x4A && prog_data[1] != 0x4B)) {
+    if (prog_data[0] != 0x85 || (prog_data[1] != 0x4A && prog_data[1] != 0x4B && prog_data[1] != 0x4C)) {
         fprintf(stderr, "Bad .pjvm magic\n");
         exit(1);
     }

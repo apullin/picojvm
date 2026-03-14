@@ -93,7 +93,11 @@ uint8_t *bc;
 #endif
 
 /* --- internal globals (file-scope) ------------------------------------ */
-static uint8_t  n_static_fields, n_int_constants, n_string_constants;
+static uint16_t n_static_fields;
+static uint8_t  n_int_constants, n_string_constants;
+static uint8_t  cp16;          /* 0 = v1/v2 (8-bit CP), 1 = v3 (16-bit CP) */
+static uint16_t cp_str_flag;   /* 0x80 (v1/v2) or 0x8000 (v3) */
+static uint16_t cp_str_mask;   /* 0x7F (v1/v2) or 0x7FFF (v3) */
 static uint8_t  m_ml[PJVM_METHOD_CAP], m_ac[PJVM_METHOD_CAP];
 static uint8_t  m_fl[PJVM_METHOD_CAP], m_vs[PJVM_METHOD_CAP], m_vmid[PJVM_METHOD_CAP];
 static uint8_t  m_ec[PJVM_METHOD_CAP], m_eo[PJVM_METHOD_CAP];
@@ -241,11 +245,14 @@ NI static int16_t bread(void) {
     return o;
 }
 
-NI static uint8_t cpread(void) {
+NI static uint16_t cpread(void) {
     uint16_t idx = (BC(g_pjvm->pc) << 8) | BC(g_pjvm->pc + 1);
-    uint8_t r = PROG(cpr_off + g_pjvm->cur_cb + idx);
     g_pjvm->pc += 2;
-    return r;
+    if (cp16) {
+        uint32_t off = cpr_off + (uint32_t)g_pjvm->cur_cb + (uint32_t)idx * 2;
+        return (uint16_t)PROG(off) | ((uint16_t)PROG(off + 1) << 8);
+    }
+    return PROG(cpr_off + g_pjvm->cur_cb + idx);
 }
 #endif
 
@@ -259,22 +266,35 @@ NI static void pjvm_push32(int32_t v) {
 
 /* --- .pjvm loader ----------------------------------------------------- */
 void pjvm_parse(uint8_t *data) {
-    uint8_t version = data[1];  /* 0x4A = v1, 0x4B = v2 */
+    uint8_t version = data[1];  /* 0x4A = v1, 0x4B = v2, 0x4C = v3 */
     n_methods = data[2];
     main_mi = data[3];
-    n_static_fields = data[4];
-    n_int_constants = data[5];
-    n_classes = data[6];
-    n_string_constants = data[7];
 
     uint8_t *p;
-    if (version == 0x4B) {
-        bytecodes_size = (uint32_t)data[8] | ((uint32_t)data[9] << 8)
-                       | ((uint32_t)data[10] << 16) | ((uint32_t)data[11] << 24);
-        p = data + 14;
+    if (version >= 0x4C) {
+        /* v3: 16-bit n_static_fields, 16-bit CP entries */
+        n_static_fields = (uint16_t)data[4] | ((uint16_t)data[5] << 8);
+        n_int_constants = data[6];
+        n_classes = data[7];
+        n_string_constants = data[8];
+        bytecodes_size = (uint32_t)data[10] | ((uint32_t)data[11] << 8)
+                       | ((uint32_t)data[12] << 16) | ((uint32_t)data[13] << 24);
+        cp16 = 1; cp_str_flag = 0x8000; cp_str_mask = 0x7FFF;
+        p = data + 16;
     } else {
-        bytecodes_size = (uint32_t)((uint16_t)data[8] | ((uint16_t)data[9] << 8));
-        p = data + 10;
+        n_static_fields = data[4];
+        n_int_constants = data[5];
+        n_classes = data[6];
+        n_string_constants = data[7];
+        cp16 = 0; cp_str_flag = 0x80; cp_str_mask = 0x7F;
+        if (version == 0x4B) {
+            bytecodes_size = (uint32_t)data[8] | ((uint32_t)data[9] << 8)
+                           | ((uint32_t)data[10] << 16) | ((uint32_t)data[11] << 24);
+            p = data + 14;
+        } else {
+            bytecodes_size = (uint32_t)((uint16_t)data[8] | ((uint16_t)data[9] << 8));
+            p = data + 10;
+        }
     }
 
     uint8_t vo = 0;
@@ -291,7 +311,7 @@ void pjvm_parse(uint8_t *data) {
 
     for (uint8_t i = 0; i < n_methods; i++) {
         m_ml[i] = p[0]; m_ac[i] = p[2]; m_fl[i] = p[3];
-        if (version == 0x4B) {
+        if (version >= 0x4B) {
             m_co[i] = (uint32_t)((uint32_t)p[4] | ((uint32_t)p[5] << 8)
                      | ((uint32_t)p[6] << 16) | ((uint32_t)p[7] << 24));
             m_cb[i] = (uint16_t)p[8] | ((uint16_t)p[9] << 8);
@@ -724,22 +744,29 @@ static void pjvm_exec(void) {
             break;
         }
         case OP_LDC: {
-            uint8_t ci = PROG(cpr_off + g_pjvm->cur_cb + bcread());
-            if (ci & 0x80) {
-                spush(str_refs[ci & 0x7F], 0);
+            uint16_t ci;
+            uint8_t raw = bcread();
+            if (cp16) {
+                uint32_t off = cpr_off + (uint32_t)g_pjvm->cur_cb + (uint32_t)raw * 2;
+                ci = (uint16_t)PROG(off) | ((uint16_t)PROG(off + 1) << 8);
             } else {
-                uint32_t base = ic_off + (uint16_t)ci * 4;
+                ci = PROG(cpr_off + g_pjvm->cur_cb + raw);
+            }
+            if (ci & cp_str_flag) {
+                spush(str_refs[ci & cp_str_mask], 0);
+            } else {
+                uint32_t base = ic_off + (uint32_t)ci * 4;
                 spush((uint16_t)PROG(base) | ((uint16_t)PROG(base + 1) << 8),
                       (uint16_t)PROG(base + 2) | ((uint16_t)PROG(base + 3) << 8));
             }
             break;
         }
         case OP_LDC_W: {
-            uint8_t ci = cpread();
-            if (ci & 0x80) {
-                spush(str_refs[ci & 0x7F], 0);
+            uint16_t ci = cpread();
+            if (ci & cp_str_flag) {
+                spush(str_refs[ci & cp_str_mask], 0);
             } else {
-                uint32_t base = ic_off + (uint16_t)ci * 4;
+                uint32_t base = ic_off + (uint32_t)ci * 4;
                 spush((uint16_t)PROG(base) | ((uint16_t)PROG(base + 1) << 8),
                       (uint16_t)PROG(base + 2) | ((uint16_t)PROG(base + 3) << 8));
             }
@@ -1097,11 +1124,11 @@ static void pjvm_exec(void) {
         case OP_RETURN: pjvm_ret(0); break;
 
         case OP_GETSTATIC: {
-            uint8_t s = cpread();
+            uint16_t s = cpread();
             spush(g_pjvm->sf_lo[s], g_pjvm->sf_hi[s]); break;
         }
         case OP_PUTSTATIC: {
-            uint8_t s = cpread();
+            uint16_t s = cpread();
             alo = spop_lo(); ahi = spop_hi();
 #ifdef PJVM_TRACE_STATIC
             if (s == PJVM_TRACE_STATIC) {
@@ -1114,13 +1141,13 @@ static void pjvm_exec(void) {
         }
 
         case OP_GETFIELD: {
-            uint8_t s = cpread();
+            uint16_t s = cpread();
             alo = spop_lo();
             uint16_t addr = alo + 4 + s * 4;
             spush(r16(addr), r16((uint16_t)(addr + 2))); break;
         }
         case OP_PUTFIELD: {
-            uint8_t s = cpread();
+            uint16_t s = cpread();
             alo = spop_lo(); ahi = spop_hi();
             blo = spop_lo();
             uint16_t addr = blo + 4 + s * 4;
@@ -1128,11 +1155,11 @@ static void pjvm_exec(void) {
         }
 
         case OP_INVOKESTATIC: case OP_INVOKESPECIAL: {
-            uint8_t mi = cpread();
+            uint16_t mi = cpread();
             pjvm_inv(mi); break;
         }
         case OP_INVOKEVIRTUAL: {
-            uint8_t bmi = cpread();
+            uint16_t bmi = cpread();
             uint8_t vs = m_vs[bmi];
             if (vs == 0xFF) { pjvm_inv(bmi); }
             else {
@@ -1143,7 +1170,7 @@ static void pjvm_exec(void) {
             break;
         }
         case OP_INVOKEINTERFACE: {
-            uint8_t bmi = cpread();
+            uint16_t bmi = cpread();
             bcread(); bcread();
             uint8_t vid = m_vmid[bmi];
             uint16_t objref = g_pjvm->stk_lo[g_pjvm->sp - m_ac[bmi]];
@@ -1160,7 +1187,7 @@ static void pjvm_exec(void) {
         }
 
         case OP_NEW: {
-            uint8_t ci = cpread();
+            uint16_t ci = cpread();
             uint8_t nf = ci < n_classes ? cls_nf[ci] : 0;
             uint16_t a = heap_alloc(g_pjvm, (uint16_t)(4 + nf * 4));
             w16(a, ci); w16((uint16_t)(a + 2), 0);
@@ -1198,7 +1225,7 @@ static void pjvm_exec(void) {
         }
 
         case OP_CHECKCAST: {
-            uint8_t tci = cpread();
+            uint16_t tci = cpread();
             alo = g_pjvm->stk_lo[g_pjvm->sp - 1];
             if (alo != 0) {
                 uint8_t ci = (uint8_t)r16(alo);
@@ -1212,7 +1239,7 @@ static void pjvm_exec(void) {
             break;
         }
         case OP_INSTANCEOF: {
-            uint8_t tci = cpread();
+            uint16_t tci = cpread();
             alo = spop_lo(); spop_hi();
             if (alo == 0) { spush(0, 0); }
             else {

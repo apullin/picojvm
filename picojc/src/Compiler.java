@@ -3,7 +3,7 @@ class C {
 	// Limits — sized to fit in picoJVM 64KB heap
 	static int MAX_CLASSES  = 32;
 	static int MAX_METHODS  = 192;
-	static int MAX_FIELDS   = 384;
+	static int MAX_FIELDS   = 320;
 	static int MAX_NAMES    = 640;
 	static int MAX_CP       = 2560;
 	static int MAX_CODE     = 19456;
@@ -14,7 +14,7 @@ class C {
 	static int MAX_STR_CONST= 80;
 
 	// --- Name pool (interning) ---
-	static byte[] nPool = new byte[10240];
+	static byte[] nPool = new byte[6144];
 	static int npLen;
 	static int[] nOff = new int[MAX_NAMES];
 	static int[] nLen = new int[MAX_NAMES];
@@ -81,8 +81,9 @@ class C {
 	static int[] mRetT   = new int[MAX_METHODS]; // 0=void,1=int,2=ref
 	static int mainMi;
 
-	// --- CP resolution table ---
+	// --- CP resolution table (16-bit entries, stored as lo/hi byte arrays) ---
 	static byte[] cpEnt = new byte[MAX_CP];
+	static byte[] cpEntH = new byte[MAX_CP];
 	static int cpSz;
 
 	// --- Per-method CP (during emit) ---
@@ -243,7 +244,7 @@ class C {
 			if (nLen[i] == len && Native.memcmp(nPool, nOff[i], buf, 0, len) == 0)
 				return i;
 		}
-		if (nCount >= MAX_NAMES || npLen + len > 10240) {
+		if (nCount >= MAX_NAMES || npLen + len > 6144) {
 			Lexer.error(251);
 			return 0;
 		}

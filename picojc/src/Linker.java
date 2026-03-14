@@ -9,16 +9,18 @@ public class Linker {
 			if (!C.cIsIface[ci]) pjvmClassCount++;
 		}
 
-		// Header (10 bytes)
+		// v3 Header (16 bytes)
 		wB(0x85); // magic
-		wB(0x4A);
+		wB(0x4C); // version = v3
 		wB(C.mCount); // n_methods
 		wB(C.mainMi); // main_mi
-		wB(C.sfCount); // n_static
-		wB(C.intCC); // n_integers
+		wSLE(C.sfCount); // n_static_fields (16-bit LE)
+		wB(C.intCC); // n_int_constants
 		wB(pjvmClassCount); // n_classes
-		wB(C.strCC); // n_strings
-		wSLE(C.cdLen); // bytecodes_size
+		wB(C.strCC); // n_string_constants
+		wB(0); // region_flags (reserved)
+		wILE(C.cdLen); // bytecodes_size (32-bit LE)
+		wSLE(0); // reserved
 
 		// Class table
 		for (int ci = C.uClsStart; ci < C.cCount; ci++) {
@@ -47,24 +49,26 @@ public class Linker {
 			excRunning += C.mExcC[mi];
 		}
 
-		// Method table (12 bytes per method)
+		// Method table (14 bytes per method, v2/v3 format)
 		for (int mi = 0; mi < C.mCount; mi++) {
 			wB(C.mMaxLoc[mi]);
 			wB(C.mMaxStk[mi]);
 			wB(C.mArgC[mi]);
 			wB(C.mFlags[mi]);
-			wSLE(C.mCodeOff[mi]);
-			wSLE(C.mCpBase[mi]);
+			wILE(C.mCodeOff[mi]); // 32-bit code_offset
+			wSLE(C.mCpBase[mi] * 2); // byte offset (2 bytes per entry)
 			wB(C.mVtSlot[mi]);
 			wB(C.mVmid[mi]);
 			wB(C.mExcC[mi]);
 			wB(C.mExcIdx[mi]);
 		}
 
-		// CP resolution table
-		wSLE(C.cpSz);
-		Native.writeBytes(C.cpEnt, 0, C.cpSz);
-		C.outLen += C.cpSz;
+		// CP resolution table (16-bit entries)
+		wSLE(C.cpSz * 2); // byte count = entries × 2
+		for (int i = 0; i < C.cpSz; i++) {
+			wB(C.cpEnt[i] & 0xFF);
+			wB(C.cpEntH[i] & 0xFF);
+		}
 
 		// Integer constants (4 bytes each, LE)
 		for (int i = 0; i < C.intCC; i++) {
@@ -105,5 +109,12 @@ public class Linker {
 	static void wSLE(int s) {
 		wB(s & 0xFF);
 		wB((s >> 8) & 0xFF);
+	}
+
+	static void wILE(int v) {
+		wB(v & 0xFF);
+		wB((v >> 8) & 0xFF);
+		wB((v >> 16) & 0xFF);
+		wB((v >> 24) & 0xFF);
 	}
 }

@@ -298,7 +298,7 @@ def topological_sort(classes):
     return order
 
 
-def pack_pjvm(class_data_list, verbose=False, v2=False, pin_hints=None):
+def pack_pjvm(class_data_list, verbose=False, v2=False, pin_hints=None):  # v2 ignored, always v3
     """Pack one or more .class files into a single .pjvm binary."""
 
     # --- Step 1: Parse all classes ---
@@ -697,7 +697,7 @@ def pack_pjvm(class_data_list, verbose=False, v2=False, pin_hints=None):
                       f"(vmid={method_table[-1]['vmid']})")
 
     # --- Step 7: Build per-class CP resolution, concatenate with offsets ---
-    global_cp_resolve = bytearray()
+    global_cp_resolve = []  # list of uint16 values (v3: 16-bit CP entries)
     global_int_constants = []
     global_string_constants = []  # list of UTF-8 byte strings
     string_constant_dedup = {}   # utf8_text -> index
@@ -715,12 +715,10 @@ def pack_pjvm(class_data_list, verbose=False, v2=False, pin_hints=None):
     for name in class_order:
         cls = classes[name]
         cp = cls.cp
-        cp_base = len(global_cp_resolve)
+        cp_base = len(global_cp_resolve) * 2  # byte offset (2 bytes per entry)
         cp_bases[name] = cp_base
 
-        cp_resolve = bytearray(len(cp))
-        for i in range(len(cp_resolve)):
-            cp_resolve[i] = 0xFF
+        cp_resolve = [0xFFFF] * len(cp)
 
         # Resolve Methodrefs
         for cp_idx in range(1, len(cp)):
@@ -826,7 +824,7 @@ def pack_pjvm(class_data_list, verbose=False, v2=False, pin_hints=None):
                 sc_idx = len(global_string_constants)
                 global_string_constants.append(utf8_text.encode("utf-8"))
                 string_constant_dedup[utf8_text] = sc_idx
-            cp_resolve[cp_idx] = 0x80 | sc_idx
+            cp_resolve[cp_idx] = 0x8000 | sc_idx
 
         # Resolve Class refs → class_id (for 'new' and 'anewarray')
         for cp_idx in range(1, len(cp)):
@@ -892,37 +890,23 @@ def pack_pjvm(class_data_list, verbose=False, v2=False, pin_hints=None):
     # --- Step 9: Emit .pjvm binary ---
     out = bytearray()
 
-    if v2:
-        # v2 Header (14 bytes)
-        hdr_size = 14
-        mt_entry_size = 14
-        region_flags = 0
-        if pin_hints:
-            region_flags |= 0x02  # bit 1: pin hints present
-        out.append(0x85)           # magic
-        out.append(0x4B)           # v2
-        out.append(len(method_table))
-        out.append(main_index)
-        out.append(total_static_fields)
-        out.append(len(global_int_constants))
-        out.append(len(class_order))
-        out.append(len(global_string_constants))
-        out.extend(struct.pack("<I", len(bytecode_section)))  # 32-bit
-        out.append(region_flags)   # [12] region_flags
-        out.append(0)              # [13] reserved
-    else:
-        # v1 Header (10 bytes)
-        hdr_size = 10
-        mt_entry_size = 12
-        out.append(0x85)           # magic
-        out.append(0x4A)           # v1
-        out.append(len(method_table))
-        out.append(main_index)
-        out.append(total_static_fields)
-        out.append(len(global_int_constants))
-        out.append(len(class_order))
-        out.append(len(global_string_constants))
-        out.extend(struct.pack("<H", len(bytecode_section)))  # 16-bit
+    # v3 Header (16 bytes): 16-bit CP entries, 16-bit n_static_fields
+    hdr_size = 16
+    mt_entry_size = 14
+    region_flags = 0
+    if pin_hints:
+        region_flags |= 0x02  # bit 1: pin hints present
+    out.append(0x85)           # [0] magic
+    out.append(0x4C)           # [1] v3
+    out.append(len(method_table))  # [2]
+    out.append(main_index)     # [3]
+    out.extend(struct.pack("<H", total_static_fields))  # [4..5] 16-bit
+    out.append(len(global_int_constants))   # [6]
+    out.append(len(class_order))            # [7]
+    out.append(len(global_string_constants))# [8]
+    out.append(region_flags)   # [9]
+    out.extend(struct.pack("<I", len(bytecode_section)))  # [10..13] 32-bit
+    out.extend(struct.pack("<H", 0))  # [14..15] reserved
 
     # Class table (variable length)
     for name in class_order:
@@ -943,19 +927,18 @@ def pack_pjvm(class_data_list, verbose=False, v2=False, pin_hints=None):
         out.append(mt["max_stack"])
         out.append(mt["arg_count"])
         out.append(flags)
-        if v2:
-            out.extend(struct.pack("<I", mt["code_offset"]))  # 32-bit
-        else:
-            out.extend(struct.pack("<H", mt["code_offset"]))  # 16-bit
+        out.extend(struct.pack("<I", mt["code_offset"]))  # 32-bit
         out.extend(struct.pack("<H", mt["cp_base"]))
         out.append(mt["vtable_slot"])
         out.append(mt.get("vmid", 0xFF))
         out.append(mt["exc_count"])
         out.append(mt["exc_offset_idx"])
 
-    # CP resolution table
-    out.extend(struct.pack("<H", len(global_cp_resolve)))
-    out.extend(global_cp_resolve)
+    # CP resolution table (16-bit LE entries)
+    cp_bytes = len(global_cp_resolve) * 2
+    out.extend(struct.pack("<H", cp_bytes))
+    for val in global_cp_resolve:
+        out.extend(struct.pack("<H", val))
 
     # Integer constants (4 bytes each, little-endian)
     for val in global_int_constants:
@@ -976,8 +959,8 @@ def pack_pjvm(class_data_list, verbose=False, v2=False, pin_hints=None):
         out.extend(struct.pack("<H", e_handler))
         out.append(e_catch_cid)
 
-    # Pin hints (one byte per method, after exception table, v2 only)
-    if v2 and pin_hints:
+    # Pin hints (one byte per method, after exception table)
+    if pin_hints:
         pin_set = set(pin_hints)
         for i in range(len(method_table)):
             out.append(1 if i in pin_set else 0)
@@ -985,14 +968,13 @@ def pack_pjvm(class_data_list, verbose=False, v2=False, pin_hints=None):
             print(f"  Pin hints: methods {sorted(pin_set)}")
 
     if verbose:
-        fmt_str = "v2" if v2 else "v1"
-        print(f"\n.pjvm output ({fmt_str}): {len(out)} bytes")
+        print(f"\n.pjvm output (v3): {len(out)} bytes")
         print(f"  Header: {hdr_size} bytes")
         ct_size = sum(4 + len(classes[n].vtable) for n in class_order)
         print(f"  Class table: {len(class_order)} classes, {ct_size} bytes")
         print(f"  Method table: {len(method_table)} × {mt_entry_size} = "
               f"{len(method_table) * mt_entry_size} bytes")
-        print(f"  CP resolution: {len(global_cp_resolve) + 2} bytes")
+        print(f"  CP resolution: {cp_bytes + 2} bytes ({len(global_cp_resolve)} entries × 2)")
         print(f"  Int constants: {len(global_int_constants)} × 4 = "
               f"{len(global_int_constants) * 4} bytes")
         sc_size = sum(2 + len(s) for s in global_string_constants)

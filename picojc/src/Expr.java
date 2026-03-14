@@ -134,7 +134,7 @@ public class Expr {
 			Lexer.nextToken();
 			pUnary();
 			E.pop();
-			E.cmpBool(0x99); // IFEQ: !x
+			E.cmpBool(E.IFEQ); // IFEQ: !x
 			return 1;
 		}
 		if (Tk.type == Tk.INC || Tk.type == Tk.DEC) {

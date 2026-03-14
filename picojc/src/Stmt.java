@@ -290,17 +290,7 @@ public class Stmt {
 
 		int lblEnd = E.label();
 
-		// Collect cases
-		// Save body start BEFORE expect consumes { and advances past first token
-		int bodyStart = Lexer.pos;
-		int bodyLine = Lexer.line;
-		Lexer.expect(Tk.LBRACE);
-		// Static to avoid heap allocation per switch (no nested switches)
-		// Allocated once in <clinit>, reused for each switch statement
-		int caseCount = 0;
-		int defaultLabel = -1;
-
-		// Use LOOKUPSWITCH for all switch statements (simplest)
+		// Emit LOOKUPSWITCH
 		int switchPC = C.mcLen;
 		E.eb(0xAB); // LOOKUPSWITCH
 
@@ -310,11 +300,20 @@ public class Stmt {
 		}
 
 		int defaultLoc = C.mcLen;
-		E.eIBE(0); // default offset placeholder (4 bytes, standard JVM format)
+		E.eIBE(0); // default offset placeholder
 		int npairsLoc = C.mcLen;
-		E.eIBE(0); // npairs placeholder (4 bytes)
+		E.eIBE(0); // npairs placeholder
 
-		// Scan cases
+		// Case table will be inserted at this position after parsing
+		int tableInsert = C.mcLen;
+
+		int caseCount = 0;
+		int defaultLabel = -1;
+
+		Lexer.expect(Tk.LBRACE);
+		E.pushLp(lblEnd, lblEnd); // continue in switch = break
+
+		// Single forward pass: collect case values AND emit body bytecodes
 		while (Tk.type != Tk.RBRACE && Tk.type != Tk.EOF) {
 			if (Tk.type == Tk.CASE) {
 				Lexer.nextToken();
@@ -330,22 +329,22 @@ public class Stmt {
 				Lexer.expect(Tk.COLON);
 
 				C.caseLbls[caseCount] = E.label();
+				E.mark(C.caseLbls[caseCount]);
 				C.caseVals[caseCount] = val;
 				caseCount++;
 			} else if (Tk.type == Tk.DEFAULT) {
 				Lexer.nextToken();
 				Lexer.expect(Tk.COLON);
 				defaultLabel = E.label();
+				E.mark(defaultLabel);
 			} else {
-				Lexer.nextToken();
+				pStmt();
 			}
 		}
 
-		// Patch npairs
-		E.pBE(npairsLoc, caseCount);
+		E.popLp();
 
-		// Emit match-offset pairs (sorted by key, picoJVM requires this)
-		// Simple insertion sort on caseVals
+		// Sort case values (insertion sort, keeping caseLbls in sync)
 		for (int i = 1; i < caseCount; i++) {
 			int kv = C.caseVals[i];
 			int kl = C.caseLbls[i];
@@ -359,61 +358,49 @@ public class Stmt {
 			C.caseLbls[j + 1] = kl;
 		}
 
-		int[] pairLocs = new int[caseCount];
-		for (int i = 0; i < caseCount; i++) {
-			E.eIBE(C.caseVals[i]); // match key (4-byte BE)
-			pairLocs[i] = C.mcLen;
-			E.eIBE(0);
-		}
+		// Patch npairs
+		E.pBE(npairsLoc, caseCount);
 
-		// Now re-parse and emit case bodies
-		Lexer.pos = bodyStart;
-		Lexer.line = bodyLine;
-		Lexer.nextToken();
+		// Insert case table: shift body bytecodes right to make room
+		int tableSize = caseCount * 8;
+		if (tableSize > 0) {
+			int bodyLen = C.mcLen - tableInsert;
+			for (int i = bodyLen - 1; i >= 0; i--) {
+				C.mcode[tableInsert + tableSize + i] = C.mcode[tableInsert + i];
+			}
+			C.mcLen += tableSize;
 
-		int curCaseIdx = -1;
-
-		E.pushLp(lblEnd, lblEnd); // continue in switch = break
-
-		while (Tk.type != Tk.RBRACE && Tk.type != Tk.EOF) {
-			if (Tk.type == Tk.CASE) {
-				Lexer.nextToken();
-				boolean neg = false;
-				if (Tk.type == Tk.MINUS) { neg = true; Lexer.nextToken(); }
-				int val = Tk.intValue;
-				if (neg) val = -val;
-				Lexer.nextToken();
-				Lexer.expect(Tk.COLON);
-
-				// Find which case this is
-				for (int i = 0; i < caseCount; i++) {
-					if (C.caseVals[i] == val) {
-						E.mark(C.caseLbls[i]);
-						E.pBE(pairLocs[i], C.mcLen - switchPC);
-						break;
-					}
+			// Adjust label addresses in shifted region
+			for (int lbl = 0; lbl < C.lblCount; lbl++) {
+				if (C.lblAddr[lbl] >= tableInsert) {
+					C.lblAddr[lbl] = C.lblAddr[lbl] + tableSize;
 				}
-			} else if (Tk.type == Tk.DEFAULT) {
-				Lexer.nextToken();
-				Lexer.expect(Tk.COLON);
-				if (defaultLabel >= 0) {
-					E.mark(defaultLabel);
-					E.pBE(defaultLoc, C.mcLen - switchPC);
+			}
+			// Adjust backpatch locations in shifted region
+			for (int i = 0; i < C.patC; i++) {
+				if (C.patLoc[i] >= tableInsert) {
+					C.patLoc[i] = C.patLoc[i] + tableSize;
 				}
-			} else {
-				pStmt();
 			}
 		}
 
-		E.popLp();
+		// Mark end label (at post-shift position)
+		E.mark(lblEnd);
 
-		// If no default, patch default to end
-		if (defaultLabel < 0) {
-			E.mark(lblEnd);
-			E.pBE(defaultLoc, C.mcLen - switchPC);
+		// Write sorted case table entries
+		for (int i = 0; i < caseCount; i++) {
+			int off = tableInsert + i * 8;
+			E.pBE(off, C.caseVals[i]);
+			E.pBE(off + 4, C.lblAddr[C.caseLbls[i]] - switchPC);
 		}
 
-		E.mark(lblEnd);
+		// Patch default offset
+		if (defaultLabel >= 0) {
+			E.pBE(defaultLoc, C.lblAddr[defaultLabel] - switchPC);
+		} else {
+			E.pBE(defaultLoc, C.lblAddr[lblEnd] - switchPC);
+		}
+
 		Lexer.expect(Tk.RBRACE);
 	}
 

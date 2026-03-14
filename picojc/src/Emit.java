@@ -2,6 +2,16 @@
 class E {
 	// Branch opcodes
 	static int IFEQ = 0x99, IFNE = 0x9A, GOTO = 0xA7;
+
+	// Per-class clinit accumulation buffer (field inits + static blocks)
+	static byte[] cinitBuf = new byte[1024];
+	static int cinitLen;
+	static int[] cinitCpV = new int[128];
+	static int[] cinitCpK = new int[128];
+	static int cinitCpC;
+	static int cinitMaxStk;
+	static int cinitMaxLoc;
+
 	static void emit() {
 		C.cdLen = 0;
 		C.cpSz = 0;
@@ -29,9 +39,39 @@ class E {
 		int ci = fCurCls();
 		C.curCi = ci;
 
+		// Reset per-class clinit accumulation
+		cinitLen = 0;
+		cinitCpC = 0;
+		cinitMaxStk = 0;
+		cinitMaxLoc = 0;
+
 		while (Tk.type != Tk.RBRACE && Tk.type != Tk.EOF) {
 			eMem(ci);
 		}
+
+		// Finalize clinit from accumulated buffer (field inits + static blocks)
+		if (cinitLen > 0 && C.cClinit[ci] != 0xFF) {
+			int mi = C.cClinit[ci];
+			if (!C.mNative[mi]) {
+				initMC(mi);
+				C.curMStatic = true;
+				C.locCount = 0;
+				C.stkDepth = 0;
+				C.maxStk = cinitMaxStk;
+				for (int i = 0; i < cinitLen; i++) C.mcode[i] = cinitBuf[i];
+				C.mcLen = cinitLen;
+				C.cpMCount = cinitCpC;
+				for (int i = 0; i < cinitCpC; i++) {
+					C.cpMVals[i] = cinitCpV[i];
+					C.cpMKeys[i] = cinitCpK[i];
+				}
+				eb(0xB1); // RETURN
+				commitMC(mi);
+				C.mMaxLoc[mi] = cinitMaxLoc > 0 ? cinitMaxLoc : 1;
+				C.mMaxStk[mi] = cinitMaxStk > 0 ? cinitMaxStk : 1;
+			}
+		}
+
 		if (Tk.type == Tk.RBRACE) Lexer.nextToken();
 	}
 
@@ -62,11 +102,9 @@ class E {
 			Lexer.nextToken();
 		}
 
-		// Static init block
+		// Static init block — accumulate into clinit buffer
 		if (isStat && Tk.type == Tk.LBRACE) {
-			int mi = fMeth(ci, C.N_CLINIT);
-			if (mi >= 0) eMBody(mi);
-			else { Lexer.nextToken(); Catalog.skipBlk(); Lexer.expect(Tk.RBRACE); }
+			eStatBlock();
 			return;
 		}
 
@@ -105,12 +143,123 @@ class E {
 				skipMDecl();
 			}
 		} else {
-			// Field - skip to semicolon
-			while (Tk.type != Tk.SEMI && Tk.type != Tk.EOF) {
-				Lexer.nextToken();
+			// Field declaration
+			if (isStat) {
+				eStatFieldDecl(ci, nm);
+			} else {
+				while (Tk.type != Tk.SEMI && Tk.type != Tk.EOF) Lexer.nextToken();
+				Lexer.expect(Tk.SEMI);
 			}
-			Lexer.expect(Tk.SEMI);
 		}
+	}
+
+	// Parse static field declaration, accumulating initializers into clinit buffer
+	static void eStatFieldDecl(int ci, int firstNm) {
+		if (Tk.type == Tk.ASSIGN) {
+			eStatFieldInit(ci, firstNm);
+		}
+		// Handle comma-separated: static int a = 1, b = 2;
+		while (Tk.type == Tk.COMMA) {
+			Lexer.nextToken();
+			int nm = C.intern(Tk.strBuf, Tk.strLen);
+			Lexer.nextToken();
+			if (Tk.type == Tk.ASSIGN) {
+				eStatFieldInit(ci, nm);
+			}
+		}
+		while (Tk.type != Tk.SEMI && Tk.type != Tk.EOF) Lexer.nextToken();
+		Lexer.expect(Tk.SEMI);
+	}
+
+	// Parse a single static field initializer expression into clinit buffer
+	static void eStatFieldInit(int ci, int nm) {
+		// Set up temp method context (free between eMBody calls)
+		C.mcLen = 0;
+		C.cpMCount = cinitCpC;
+		C.cpMBase = 0;
+		for (int i = 0; i < cinitCpC; i++) {
+			C.cpMVals[i] = cinitCpV[i];
+			C.cpMKeys[i] = cinitCpK[i];
+		}
+		C.stkDepth = 0; C.maxStk = 0;
+		C.curMStatic = true;
+		C.locCount = 0; C.locNext = 0;
+		C.lblCount = 0; C.patC = 0; C.lpDepth = 0;
+
+		Lexer.nextToken(); // skip '='
+		Expr.pExpr();
+		int fi = Resolver.fStatField(ci, nm);
+		if (fi >= 0) {
+			int cpIdx = aFCP(C.fSlot[fi]);
+			eOp(0xB3, cpIdx); pop(); // PUTSTATIC
+		}
+
+		// Resolve backpatches (ternary expressions etc.)
+		for (int i = 0; i < C.patC; i++) {
+			int loc = C.patLoc[i];
+			int lbl = C.patLbl[i];
+			int target = C.lblAddr[lbl];
+			int offset = target - (loc - 1);
+			C.mcode[loc] = (byte)((offset >> 8) & 0xFF);
+			C.mcode[loc + 1] = (byte)(offset & 0xFF);
+		}
+
+		// Append to clinit buffer
+		for (int i = 0; i < C.mcLen; i++) {
+			cinitBuf[cinitLen + i] = C.mcode[i];
+		}
+		cinitLen = cinitLen + C.mcLen;
+
+		// Update clinit CP
+		cinitCpC = C.cpMCount;
+		for (int i = 0; i < cinitCpC; i++) {
+			cinitCpV[i] = C.cpMVals[i];
+			cinitCpK[i] = C.cpMKeys[i];
+		}
+		if (C.maxStk > cinitMaxStk) cinitMaxStk = C.maxStk;
+	}
+
+	// Accumulate explicit static { } block into clinit buffer
+	static void eStatBlock() {
+		C.mcLen = 0;
+		C.cpMCount = cinitCpC;
+		C.cpMBase = 0;
+		for (int i = 0; i < cinitCpC; i++) {
+			C.cpMVals[i] = cinitCpV[i];
+			C.cpMKeys[i] = cinitCpK[i];
+		}
+		C.stkDepth = 0; C.maxStk = 0;
+		C.curMStatic = true;
+		C.locCount = 0; C.locNext = cinitMaxLoc;
+		C.lblCount = 0; C.patC = 0; C.lpDepth = 0;
+
+		Lexer.nextToken(); // skip {
+		Stmt.pBlock();
+		Lexer.expect(Tk.RBRACE);
+
+		// Resolve backpatches
+		for (int i = 0; i < C.patC; i++) {
+			int loc = C.patLoc[i];
+			int lbl = C.patLbl[i];
+			int target = C.lblAddr[lbl];
+			int offset = target - (loc - 1);
+			C.mcode[loc] = (byte)((offset >> 8) & 0xFF);
+			C.mcode[loc + 1] = (byte)(offset & 0xFF);
+		}
+
+		// Append to clinit buffer
+		for (int i = 0; i < C.mcLen; i++) {
+			cinitBuf[cinitLen + i] = C.mcode[i];
+		}
+		cinitLen = cinitLen + C.mcLen;
+
+		cinitCpC = C.cpMCount;
+		for (int i = 0; i < cinitCpC; i++) {
+			cinitCpV[i] = C.cpMVals[i];
+			cinitCpK[i] = C.cpMKeys[i];
+		}
+		if (C.maxStk > cinitMaxStk) cinitMaxStk = C.maxStk;
+		if (C.locNext > cinitMaxLoc) cinitMaxLoc = C.locNext;
 	}
 
 	static void skipMDecl() {
@@ -184,21 +333,6 @@ class E {
 
 			// Emit RETURN
 			eb(0xB1);
-		} else if (C.mName[mi] == C.N_CLINIT) {
-			// Save current lexer position (at '{' of static block)
-			int clinitPos = Lexer.pos;
-			int clinitLine = Lexer.line;
-			int clinitTok = Tk.type;
-			emitStaticInits();
-			// Restore lexer to static block body
-			Lexer.pos = clinitPos;
-			Lexer.line = clinitLine;
-			Tk.type = clinitTok;
-			// Static initializer body: { ... }
-			Lexer.nextToken(); // skip {
-			Stmt.pBlock();
-			Lexer.expect(Tk.RBRACE);
-			eb(0xB1); // RETURN
 		} else {
 			// Regular method
 			if (!C.curMStatic) {
@@ -241,7 +375,8 @@ class E {
 		}
 		C.mCpBase[mi] = C.cpMBase;
 		for (int i = 0; i < C.cpMCount; i++) {
-			C.cpEnt[C.cpMBase + i] = (byte) C.cpMVals[i];
+			C.cpEnt[C.cpMBase + i] = (byte)(C.cpMVals[i] & 0xFF);
+			C.cpEntH[C.cpMBase + i] = (byte)((C.cpMVals[i] >> 8) & 0xFF);
 		}
 		C.cpSz = C.cpMBase + C.cpMCount;
 	}
@@ -268,36 +403,7 @@ class E {
 				C.mMaxLoc[mi] = 1;
 				C.mMaxStk[mi] = 1;
 			}
-			// Synthetic <clinit>: only field initializers, no explicit body
-			if (C.mName[mi] == C.N_CLINIT && !C.mNative[mi] && C.mBodyS[mi] == -2) {
-				// Synthetic clinit: field initializers only
-				initMC(mi);
-				C.curCi = C.mClass[mi];
-				C.curMStatic = true;
-				C.locCount = 0;
-				C.stkDepth = 0;
-				C.maxStk = 0;
-
-				emitStaticInits();
-				eb(0xB1); // RETURN
-
-				commitMC(mi);
-				C.mMaxLoc[mi] = 1;
-				C.mMaxStk[mi] = C.maxStk > 0 ? C.maxStk : 1;
-			}
-		}
-	}
-
-	static void emitStaticInits() {
-		for (int fi = 0; fi < C.fCount; fi++) {
-			if (C.fClass[fi] == C.curCi && C.fStatic[fi] && C.fInitPos[fi] >= 0) {
-				Lexer.pos = C.fInitPos[fi];
-				Lexer.line = C.fInitLn[fi];
-				Lexer.nextToken();
-				Expr.pExpr();
-				int cpIdx = aCP(C.fSlot[fi]);
-				eOp(0xB3, cpIdx); pop(); // PUTSTATIC
-			}
+			// Synthetic clinits are now handled in eClsMethods via cinitBuf
 		}
 	}
 
@@ -463,7 +569,7 @@ class E {
 			Native.arraycopy(buf, 0, C.strC[strIdx], 0, len);
 			C.strCLen[strIdx] = len;
 		}
-		return aCP(0x80 | strIdx);
+		return aCP(0x8000 | strIdx);
 	}
 
 	static int aICP(int val) {

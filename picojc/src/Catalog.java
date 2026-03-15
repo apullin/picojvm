@@ -294,15 +294,29 @@ public class Catalog {
 		// Parse parameters
 		Lexer.expect(Tk.LPAREN);
 		int argc = isStat ? 0 : 1; // instance methods have 'this' as arg 0
+		boolean isVarargs = false;
+		int fixedCount = 0;
 		while (Tk.type != Tk.RPAREN && Tk.type != Tk.EOF) {
 			// Skip type
 			skipTy();
+			// Check for varargs: Type... name
+			if (Tk.type == Tk.ELLIPSIS) {
+				isVarargs = true;
+				fixedCount = argc - (isStat ? 0 : 1);
+				Lexer.nextToken(); // skip '...'
+			}
 			// Skip name
 			Lexer.nextToken();
 			argc++;
 			if (Tk.type == Tk.COMMA) Lexer.nextToken();
 		}
 		Lexer.expect(Tk.RPAREN);
+		if (isVarargs) {
+			C.mVarargs[mi] = true;
+			C.mFixedArgs[mi] = (byte)fixedCount;
+			// Replace varargs param with MAX_VA_SLOTS + 1(count)
+			argc = argc - 1 + C.MAX_VA_SLOTS + 1;
+		}
 		C.mArgC[mi] = (byte)argc;
 
 		if (isNat || isAbstract || C.cIsIface[ci]) {

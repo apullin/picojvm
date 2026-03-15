@@ -467,7 +467,14 @@ public class Lexer {
 		else if (c == ']') { Tk.type = Tk.RBRACKET; }
 		else if (c == ';') { Tk.type = Tk.SEMI; }
 		else if (c == ',') { Tk.type = Tk.COMMA; }
-		else if (c == '.') { Tk.type = Tk.DOT; }
+		else if (c == '.') {
+		if (ch() == '.' && chNext() == '.') {
+			advance(); advance();
+			Tk.type = Tk.ELLIPSIS;
+		} else {
+			Tk.type = Tk.DOT;
+		}
+	}
 		else if (c == '~') { Tk.type = Tk.TILDE; }
 		else if (c == '?') { Tk.type = Tk.QUESTION; }
 		else if (c == ':') { Tk.type = Tk.COLON; }

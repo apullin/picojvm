@@ -4,7 +4,7 @@ class C {
 	static final int MAX_CLASSES  = 32;
 	static final int MAX_METHODS  = 192;
 	static final int MAX_FIELDS   = 320;
-	static final int MAX_NAMES    = 640;
+	static final int MAX_NAMES    = 768;
 	static final int MAX_CP       = 2560;
 	static final int MAX_CODE     = 19456;
 	static final int MAX_LOCALS   = 64;
@@ -12,6 +12,7 @@ class C {
 	static final int MAX_VTABLE   = 128;
 	static final int MAX_INT_CONST= 80;
 	static final int MAX_STR_CONST= 80;
+	static final int MAX_VA_SLOTS = 8;
 
 	// --- Name pool (interning) ---
 	static byte[] nPool = new byte[6144];
@@ -80,6 +81,8 @@ class C {
 	static boolean[] mStatic     = new boolean[MAX_METHODS];
 	static boolean[] mIsCtor= new boolean[MAX_METHODS];
 	static boolean[] mNative     = new boolean[MAX_METHODS];
+	static boolean[] mVarargs    = new boolean[MAX_METHODS];
+	static byte[] mFixedArgs = new byte[MAX_METHODS];
 	static int[] mBodyS = new int[MAX_METHODS]; // source pos (must be int: >32KB sources)
 	static int[] mBodyE   = new int[MAX_METHODS]; // source pos (must be int: >32KB sources)
 	static byte[] mRetT   = new byte[MAX_METHODS]; // 0=void,1=int,2=ref
@@ -274,6 +277,7 @@ class C {
 		mClass[mi] = (byte)ci; mName[mi] = (short)nm; mArgC[mi] = (byte)argc;
 		mStatic[mi] = isStat; mIsCtor[mi] = isCtor; mNative[mi] = isNat;
 		mRetT[mi] = (byte)retType; mVtSlot[mi] = (byte)0xFF; mVmid[mi] = (byte)0xFF; mExcC[mi] = 0;
+		mVarargs[mi] = false; mFixedArgs[mi] = 0;
 		return mi;
 	}
 

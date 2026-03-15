@@ -516,7 +516,12 @@ public class Expr {
 				}
 			}
 		}
-		int argc = pArgs(0);
+		int argc;
+		if (mi >= 0 && C.mVarargs[mi]) {
+			argc = pVAArgs(0, mi);
+		} else {
+			argc = pArgs(0);
+		}
 		if (mi < 0) { Lexer.error(204); return 0; }
 		E.eOp(0xB8, E.aCP(mi)); // INVOKESTATIC
 		return eCallRet(mi, argc);
@@ -526,13 +531,18 @@ public class Expr {
 		Lexer.expect(Tk.LPAREN);
 		// Native String method or user-defined instance method
 		int mi = C.ensNat(C.N_STRING, methodNm);
-		int argc = pArgs(1); // 'this' already on stack
 		if (mi < 0) {
 			for (int m = 0; m < C.mCount; m++) {
 				if (C.mName[m] == methodNm && !C.mStatic[m] && !C.mNative[m]) { mi = m; break; }
 			}
-			if (mi < 0) { Lexer.error(205); return 0; }
 		}
+		int argc;
+		if (mi >= 0 && C.mVarargs[mi]) {
+			argc = pVAArgs(1, mi);
+		} else {
+			argc = pArgs(1);
+		}
+		if (mi < 0) { Lexer.error(205); return 0; }
 		int cpIdx = E.aCP(mi);
 		int mci = C.mClass[mi];
 		// Interface dispatch only for non-native user methods
@@ -542,6 +552,35 @@ public class Expr {
 			E.eOp(0xB6, cpIdx); // INVOKEVIRTUAL
 		}
 		return eCallRet(mi, argc);
+	}
+
+	static int pVAArgs(int start, int mi) {
+		int fixedCount = C.mFixedArgs[mi];
+		int argc = start;
+
+		// Parse fixed args
+		for (int i = 0; i < fixedCount; i++) {
+			pExpr(); argc++;
+			if (Tk.type == Tk.COMMA) Lexer.nextToken();
+		}
+
+		// Parse varargs values
+		int vaCount = 0;
+		while (Tk.type != Tk.RPAREN && Tk.type != Tk.EOF) {
+			pExpr(); vaCount++; argc++;
+			if (Tk.type == Tk.COMMA) Lexer.nextToken();
+		}
+
+		// Pad unused slots with 0
+		for (int i = vaCount; i < C.MAX_VA_SLOTS; i++) {
+			E.eIC(0); E.push(); argc++;
+		}
+
+		// Push count as last argument
+		E.eIC(vaCount); E.push(); argc++;
+
+		Lexer.expect(Tk.RPAREN);
+		return argc;
 	}
 
 	// ==================== LVALUE OPS ====================

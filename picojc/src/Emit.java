@@ -477,16 +477,79 @@ class E {
 	}
 
 
+	static int vaPN = -1;  // varargs param name index (-1 = not varargs)
+	static int vaET;       // varargs element type token (Tk.INT, Tk.BYTE, etc.)
+
 	static void pParams() {
+		vaPN = -1;
 		Lexer.expect(Tk.LPAREN);
 		while (Tk.type != Tk.RPAREN && Tk.type != Tk.EOF) {
+			int savedTyTok = Tk.type;
 			int pType = pTypeLoc();
+			if (Tk.type == Tk.ELLIPSIS) {
+				// Varargs parameter — must be last
+				Lexer.nextToken(); // skip '...'
+				vaPN = C.intern(Tk.strBuf, Tk.strLen);
+				Lexer.nextToken(); // skip parameter name
+				vaET = savedTyTok;
+				// Allocate MAX_VA_SLOTS hidden locals for spread values
+				byte[] sb = Tk.strBuf;
+				sb[0] = (byte)'$'; sb[1] = (byte)'v';
+				for (int vi = 0; vi < C.MAX_VA_SLOTS; vi++) {
+					sb[2] = (byte)('0' + vi);
+					aLoc(C.intern(sb, 3), 0);
+				}
+				// Allocate count local
+				sb[1] = (byte)'c';
+				aLoc(C.intern(sb, 2), 0);
+				break;
+			}
 			int pNm = C.intern(Tk.strBuf, Tk.strLen);
 			Lexer.nextToken();
 			aLoc(pNm, pType);
 			if (Tk.type == Tk.COMMA) Lexer.nextToken();
 		}
 		Lexer.expect(Tk.RPAREN);
+		if (vaPN >= 0) {
+			emitVAPrologue();
+		}
+	}
+
+	static void emitVAPrologue() {
+		int countSlot = C.locCount - 1;
+		int firstVASlot = countSlot - C.MAX_VA_SLOTS;
+
+		// Determine NEWARRAY type code and local array type
+		int typeCode = 10; // T_INT
+		int arrLocType = 3; // int[]
+		if (vaET == Tk.BYTE || vaET == Tk.BOOLEAN) { typeCode = 8; arrLocType = 4; }
+		else if (vaET == Tk.CHAR) { typeCode = 5; arrLocType = 5; }
+		else if (vaET == Tk.SHORT) { typeCode = 9; arrLocType = 8; }
+
+		// Create array: ILOAD count, NEWARRAY
+		eLd(countSlot, 0); push();
+		eb(0xBC); eb(typeCode); // NEWARRAY (pops count, pushes array ref)
+
+		// Store array in new local bound to the varargs parameter name
+		int arrSlot = C.locCount;
+		aLoc(vaPN, arrLocType);
+		eSt(arrSlot, 1); pop();
+
+		// Copy: for i = 0..MAX_VA_SLOTS-1, if (count > i) arr[i] = va_i
+		for (int vi = 0; vi < C.MAX_VA_SLOTS; vi++) {
+			eLd(countSlot, 0); push();
+			eIC(vi); push();
+			int skipLbl = label();
+			eBr(0xA4, skipLbl); // IF_ICMPLE: count <= i → skip
+			pop(); pop();
+
+			eLd(arrSlot, 1); push();
+			eIC(vi); push();
+			eLd(firstVASlot + vi, 0); push();
+			eASt(arrLocType); pop(); pop(); pop();
+
+			mark(skipLbl);
+		}
 	}
 
 	// Bytecode emission shortcuts

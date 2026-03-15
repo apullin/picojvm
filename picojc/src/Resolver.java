@@ -147,26 +147,8 @@ public class Resolver {
 		// Ensure all cataloged native methods have their flags set
 		for (int mi = 0; mi < C.mCount; mi++) {
 			if (C.mNative[mi] && C.mFlags[mi] == 0) {
-				int nm = C.mName[mi];
-				int nid = -1;
-				if (nm == C.N_PUTCHAR)      nid = 0;
-				else if (nm == C.N_IN)      nid = 1;
-				else if (nm == C.N_OUT)     nid = 2;
-				else if (nm == C.N_PEEK)    nid = 3;
-				else if (nm == C.N_POKE)    nid = 4;
-				else if (nm == C.N_HALT)    nid = 5;
-				else if (nm == C.N_INIT)    nid = 6;
-				else if (nm == C.N_LENGTH)  nid = 7;
-				else if (nm == C.N_CHARAT)  nid = 8;
-				else if (nm == C.N_EQUALS)  nid = 9;
-				else if (nm == C.N_TOSTRING) nid = 10;
-				else if (nm == C.N_PRINT)   nid = 11;
-				else if (nm == C.N_HASHCODE) nid = 12;
-				else if (nm == C.N_ARRAYCOPY)       nid = 13;
-				else if (nm == C.N_MEMCMP)          nid = 14;
-				else if (nm == C.N_WRITE_BYTES)     nid = 15;
-				else if (nm == C.N_STRING_FROM_BYTES) nid = 16;
-				if (nid >= 0) C.mFlags[mi] = (byte)((nid << 1) | 1);
+				int info = C.natInfo(C.mName[mi]);
+				if (info >= 0) C.mFlags[mi] = (byte)(((info >> 8) << 1) | 1);
 			}
 		}
 

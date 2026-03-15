@@ -315,40 +315,45 @@ class C {
 		return mi;
 	}
 
-	static int aN(int nm, int argc, int id, int ret) { return addNat(N_NATIVE, nm, argc, id, true, ret); }
-	static int aS(int nm, int argc, int id, int ret) { return addNat(N_STRING, nm, argc, id, false, ret); }
+	// Packed native method info: (nativeId << 8) | (argc << 2) | retType
+	// Single source of truth for all native method metadata.
+	static int natInfo(int nm) {
+		if (nm == N_PUTCHAR)           return (0  << 8) | (1 << 2) | 0;
+		if (nm == N_IN)                return (1  << 8) | (1 << 2) | 1;
+		if (nm == N_OUT)               return (2  << 8) | (2 << 2) | 0;
+		if (nm == N_PEEK)              return (3  << 8) | (1 << 2) | 1;
+		if (nm == N_POKE)              return (4  << 8) | (2 << 2) | 0;
+		if (nm == N_HALT)              return (5  << 8) | (0 << 2) | 0;
+		if (nm == N_INIT)              return (6  << 8) | (1 << 2) | 0;
+		if (nm == N_LENGTH)            return (7  << 8) | (1 << 2) | 1;
+		if (nm == N_CHARAT)            return (8  << 8) | (2 << 2) | 1;
+		if (nm == N_EQUALS)            return (9  << 8) | (2 << 2) | 1;
+		if (nm == N_TOSTRING)          return (10 << 8) | (1 << 2) | 2;
+		if (nm == N_PRINT)             return (11 << 8) | (1 << 2) | 0;
+		if (nm == N_HASHCODE)          return (12 << 8) | (1 << 2) | 1;
+		if (nm == N_ARRAYCOPY)         return (13 << 8) | (5 << 2) | 0;
+		if (nm == N_MEMCMP)            return (14 << 8) | (5 << 2) | 1;
+		if (nm == N_WRITE_BYTES)       return (15 << 8) | (3 << 2) | 0;
+		if (nm == N_STRING_FROM_BYTES) return (16 << 8) | (3 << 2) | 2;
+		if (nm == N_FILE_OPEN)         return (17 << 8) | (3 << 2) | 1;
+		if (nm == N_FILE_READ_BYTE)    return (18 << 8) | (0 << 2) | 1;
+		if (nm == N_FILE_WRITE_BYTE)   return (19 << 8) | (1 << 2) | 0;
+		if (nm == N_FILE_READ)         return (20 << 8) | (3 << 2) | 1;
+		if (nm == N_FILE_WRITE)        return (21 << 8) | (3 << 2) | 0;
+		if (nm == N_FILE_CLOSE)        return (22 << 8) | (1 << 2) | 0;
+		if (nm == N_FILE_DELETE)        return (23 << 8) | (2 << 2) | 1;
+		return -1;
+	}
 
 	// Ensure a native method exists, return its index
 	static int ensNat(int classNm, int methodNm) {
+		int info = natInfo(methodNm);
+		if (info < 0) return -1;
+		int id = info >> 8, argc = (info >> 2) & 63, ret = info & 3;
 		if (classNm == N_OBJECT && methodNm == N_INIT)
-			return addNat(N_OBJECT, N_INIT, 1, 6, false, 0);
-		if (classNm == N_NATIVE) {
-			if (methodNm == N_PUTCHAR) return aN(N_PUTCHAR, 1, 0, 0);
-			if (methodNm == N_IN)      return aN(N_IN, 1, 1, 1);
-			if (methodNm == N_OUT)     return aN(N_OUT, 2, 2, 0);
-			if (methodNm == N_PEEK)    return aN(N_PEEK, 1, 3, 1);
-			if (methodNm == N_POKE)    return aN(N_POKE, 2, 4, 0);
-			if (methodNm == N_HALT)    return aN(N_HALT, 0, 5, 0);
-			if (methodNm == N_PRINT)   return aN(N_PRINT, 1, 11, 0);
-			if (methodNm == N_ARRAYCOPY)       return aN(N_ARRAYCOPY, 5, 13, 0);
-			if (methodNm == N_MEMCMP)          return aN(N_MEMCMP, 5, 14, 1);
-			if (methodNm == N_WRITE_BYTES)     return aN(N_WRITE_BYTES, 3, 15, 0);
-			if (methodNm == N_STRING_FROM_BYTES) return aN(N_STRING_FROM_BYTES, 3, 16, 2);
-			if (methodNm == N_FILE_OPEN)       return aN(N_FILE_OPEN, 3, 17, 1);
-			if (methodNm == N_FILE_READ_BYTE)  return aN(N_FILE_READ_BYTE, 0, 18, 1);
-			if (methodNm == N_FILE_WRITE_BYTE) return aN(N_FILE_WRITE_BYTE, 1, 19, 0);
-			if (methodNm == N_FILE_READ)       return aN(N_FILE_READ, 3, 20, 1);
-			if (methodNm == N_FILE_WRITE)      return aN(N_FILE_WRITE, 3, 21, 0);
-			if (methodNm == N_FILE_CLOSE)      return aN(N_FILE_CLOSE, 1, 22, 0);
-			if (methodNm == N_FILE_DELETE)      return aN(N_FILE_DELETE, 2, 23, 1);
-		}
-		if (classNm == N_STRING) {
-			if (methodNm == N_LENGTH)   return aS(N_LENGTH, 1, 7, 1);
-			if (methodNm == N_CHARAT)   return aS(N_CHARAT, 2, 8, 1);
-			if (methodNm == N_EQUALS)   return aS(N_EQUALS, 2, 9, 1);
-			if (methodNm == N_TOSTRING) return aS(N_TOSTRING, 1, 10, 2);
-			if (methodNm == N_HASHCODE) return aS(N_HASHCODE, 1, 12, 1);
-		}
+			return addNat(N_OBJECT, methodNm, argc, id, false, ret);
+		if (classNm == N_NATIVE) return addNat(N_NATIVE, methodNm, argc, id, true, ret);
+		if (classNm == N_STRING) return addNat(N_STRING, methodNm, argc, id, false, ret);
 		return -1;
 	}
 

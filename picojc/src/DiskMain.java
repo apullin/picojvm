@@ -44,38 +44,22 @@ public class DiskMain {
 
 		boolean multiFile = readManifest();
 
-		if (multiFile) {
-			// Pass 1: Catalog (stream all files)
-			Lexer.initDiskFiles(fileNames, fileNameLens, fileCount);
-			Lexer.nextToken();
-			Catalog.catalog();
+		// Pass 1: Catalog
+		if (multiFile) Lexer.initDiskFiles(fileNames, fileNameLens, fileCount);
+		else Lexer.initDisk(fname, 10);
+		Lexer.nextToken();
+		Catalog.catalog();
 
-			// Pass 2: Resolve (no source access)
-			Resolver.resolve();
+		// Pass 2: Resolve
+		Resolver.resolve();
 
-			// Pass 3: Emit (rewind and re-stream all files)
-			// Open spill file for bytecodes (write handle, won't disturb read)
-			Native.fileOpen(spillName, 8, 2);
-			Lexer.rewindDiskFiles();
-			Lexer.nextToken();
-			E.emit();
-			Native.fileClose(2); // close write handle
-		} else {
-			// Single-file fallback
-			Lexer.initDisk(fname, 10);
-			Lexer.nextToken();
-			Catalog.catalog();
-
-			Resolver.resolve();
-
-			// Open spill file for bytecodes
-			Native.fileOpen(spillName, 8, 2);
-			Lexer.rewindDisk();
-			Lexer.initDisk(fname, 10);
-			Lexer.nextToken();
-			E.emit();
-			Native.fileClose(2); // close write handle
-		}
+		// Pass 3: Emit (rewind and re-stream)
+		Native.fileOpen(spillName, 8, 2);
+		if (multiFile) Lexer.rewindDiskFiles();
+		else { Lexer.rewindDisk(); Lexer.initDisk(fname, 10); }
+		Lexer.nextToken();
+		E.emit();
+		Native.fileClose(2);
 
 		// Close source read handle before Link
 		Lexer.closeDisk();

@@ -129,54 +129,16 @@ class E {
 	}
 
 	static void eMem(int ci) {
-		// Skip modifiers
-		boolean isStat = false;
-		boolean isNat = false;
-		boolean isAbstract = false;
-		while (Tk.type == Tk.PUBLIC || Tk.type == Tk.PRIVATE ||
-			   Tk.type == Tk.PROTECTED || Tk.type == Tk.STATIC ||
-			   Tk.type == Tk.FINAL || Tk.type == Tk.NATIVE ||
-			   Tk.type == Tk.ABSTRACT) {
-			if (Tk.type == Tk.STATIC) isStat = true;
-			if (Tk.type == Tk.NATIVE) isNat = true;
-			if (Tk.type == Tk.ABSTRACT) isAbstract = true;
-			Lexer.nextToken();
-		}
-
-		// Static init block — accumulate into clinit buffer
-		if (isStat && Tk.type == Tk.LBRACE) {
-			eStatBlock();
+		if (Catalog.parseMods()) { eStatBlock(); return; }
+		if (Catalog.isCtor(ci)) {
+			int mi = fCtor(ci);
+			if (mi >= 0) eMBody(mi);
+			else skipMDecl();
 			return;
 		}
-
-		// Constructor check
-		if (Tk.type == Tk.IDENT) {
-			int nm = C.intern(Tk.strBuf, Tk.strLen);
-			if (nm == C.cName[ci]) {
-				Lexer.save();
-				Lexer.nextToken();
-				if (Tk.type == Tk.LPAREN) {
-					Lexer.discardSave();
-					int mi = fCtor(ci);
-					if (mi >= 0) eMBody(mi);
-					else skipMDecl();
-					return;
-				}
-				Lexer.restore();
-				Tk.strLen = C.nLen[nm];
-				Native.arraycopy(C.nPool, C.nOff[nm], Tk.strBuf, 0, Tk.strLen);
-				Tk.type = Tk.IDENT;
-			}
-		}
-
-		// Return type
 		Catalog.skipTy();
-
-		// Name
 		int nm = C.iN();
-
 		if (Tk.type == Tk.LPAREN) {
-			// Method
 			int mi = fMeth(ci, nm);
 			if (mi >= 0 && !C.mNative[mi] && C.mBodyS[mi] >= 0) {
 				eMBody(mi);
@@ -184,8 +146,7 @@ class E {
 				skipMDecl();
 			}
 		} else {
-			// Field declaration
-			if (isStat) {
+			if (Catalog.mStat) {
 				eStatFieldDecl(ci, nm);
 			} else {
 				while (Tk.type != Tk.SEMI && Tk.type != Tk.EOF) Lexer.nextToken();

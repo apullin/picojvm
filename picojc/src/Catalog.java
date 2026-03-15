@@ -83,28 +83,48 @@ public class Catalog {
 		Lexer.expect(Tk.RBRACE);
 	}
 
-	static void catMember(int ci) {
-		// Collect modifiers
-		boolean isStat = false;
-		boolean isNat = false;
-		boolean isAbstract = false;
-		boolean isFinal = false;
+	// Shared member-head parsing state (used by Catalog and Emit)
+	static boolean mStat, mNat, mAbst, mFinal;
+
+	// Parse member modifiers. Returns true if this is a static block.
+	static boolean parseMods() {
+		mStat = false; mNat = false; mAbst = false; mFinal = false;
 		while (Tk.type == Tk.PUBLIC || Tk.type == Tk.PRIVATE ||
 			   Tk.type == Tk.PROTECTED || Tk.type == Tk.STATIC ||
 			   Tk.type == Tk.FINAL || Tk.type == Tk.NATIVE ||
 			   Tk.type == Tk.ABSTRACT) {
-			if (Tk.type == Tk.STATIC) isStat = true;
-			if (Tk.type == Tk.NATIVE) isNat = true;
-			if (Tk.type == Tk.ABSTRACT) isAbstract = true;
-			if (Tk.type == Tk.FINAL) isFinal = true;
+			if (Tk.type == Tk.STATIC) mStat = true;
+			if (Tk.type == Tk.NATIVE) mNat = true;
+			if (Tk.type == Tk.ABSTRACT) mAbst = true;
+			if (Tk.type == Tk.FINAL) mFinal = true;
 			Lexer.nextToken();
 		}
+		return mStat && Tk.type == Tk.LBRACE;
+	}
 
-		// Static initializer block: static { ... }
-		if (isStat && Tk.type == Tk.LBRACE) {
+	// Check for constructor. Returns true if it is one (lexer at LPAREN).
+	static boolean isCtor(int ci) {
+		if (Tk.type != Tk.IDENT) return false;
+		int nm = C.intern(Tk.strBuf, Tk.strLen);
+		if (nm != C.cName[ci]) return false;
+		Lexer.save();
+		Lexer.nextToken();
+		if (Tk.type == Tk.LPAREN) {
+			Lexer.discardSave();
+			return true;
+		}
+		Lexer.restore();
+		Tk.type = Tk.IDENT;
+		Tk.strLen = C.nLen[nm];
+		Native.arraycopy(C.nPool, C.nOff[nm], Tk.strBuf, 0, Tk.strLen);
+		return false;
+	}
+
+	static void catMember(int ci) {
+		if (parseMods()) {
+			// Static initializer block: static { ... }
 			int mi;
 			if (C.cClinit[ci] != 0xFF && C.mBodyS[C.cClinit[ci]] == -2) {
-				// Reuse synthetic <clinit> (created for field initializers)
 				mi = C.cClinit[ci];
 			} else {
 				mi = C.initMethod(ci, C.N_CLINIT, 0, true, false, false, 0);
@@ -118,43 +138,22 @@ public class Catalog {
 			return;
 		}
 
-		// Return type or constructor
-		int retType = 0; // 0=void, 1=int, 2=ref
-		int arrayKind = 0; // 0=non-array, 4=byte[], 5=char[]
-		boolean isCtor = false;
-		int retTypeToken = Tk.type;
-
-		// Check for constructor: ClassName(
-		if (Tk.type == Tk.IDENT) {
-			int nm = C.intern(Tk.strBuf, Tk.strLen);
-			if (nm == C.cName[ci]) {
-				// Might be constructor or field/method named same as class
-				Lexer.save();
-				Lexer.nextToken();
-				if (Tk.type == Tk.LPAREN) {
-					// It's a constructor
-					Lexer.discardSave();
-					isCtor = true;
-					retType = 0; // void
-					catMethod(ci, nm, isStat, isCtor, isNat, isAbstract, retType);
-					return;
-				}
-				// Not a constructor, restore
-				Lexer.restore();
-				Tk.type = Tk.IDENT;
-				Tk.strLen = C.nLen[nm];
-				Native.arraycopy(C.nPool, C.nOff[nm], Tk.strBuf, 0, Tk.strLen);
-			}
+		if (isCtor(ci)) {
+			catMethod(ci, C.cName[ci], mStat, true, mNat, mAbst, 0);
+			return;
 		}
 
 		// Parse return type
+		int retType = 0;
+		int arrayKind = 0;
+		int retTypeToken = Tk.type;
+
 		if (Tk.type == Tk.VOID) { retType = 0; Lexer.nextToken(); }
 		else if (Tk.type == Tk.INT || Tk.type == Tk.BYTE ||
 				 Tk.type == Tk.CHAR || Tk.type == Tk.SHORT ||
 				 Tk.type == Tk.BOOLEAN) {
-			retType = 1; // int-like
+			retType = 1;
 			Lexer.nextToken();
-			// Check for array type (supports multi-dimensional)
 			{
 				int dimCount = 0;
 				while (Tk.type == Tk.LBRACKET) {
@@ -166,21 +165,18 @@ public class Catalog {
 						else if (retTypeToken == Tk.CHAR) arrayKind = 5;
 						else if (retTypeToken == Tk.SHORT) arrayKind = 8;
 					}
-					retType = 2; // array = ref
+					retType = 2;
 				}
-				// Multi-dimensional: outer array is reference array, but track inner type
-				// 6=byte[][], 7=char[][] — after first [i], type becomes 4 or 5
 				if (dimCount > 1) {
-					if (arrayKind == 4) arrayKind = 6;      // byte[][]
-					else if (arrayKind == 5) arrayKind = 7;  // char[][]
+					if (arrayKind == 4) arrayKind = 6;
+					else if (arrayKind == 5) arrayKind = 7;
 					else arrayKind = 0;
 				}
 			}
 		}
 		else if (Tk.type == Tk.STRING_KW || Tk.type == Tk.IDENT) {
-			retType = 2; // reference
+			retType = 2;
 			Lexer.nextToken();
-			// Check for array type (supports multi-dimensional)
 			while (Tk.type == Tk.LBRACKET) {
 				Lexer.nextToken();
 				Lexer.expect(Tk.RBRACKET);
@@ -200,16 +196,11 @@ public class Catalog {
 			return;
 		}
 
-		// Name
 		int nm = C.iN();
-
-		// Method or field?
 		if (Tk.type == Tk.LPAREN) {
-			// Method
-			catMethod(ci, nm, isStat, false, isNat, isAbstract, retType);
+			catMethod(ci, nm, mStat, false, mNat, mAbst, retType);
 		} else {
-			// Field
-			catField(ci, nm, isStat, isFinal, retType, arrayKind);
+			catField(ci, nm, mStat, mFinal, retType, arrayKind);
 		}
 	}
 

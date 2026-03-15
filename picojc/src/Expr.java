@@ -564,13 +564,7 @@ public class Expr {
 
 				// Check for method call in same class
 				if (Tk.type == Tk.LPAREN) {
-					// Check if it's an instance method (implicit this.method())
-					if (!C.curMStatic && Resolver.fMethod(C.curCi, nm, false) >= 0) {
-						E.ethis();
-						setObjRef(C.cName[C.curCi]);
-						return eCall(C.cName[C.curCi], nm, E.INVOKEVIRTUAL, 205);
-					}
-					return eCall(C.cName[C.curCi], nm, E.INVOKESTATIC, 204);
+					return eSelfCall(nm);
 				}
 
 				Lexer.error(202); // Undefined identifier
@@ -708,6 +702,31 @@ public class Expr {
 		return rt;
 	}
 
+	static void emitInvoke(int mi, int invokeKind, int argc) {
+		int cpIdx = E.aCP(mi);
+		if (invokeKind == E.INVOKESTATIC || invokeKind == E.INVOKESPECIAL) {
+			E.eOp(invokeKind, cpIdx);
+			return;
+		}
+		int mci = C.mClass[mi];
+		if (!C.mNative[mi] && mci < C.cCount && C.cIsIface[mci]) {
+			E.eOp(E.INVOKEINTERFACE, cpIdx);
+			E.eb(argc);
+			E.eb(0);
+		} else {
+			E.eOp(E.INVOKEVIRTUAL, cpIdx);
+		}
+	}
+
+	static int eSelfCall(int methodNm) {
+		int ownerNm = C.cName[C.curCi];
+		if (!C.curMStatic && Resolver.fMethod(C.curCi, methodNm, false) >= 0) {
+			E.ethis();
+			return eCall(ownerNm, methodNm, E.INVOKEVIRTUAL, 205);
+		}
+		return eCall(ownerNm, methodNm, E.INVOKESTATIC, 204);
+	}
+
 	static int eCall(int ownerNm, int methodNm, int invokeKind, int errCode) {
 		Lexer.expect(Tk.LPAREN);
 		boolean isStatic = invokeKind == E.INVOKESTATIC;
@@ -715,17 +734,7 @@ public class Expr {
 		int mi = ownerNm >= 0 ? Resolver.fCallTarget(ownerNm, methodNm, isStatic, argc) : -1;
 		argc = mi >= 0 ? packVarargs(mi, argc) : -1;
 		if (mi < 0 || argc < 0) { Lexer.error(errCode); return 0; }
-		int cpIdx = E.aCP(mi);
-		if (invokeKind == E.INVOKESTATIC || invokeKind == E.INVOKESPECIAL) {
-			E.eOp(invokeKind, cpIdx);
-		} else {
-			int mci = C.mClass[mi];
-			if (!C.mNative[mi] && mci < C.cCount && C.cIsIface[mci]) {
-				E.eOp(E.INVOKEINTERFACE, cpIdx); E.eb(argc); E.eb(0);
-			} else {
-				E.eOp(E.INVOKEVIRTUAL, cpIdx);
-			}
-		}
+		emitInvoke(mi, invokeKind, argc);
 		return eCallRet(mi, argc);
 	}
 

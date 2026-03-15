@@ -99,8 +99,7 @@ public class Resolver {
 				int slot = -1;
 				for (int j = 0; j < C.cVtSize[ci]; j++) {
 					int existingMi = C.vtable[C.vtBase[ci] + j];
-					if (C.mName[existingMi] == C.mName[mi] &&
-						C.mArgC[existingMi] == C.mArgC[mi]) {
+					if (sameSig(existingMi, mi)) {
 						slot = j;
 						break;
 					}
@@ -137,8 +136,7 @@ public class Resolver {
 					// Find matching method in implementing class
 						for (int cmi = 0; cmi < C.mCount; cmi++) {
 							if (C.mClass[cmi] != ci) continue;
-							if (C.mName[cmi] == C.mName[imi] &&
-								C.mArgC[cmi] == C.mArgC[imi]) {
+							if (sameSig(cmi, imi)) {
 								C.mVmid[cmi] = C.mVmid[imi];
 							}
 						}
@@ -257,23 +255,33 @@ public class Resolver {
 		return fMethodExact(ci, nm, isStatic, -1);
 	}
 
+	static boolean sameSig(int mi, int mj) {
+		return C.mName[mi] == C.mName[mj] && C.mArgC[mi] == C.mArgC[mj];
+	}
+
+	static boolean argcFits(int mi, int argc) {
+		if (argc < 0) return true;
+		if (!C.mVarargs[mi]) return C.mArgC[mi] == argc;
+		int minArgc = (C.mStatic[mi] ? 0 : 1) + C.mFixedArgs[mi];
+		return argc >= minArgc && argc <= minArgc + C.MAX_VA_SLOTS;
+	}
+
+	static boolean callShapeFits(int mi, int nm, boolean isStatic, int argc) {
+		return C.mName[mi] == nm &&
+			   C.mStatic[mi] == isStatic &&
+			   !C.mIsCtor[mi] &&
+			   argcFits(mi, argc);
+	}
+
 	static int fMethodExact(int ci, int nm, boolean isStatic, int argc) {
 		while (ci >= 0) {
 			int varargsMi = -1;
 			for (int mi = 0; mi < C.mCount; mi++) {
-				if (C.mClass[mi] != ci || C.mName[mi] != nm ||
-					C.mStatic[mi] != isStatic || C.mIsCtor[mi]) {
+				if (C.mClass[mi] != ci || !callShapeFits(mi, nm, isStatic, argc)) {
 					continue;
 				}
-				if (argc < 0) return mi;
-				if (!C.mVarargs[mi]) {
-					if (C.mArgC[mi] == argc) return mi;
-				} else {
-					int minArgc = (C.mStatic[mi] ? 0 : 1) + C.mFixedArgs[mi];
-					if (argc >= minArgc && argc <= minArgc + C.MAX_VA_SLOTS && varargsMi < 0) {
-					varargsMi = mi;
-				}
-				}
+				if (!C.mVarargs[mi]) return mi;
+				if (varargsMi < 0) varargsMi = mi;
 			}
 			if (varargsMi >= 0) return varargsMi;
 			ci = C.cParent[ci];
@@ -283,15 +291,7 @@ public class Resolver {
 
 	static int fCallTarget(int ownerNm, int methodNm, boolean isStatic, int argc) {
 		int mi = C.ensNat(ownerNm, methodNm);
-		if (mi >= 0 && C.mName[mi] == methodNm &&
-			C.mStatic[mi] == isStatic && !C.mIsCtor[mi]) {
-			if (!C.mVarargs[mi]) {
-				if (C.mArgC[mi] == argc) return mi;
-			} else {
-				int minArgc = (C.mStatic[mi] ? 0 : 1) + C.mFixedArgs[mi];
-				if (argc >= minArgc && argc <= minArgc + C.MAX_VA_SLOTS) return mi;
-			}
-		}
+		if (mi >= 0 && callShapeFits(mi, methodNm, isStatic, argc)) return mi;
 		int ci = fClsByNm(ownerNm);
 		if (ci < 0) return -1;
 		return fMethodExact(ci, methodNm, isStatic, argc);

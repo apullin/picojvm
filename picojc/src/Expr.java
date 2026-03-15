@@ -11,20 +11,64 @@ public class Expr {
 	static boolean lvRV; // assign DUPs and returns value
 	static int exprRefNm = -1; // declared ref type name for the last parsed ref expression
 	static int exprArrRefNm = -1; // element ref type when the last parsed expression is object[]
+	static int exprNarrow = C.NK_NONE; // exact scalar kind when known, else int-like
+	static boolean exprConst;
+	static int exprConstVal;
 
 	static void clearRefInfo() {
 		exprRefNm = -1;
 		exprArrRefNm = -1;
+		exprNarrow = C.NK_NONE;
+		exprConst = false;
 	}
 
 	static void setObjRef(int refNm) {
 		exprRefNm = refNm;
 		exprArrRefNm = -1;
+		exprNarrow = C.NK_NONE;
+		exprConst = false;
 	}
 
 	static void setObjArrayRef(int refNm) {
 		exprRefNm = -1;
 		exprArrRefNm = refNm;
+		exprNarrow = C.NK_NONE;
+		exprConst = false;
+	}
+
+	static void setScalarKind(int narrowKind) {
+		exprRefNm = -1;
+		exprArrRefNm = -1;
+		exprNarrow = narrowKind;
+		exprConst = false;
+	}
+
+	static void setConstInt(int val, int narrowKind) {
+		exprRefNm = -1;
+		exprArrRefNm = -1;
+		exprNarrow = narrowKind;
+		exprConst = true;
+		exprConstVal = val;
+	}
+
+	static boolean fitsNarrow(int val, int narrowKind) {
+		if (narrowKind == C.NK_BYTE) return val >= -128 && val <= 127;
+		if (narrowKind == C.NK_CHAR) return val >= 0 && val <= 65535;
+		if (narrowKind == C.NK_SHORT) return val >= -32768 && val <= 32767;
+		return true;
+	}
+
+	static boolean widensTo(int srcNarrow, int dstNarrow) {
+		if (dstNarrow == srcNarrow) return true;
+		if (dstNarrow == C.NK_SHORT && srcNarrow == C.NK_BYTE) return true;
+		return false;
+	}
+
+	static void chkImplicitNarrow(int narrowKind) {
+		if (narrowKind == C.NK_NONE) return;
+		if (exprConst && fitsNarrow(exprConstVal, narrowKind)) return;
+		if (widensTo(exprNarrow, narrowKind)) return;
+		Lexer.error(208);
 	}
 
 	static int packVarargs(int mi, int argc) {
@@ -48,7 +92,7 @@ public class Expr {
 		return Resolver.fInstField(ci, fieldNm);
 	}
 
-	static int fRetType(int t, int refNm) {
+	static int fRetType(int t, int refNm, int narrowKind) {
 		if (t == 2) {
 			setObjArrayRef(refNm);
 			return 2;
@@ -61,7 +105,7 @@ public class Expr {
 			setObjRef(refNm);
 			return 2;
 		}
-		clearRefInfo();
+		setScalarKind(narrowKind);
 		return 1;
 	}
 
@@ -130,6 +174,8 @@ public class Expr {
 			if (prec < minPrec) break;
 			int opcode = info & 0xFF;
 			int tok = Tk.type;
+			boolean lhsConst = exprConst;
+			int lhsVal = exprConstVal;
 			Lexer.nextToken();
 			if (prec <= 2) {
 				// Short-circuit: || (prec 1) or && (prec 2)
@@ -140,6 +186,7 @@ public class Expr {
 				pBin(prec + 1);
 				E.eBr(E.GOTO, lbl2);
 				E.mark(lbl1); E.mark(lbl2);
+				clearRefInfo();
 				} else if (prec == 6) {
 					// Equality: ==, !=
 					int rtype = pBin(prec + 1);
@@ -170,7 +217,21 @@ public class Expr {
 					pBin(prec + 1);
 					E.pop();
 					E.eb(opcode);
-					clearRefInfo();
+					if (lhsConst && exprConst) {
+						int rhsVal = exprConstVal;
+						if (tok == Tk.PIPE) setConstInt(lhsVal | rhsVal, C.NK_NONE);
+						else if (tok == Tk.CARET) setConstInt(lhsVal ^ rhsVal, C.NK_NONE);
+						else if (tok == Tk.AMP) setConstInt(lhsVal & rhsVal, C.NK_NONE);
+						else if (tok == Tk.SHL) setConstInt(lhsVal << rhsVal, C.NK_NONE);
+						else if (tok == Tk.SHR) setConstInt(lhsVal >> rhsVal, C.NK_NONE);
+						else if (tok == Tk.USHR) setConstInt(lhsVal >>> rhsVal, C.NK_NONE);
+						else if (tok == Tk.PLUS) setConstInt(lhsVal + rhsVal, C.NK_NONE);
+						else if (tok == Tk.MINUS) setConstInt(lhsVal - rhsVal, C.NK_NONE);
+						else if (tok == Tk.STAR) setConstInt(lhsVal * rhsVal, C.NK_NONE);
+						else if (tok == Tk.SLASH && rhsVal != 0) setConstInt(lhsVal / rhsVal, C.NK_NONE);
+						else if (tok == Tk.PERCENT && rhsVal != 0) setConstInt(lhsVal % rhsVal, C.NK_NONE);
+						else clearRefInfo();
+					} else clearRefInfo();
 				}
 			}
 			return type;
@@ -186,7 +247,10 @@ public class Expr {
 			}
 				pUnary();
 				E.eb(E.INEG);
-				clearRefInfo();
+				if (exprConst) {
+					exprConstVal = -exprConstVal;
+					exprNarrow = C.NK_NONE;
+				} else setScalarKind(C.NK_NONE);
 				return 1;
 			}
 		if (Tk.type == Tk.TILDE) {
@@ -197,7 +261,10 @@ public class Expr {
 				E.push();
 				E.eb(E.IXOR);
 				E.pop();
-				clearRefInfo();
+				if (exprConst) {
+					exprConstVal = ~exprConstVal;
+					exprNarrow = C.NK_NONE;
+				} else setScalarKind(C.NK_NONE);
 				return 1;
 			}
 		if (Tk.type == Tk.BANG) {
@@ -205,7 +272,10 @@ public class Expr {
 				pUnary();
 				E.pop();
 				E.cmpBool(E.IFEQ); // IFEQ: !x
-				clearRefInfo();
+				if (exprConst) {
+					exprConstVal = exprConstVal == 0 ? 1 : 0;
+					exprNarrow = C.NK_NONE;
+				} else setScalarKind(C.NK_NONE);
 				return 1;
 			}
 		if (Tk.type == Tk.INC || Tk.type == Tk.DEC) {
@@ -226,7 +296,7 @@ public class Expr {
 				E.edup();
 				E.eSt(slot, 0);
 				E.pop();
-				clearRefInfo();
+				setScalarKind(narrowKind);
 				return 1;
 			}
 			Lexer.error(201);
@@ -247,15 +317,27 @@ public class Expr {
 					Lexer.nextToken();
 					pUnary();
 					// Emit cast instruction
-					if (castType == Tk.BYTE) E.eb(E.I2B);
-					else if (castType == Tk.CHAR) E.eb(E.I2C);
-					else if (castType == Tk.SHORT) E.eb(E.I2S);
+					if (castType == Tk.BYTE) {
+						E.eb(E.I2B);
+						if (exprConst) setConstInt((byte)exprConstVal, C.NK_BYTE);
+						else setScalarKind(C.NK_BYTE);
+					}
+					else if (castType == Tk.CHAR) {
+						E.eb(E.I2C);
+						if (exprConst) setConstInt((char)exprConstVal, C.NK_CHAR);
+						else setScalarKind(C.NK_CHAR);
+					}
+					else if (castType == Tk.SHORT) {
+						E.eb(E.I2S);
+						if (exprConst) setConstInt((short)exprConstVal, C.NK_SHORT);
+						else setScalarKind(C.NK_SHORT);
+					}
 						else if (castType == Tk.IDENT && castNm >= 0) {
 							int ci = Resolver.fClsByNm(castNm);
 							int cpIdx = E.aCP(ci >= 0 ? ci : 0);
 							E.eOp(E.CHECKCAST, cpIdx);
+							setObjRef(castNm);
 						}
-						if (castType == Tk.IDENT) setObjRef(castNm);
 						else clearRefInfo();
 						return castType == Tk.IDENT ? 2 : 1;
 					}
@@ -323,6 +405,7 @@ public class Expr {
 						type = 1;
 						clearRefInfo();
 					} else {
+						int elemType = type;
 						E.eALd(type);
 						// Propagate inner type for multi-dim arrays
 						if (type == 6) type = 4;
@@ -332,7 +415,10 @@ public class Expr {
 							setObjRef(arrElemRefNm);
 						} else {
 							type = 1;
-							clearRefInfo();
+							if (elemType == 4) setScalarKind(C.NK_BYTE);
+							else if (elemType == 5) setScalarKind(C.NK_CHAR);
+							else if (elemType == 8) setScalarKind(C.NK_SHORT);
+							else clearRefInfo();
 						}
 					}
 				}
@@ -358,10 +444,11 @@ public class Expr {
 	static int pPrim() {
 		if (Tk.type == Tk.INT_LIT || Tk.type == Tk.CHAR_LIT) {
 			int val = Tk.intValue;
+			int narrowKind = Tk.type == Tk.CHAR_LIT ? C.NK_CHAR : C.NK_NONE;
 			Lexer.nextToken();
 			E.eIC(val);
 			E.push();
-			clearRefInfo();
+			setConstInt(val, narrowKind);
 			return 1;
 		}
 		if (Tk.type == Tk.STR_LIT) {
@@ -374,8 +461,8 @@ public class Expr {
 			setObjRef(C.N_STRING);
 			return 2; // reference
 		}
-		if (Tk.type == Tk.TRUE) { Lexer.nextToken(); E.ic1(); clearRefInfo(); return 1; }
-		if (Tk.type == Tk.FALSE) { Lexer.nextToken(); E.ic0(); clearRefInfo(); return 1; }
+		if (Tk.type == Tk.TRUE) { Lexer.nextToken(); E.ic1(); setConstInt(1, C.NK_NONE); return 1; }
+		if (Tk.type == Tk.FALSE) { Lexer.nextToken(); E.ic0(); setConstInt(0, C.NK_NONE); return 1; }
 		if (Tk.type == Tk.NULL) {
 			Lexer.nextToken();
 			E.eb(E.ACONST_NULL);
@@ -431,7 +518,7 @@ public class Expr {
 							int fi = Resolver.fStatField(ci, memberNm);
 							if (fi < 0) { Lexer.error(207); return 0; }
 							if (C.fFinal[fi] && C.fHasConst[fi]) {
-								E.eIC(C.fConstVal[fi]); E.push(); clearRefInfo(); return 1;
+								E.eIC(C.fConstVal[fi]); E.push(); setConstInt(C.fConstVal[fi], C.fNarrow[fi]); return 1;
 							}
 							// ClassName.field — no return value on assign
 							lvK = 2; lvI = E.aCP(C.fSlot[fi]); lvT = C.fType[fi];
@@ -466,7 +553,7 @@ public class Expr {
 					int fi = Resolver.fStatField(C.curCi, nm);
 						if (fi >= 0) {
 							if (C.fFinal[fi] && C.fHasConst[fi]) {
-								E.eIC(C.fConstVal[fi]); E.push(); clearRefInfo(); return 1;
+								E.eIC(C.fConstVal[fi]); E.push(); setConstInt(C.fConstVal[fi], C.fNarrow[fi]); return 1;
 							}
 						// Static field lvalue (in-class, returns value on assign)
 						lvK = 2; lvI = E.aCP(C.fSlot[fi]); lvT = C.fType[fi];
@@ -615,6 +702,7 @@ public class Expr {
 		for (int j = 0; j < argc; j++) E.pop();
 		int rt = C.mRetT[mi];
 		if (rt == 2) setObjRef(C.mRetRefNm[mi]);
+		else if (rt == 1) setScalarKind(C.mRetNarrow[mi]);
 		else clearRefInfo();
 		if (rt != 0) E.push();
 		return rt;
@@ -650,10 +738,11 @@ public class Expr {
 			Lexer.nextToken();
 			if (k == 1) E.ethis();
 			pExpr();
-			if (k == 0) { E.eNarrow(n); E.edup(); E.eSt(i, t); E.pop(); return fRetType(t, refNm); }
+			chkImplicitNarrow(n);
+			if (k == 0) { E.eNarrow(n); E.edup(); E.eSt(i, t); E.pop(); return fRetType(t, refNm, n); }
 			if (k == 2) {
 				E.eNarrow(n);
-				if (rv) { E.edup(); E.eOp(E.PUTSTATIC, i); E.pop(); return fRetType(arr != 0 ? arr : t, arr != 0 ? -1 : refNm); }
+				if (rv) { E.edup(); E.eOp(E.PUTSTATIC, i); E.pop(); return fRetType(arr != 0 ? arr : t, arr != 0 ? -1 : refNm, n); }
 				E.eOp(E.PUTSTATIC, i); E.pop(); return 0;
 			}
 			E.eNarrow(n);
@@ -663,7 +752,7 @@ public class Expr {
 			int op = Tk.type; Lexer.nextToken();
 			if (k == 0) {
 				E.eLd(i, t); E.push(); pExpr(); E.eCO(op); E.pop();
-				E.eNarrow(n); E.edup(); E.eSt(i, t); E.pop(); return 1;
+				E.eNarrow(n); E.edup(); E.eSt(i, t); E.pop(); return fRetType(t, refNm, n);
 			}
 			if (k == 1) {
 				E.ethis(); E.ethis(); E.eOp(E.GETFIELD, i);
@@ -673,7 +762,7 @@ public class Expr {
 			}
 			if (k == 2) {
 				E.eOp(E.GETSTATIC, i); E.push(); pExpr(); E.eCO(op); E.pop();
-				E.eNarrow(n); E.edup(); E.eOp(E.PUTSTATIC, i); E.pop(); return 1;
+				E.eNarrow(n); E.edup(); E.eOp(E.PUTSTATIC, i); E.pop(); return fRetType(arr != 0 ? arr : t, arr != 0 ? -1 : refNm, n);
 			}
 			// k == 3: obj already on stack
 			E.edup(); E.eOp(E.GETFIELD, i); pExpr(); E.eCO(op); E.pop();
@@ -689,35 +778,35 @@ public class Expr {
 					E.ic1(); E.eb(op == Tk.INC ? E.IADD : E.ISUB); E.pop();
 					E.eNarrow(n);
 					E.eSt(i, 0); E.pop();
-					return 1;
+					return fRetType(t, refNm, n);
 				}
 				E.eLd(i, 0); E.push();
-				E.eb(E.IINC); E.eb(i); E.eb(op == Tk.INC ? 1 : 0xFF); return 1;
+				E.eb(E.IINC); E.eb(i); E.eb(op == Tk.INC ? 1 : 0xFF); return fRetType(t, refNm, n);
 			}
 			if (k == 1) {
 				E.ethis(); E.eOp(E.GETFIELD, i);
 				E.ethis(); E.ethis(); E.eOp(E.GETFIELD, i);
 				E.ic1(); E.eb(op == Tk.INC ? E.IADD : E.ISUB); E.pop();
 				E.eNarrow(n);
-				E.eOp(E.PUTFIELD, i); E.pop(); E.pop(); return 1;
+				E.eOp(E.PUTFIELD, i); E.pop(); E.pop(); return fRetType(t, refNm, n);
 			}
 			// k == 2: GETSTATIC + DUP + 1 + op + PUTSTATIC
 			E.eOp(E.GETSTATIC, i); E.push(); E.edup();
 			E.ic1(); E.eb(op == Tk.INC ? E.IADD : E.ISUB); E.pop();
 			E.eNarrow(n);
-			E.eOp(E.PUTSTATIC, i); E.pop(); return 1;
+			E.eOp(E.PUTSTATIC, i); E.pop(); return fRetType(arr != 0 ? arr : t, arr != 0 ? -1 : refNm, n);
 			// k == 3: not supported, falls through to load
 		}
 		// Load
 		if (k == 0) {
 			E.eLd(i, t); E.push();
-			return fRetType(t, refNm);
+			return fRetType(t, refNm, n);
 		}
 		if (k == 1) { E.ethis(); E.eOp(E.GETFIELD, i); }
 		else if (k == 2) { E.eOp(E.GETSTATIC, i); E.push(); }
 		else { E.eOp(E.GETFIELD, i); }
-		if (arr != 0) return fRetType(arr, -1);
-		return fRetType(t, refNm);
+		if (arr != 0) return fRetType(arr, -1, C.NK_NONE);
+		return fRetType(t, refNm, n);
 	}
 
 	// Explicit obj.field lvalue (obj already on stack)

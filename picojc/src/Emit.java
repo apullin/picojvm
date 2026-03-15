@@ -231,6 +231,7 @@ class E {
 		Expr.pExpr();
 		int fi = Resolver.fStatField(ci, nm);
 		if (fi >= 0) {
+			Expr.chkImplicitNarrow(C.fNarrow[fi]);
 			eNarrow(C.fNarrow[fi]);
 			int cpIdx = aCP(C.fSlot[fi]);
 			eOp(PUTSTATIC, cpIdx); pop();

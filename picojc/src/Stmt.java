@@ -111,6 +111,7 @@ public class Stmt {
 			if (Tk.type == Tk.ASSIGN) {
 				Lexer.nextToken();
 				Expr.pExpr();
+				Expr.chkImplicitNarrow(varNarrow);
 				E.eStN(slot, varType, varNarrow);
 				E.pop();
 			}
@@ -219,6 +220,7 @@ public class Stmt {
 				if (Tk.type == Tk.ASSIGN) {
 					Lexer.nextToken();
 					Expr.pExpr();
+					Expr.chkImplicitNarrow(varNarrow);
 					E.eStN(slot, varType, varNarrow);
 					E.pop();
 				}
@@ -231,6 +233,7 @@ public class Stmt {
 					if (Tk.type == Tk.ASSIGN) {
 						Lexer.nextToken();
 						Expr.pExpr();
+						Expr.chkImplicitNarrow(varNarrow);
 						E.eStN(slot2, varType, varNarrow);
 						E.pop();
 					}
@@ -362,6 +365,7 @@ public class Stmt {
 			E.pop();
 			if (retType == 2) E.eb(E.ARETURN);
 			else {
+				Expr.chkImplicitNarrow(C.mRetNarrow[C.curMi]);
 				E.eNarrow(C.mRetNarrow[C.curMi]);
 				E.eb(E.IRETURN);
 			}

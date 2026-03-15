@@ -33,6 +33,36 @@ class E {
 	static int cinitMaxLoc;
 	static int tyNarrow; // declared scalar narrow kind for the last parsed local/param type
 
+	static void resetClinitState() {
+		cinitLen = 0;
+		cinitCpC = 0;
+		cinitMaxStk = 0;
+		cinitMaxLoc = 0;
+	}
+
+	static void emitClinitMethod(int mi) {
+		initMC(mi);
+		C.curMStatic = true;
+		C.locCount = 0;
+		C.stkDepth = 0;
+		if (cinitLen > 0) {
+			C.maxStk = cinitMaxStk;
+			for (int i = 0; i < cinitLen; i++) C.mcode[i] = cinitBuf[i];
+			C.mcLen = cinitLen;
+			C.cpMCount = cinitCpC;
+			for (int i = 0; i < cinitCpC; i++) {
+				C.cpEnt[C.cpMBase + i] = cinitCpL[i];
+				C.cpEntH[C.cpMBase + i] = cinitCpH[i];
+			}
+		} else {
+			C.cpMCount = 0;
+		}
+		eb(RETURN);
+		commitMC(mi);
+		C.mMaxLoc[mi] = (byte)(cinitLen > 0 && cinitMaxLoc > 0 ? cinitMaxLoc : 1);
+		C.mMaxStk[mi] = (byte)(cinitLen > 0 && cinitMaxStk > 0 ? cinitMaxStk : 1);
+	}
+
 	static void emit() {
 		C.cdLen = 0;
 		C.cpSz = 0;
@@ -61,10 +91,7 @@ class E {
 		C.curCi = ci;
 
 		// Reset per-class clinit accumulation
-		cinitLen = 0;
-		cinitCpC = 0;
-		cinitMaxStk = 0;
-		cinitMaxLoc = 0;
+		resetClinitState();
 
 		// Skip enum constant list
 		if (C.cIsEnum[ci]) {
@@ -83,35 +110,11 @@ class E {
 		// Finalize clinit from accumulated buffer (field inits + static blocks)
 		if (cinitLen > 0 && C.cClinit[ci] != 0xFF) {
 			int mi = C.cClinit[ci];
-			if (!C.mNative[mi]) {
-				initMC(mi);
-				C.curMStatic = true;
-				C.locCount = 0;
-				C.stkDepth = 0;
-				C.maxStk = cinitMaxStk;
-				for (int i = 0; i < cinitLen; i++) C.mcode[i] = cinitBuf[i];
-				C.mcLen = cinitLen;
-				C.cpMCount = cinitCpC;
-				for (int i = 0; i < cinitCpC; i++) {
-					C.cpEnt[C.cpMBase + i] = cinitCpL[i];
-					C.cpEntH[C.cpMBase + i] = cinitCpH[i];
-				}
-				eb(RETURN);
-				commitMC(mi);
-				C.mMaxLoc[mi] = (byte)(cinitMaxLoc > 0 ? cinitMaxLoc : 1);
-				C.mMaxStk[mi] = (byte)(cinitMaxStk > 0 ? cinitMaxStk : 1);
-			}
+			if (!C.mNative[mi]) emitClinitMethod(mi);
 		} else if (cinitLen == 0 && C.cClinit[ci] != 0xFF) {
 			// All field inits were inlined — emit minimal RETURN-only clinit
 			int mi = C.cClinit[ci];
-			initMC(mi);
-			C.curMStatic = true;
-			C.locCount = 0; C.stkDepth = 0;
-			C.cpMCount = 0;
-			eb(RETURN);
-			commitMC(mi);
-			C.mMaxLoc[mi] = (byte)1;
-			C.mMaxStk[mi] = (byte)1;
+			emitClinitMethod(mi);
 		}
 
 		if (Tk.type == Tk.RBRACE) Lexer.nextToken();

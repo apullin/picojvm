@@ -110,6 +110,88 @@ public class Expr {
 		return 1;
 	}
 
+	static int arrTypeCode(int arrType) {
+		if (arrType == 4) return 8;
+		if (arrType == 5) return 5;
+		if (arrType == 8) return 9;
+		return 10;
+	}
+
+	static int arrNarrow(int arrType) {
+		if (arrType == 4) return C.NK_BYTE;
+		if (arrType == 5) return C.NK_CHAR;
+		if (arrType == 8) return C.NK_SHORT;
+		return C.NK_NONE;
+	}
+
+	// Count top-level elements so array creation can emit its size before the stores.
+	static int countArrayInitElems() {
+		int savedType = Tk.type, savedLine = Tk.line, savedInt = Tk.intValue, savedLen = Tk.strLen;
+		Lexer.save();
+		int count = 0;
+		int depth = 0;
+		Lexer.nextToken();
+		if (Tk.type != Tk.RBRACE) {
+			count = 1;
+			while (Tk.type != Tk.EOF) {
+				if (Tk.type == Tk.LPAREN || Tk.type == Tk.LBRACKET || Tk.type == Tk.LBRACE) depth++;
+				else if (Tk.type == Tk.RPAREN || Tk.type == Tk.RBRACKET) depth--;
+				else if (Tk.type == Tk.RBRACE) {
+					if (depth == 0) break;
+					depth--;
+				} else if (Tk.type == Tk.COMMA && depth == 0) {
+					count++;
+				}
+				Lexer.nextToken();
+			}
+		}
+		Lexer.restore();
+		Tk.type = savedType;
+		Tk.line = savedLine;
+		Tk.intValue = savedInt;
+		Tk.strLen = savedLen;
+		return count;
+	}
+
+	// Typed array literals share one path for local declarations, static init, and new T[]{...}.
+	static int pArrayInit(int arrType, int refNm) {
+		int count = countArrayInitElems();
+		E.eIC(count);
+		E.push();
+		if (arrType == 2) {
+			int ci = Resolver.fClsByNm(refNm);
+			E.eOp(E.ANEWARRAY, E.aCP(ci >= 0 ? ci : 0));
+		} else {
+			E.eb(E.NEWARRAY);
+			E.eb(arrTypeCode(arrType));
+		}
+
+		Lexer.expect(Tk.LBRACE);
+		for (int i = 0; Tk.type != Tk.RBRACE && Tk.type != Tk.EOF; i++) {
+			E.edup();
+			E.eIC(i);
+			E.push();
+			pExpr();
+			int narrowKind = arrNarrow(arrType);
+			chkImplicitNarrow(narrowKind);
+			E.eNarrow(narrowKind);
+			E.eASt(arrType);
+			E.pop(); E.pop(); E.pop();
+			if (Tk.type == Tk.COMMA) Lexer.nextToken();
+		}
+		Lexer.expect(Tk.RBRACE);
+		if (arrType == 2) setObjArrayRef(refNm);
+		else clearRefInfo();
+		return arrType;
+	}
+
+	static int pTypedInit(int type, int refNm) {
+		if (Tk.type == Tk.LBRACE && (type == 2 || type == 3 || type == 4 || type == 5 || type == 8)) {
+			return pArrayInit(type, refNm);
+		}
+		return pExpr();
+	}
+
 	static int pExpr() {
 		return pTern();
 	}
@@ -585,10 +667,23 @@ public class Expr {
 		if (Tk.type == Tk.INT || Tk.type == Tk.BYTE ||
 			Tk.type == Tk.CHAR || Tk.type == Tk.SHORT ||
 			Tk.type == Tk.BOOLEAN) {
-			// Primitive array: new int[size]
+			// Primitive array: new int[size] or new int[]{...}
 			int elemType = Tk.type;
 			Lexer.nextToken();
 			Lexer.expect(Tk.LBRACKET);
+			if (Tk.type == Tk.RBRACKET) {
+				Lexer.nextToken();
+				if (Tk.type == Tk.LBRACE) {
+					int arrType = 3;
+					if (elemType == Tk.BYTE || elemType == Tk.BOOLEAN) arrType = 4;
+					else if (elemType == Tk.CHAR) arrType = 5;
+					else if (elemType == Tk.SHORT) arrType = 8;
+					return pArrayInit(arrType, -1);
+				}
+				Lexer.error(203);
+				clearRefInfo();
+				return 0;
+			}
 			pExpr();
 			Lexer.expect(Tk.RBRACKET);
 
@@ -631,12 +726,21 @@ public class Expr {
 			return 3; // int[]
 		}
 
-		// Object or reference array: new ClassName(...) or new ClassName[size]
+		// Object or reference array: new ClassName(...), new ClassName[size], new ClassName[]{...}
 		int classNm = C.iN();
 
 		if (Tk.type == Tk.LBRACKET) {
-			// Reference array: new ClassName[size]
+			// Reference array: new ClassName[size] or new ClassName[]{...}
 			Lexer.nextToken();
+			if (Tk.type == Tk.RBRACKET) {
+				Lexer.nextToken();
+				if (Tk.type == Tk.LBRACE) {
+					return pArrayInit(2, classNm);
+				}
+				Lexer.error(203);
+				clearRefInfo();
+				return 0;
+			}
 			pExpr();
 			Lexer.expect(Tk.RBRACKET);
 

@@ -110,7 +110,7 @@ public class Stmt {
 
 			if (Tk.type == Tk.ASSIGN) {
 				Lexer.nextToken();
-				Expr.pExpr();
+				Expr.pTypedInit(varType, refNm);
 				Expr.chkImplicitNarrow(varNarrow);
 				E.eStN(slot, varType, varNarrow);
 				E.pop();
@@ -204,10 +204,11 @@ public class Stmt {
 		if (Tk.type != Tk.SEMI) {
 			if (isTyTok(Tk.type)) {
 				int varType = E.pTypeLoc();
+				int varRefNm = E.tyRefNm;
 				int varNarrow = E.tyNarrow;
 				int nm = C.intern(Tk.strBuf, Tk.strLen);
 				int slot = C.locCount;
-				E.aLoc(nm, varType, -1, varNarrow);
+				E.aLoc(nm, varType, varRefNm, varNarrow);
 				Lexer.nextToken(); // consume name
 
 				if (Tk.type == Tk.COLON) {
@@ -219,7 +220,7 @@ public class Stmt {
 				// Traditional for — already declared the local, handle initializer
 				if (Tk.type == Tk.ASSIGN) {
 					Lexer.nextToken();
-					Expr.pExpr();
+					Expr.pTypedInit(varType, varRefNm);
 					Expr.chkImplicitNarrow(varNarrow);
 					E.eStN(slot, varType, varNarrow);
 					E.pop();
@@ -228,11 +229,11 @@ public class Stmt {
 					Lexer.nextToken();
 					int nm2 = C.intern(Tk.strBuf, Tk.strLen);
 					int slot2 = C.locCount;
-					E.aLoc(nm2, varType, -1, varNarrow);
+					E.aLoc(nm2, varType, varRefNm, varNarrow);
 					Lexer.nextToken();
 					if (Tk.type == Tk.ASSIGN) {
 						Lexer.nextToken();
-						Expr.pExpr();
+						Expr.pTypedInit(varType, varRefNm);
 						Expr.chkImplicitNarrow(varNarrow);
 						E.eStN(slot2, varType, varNarrow);
 						E.pop();

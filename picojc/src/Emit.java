@@ -236,8 +236,14 @@ class E {
 		beginClinitChunk(0);
 
 		Lexer.nextToken(); // skip '='
-		Expr.pExpr();
+		int initType = -1;
+		int initRefNm = -1;
 		int fi = Resolver.fStatField(ci, nm);
+		if (fi >= 0) {
+			if (C.fType[fi] == 2) { initType = 2; initRefNm = C.fRefNm[fi]; }
+			else if (C.fArrKind[fi] != 0) initType = C.fArrKind[fi];
+		}
+		Expr.pTypedInit(initType, initRefNm);
 		if (fi >= 0) {
 			Expr.chkImplicitNarrow(C.fNarrow[fi]);
 			eNarrow(C.fNarrow[fi]);

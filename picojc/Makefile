@@ -33,7 +33,7 @@ TESTS = T01_Empty T02_Literal T03_Arithmetic T04_IfElse T05_WhileLoop \
         T47_MultiDimArray T48_CompoundAssign T49_MultiInterface T50_SwitchEdge \
         T51_ObjectCast T52_CommaLocal T53_Precedence T54_InheritField \
         T55_ExactDispatch T56_OverloadDispatch T57_InheritedOverload \
-        T58_Super T59_NarrowWrap T60_NarrowAssign
+        T58_Super T59_NarrowWrap T60_NarrowAssign T62_ArrayInit
 
 NEGTESTS = N01_InvalidStaticCall N02_OverloadSameClass \
            N03_OverloadInherited N04_SwitchTooManyCases \

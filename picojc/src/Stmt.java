@@ -381,23 +381,29 @@ public class Stmt {
 		Lexer.expect(Tk.SEMI);
 	}
 
-	static void shiftTail(int insertAt, int delta) {
-		if (delta <= 0) return;
-		int bodyLen = C.mcLen - insertAt;
-		for (int i = bodyLen - 1; i >= 0; i--) {
-			C.mcode[insertAt + delta + i] = C.mcode[insertAt + i];
-		}
-		C.mcLen += delta;
-		for (int lbl = 0; lbl < C.lblCount; lbl++) {
-			if (C.lblAddr[lbl] >= insertAt) {
-				C.lblAddr[lbl] = (short)(C.lblAddr[lbl] + delta);
+	static void insertDispatch(int insertAt, int delta, int lblEnd) {
+		if (delta > 0) {
+			int bodyLen = C.mcLen - insertAt;
+			for (int i = bodyLen - 1; i >= 0; i--) {
+				C.mcode[insertAt + delta + i] = C.mcode[insertAt + i];
+			}
+			C.mcLen += delta;
+			for (int lbl = 0; lbl < C.lblCount; lbl++) {
+				if (C.lblAddr[lbl] >= insertAt) {
+					C.lblAddr[lbl] = (short)(C.lblAddr[lbl] + delta);
+				}
+			}
+			for (int i = 0; i < C.patC; i++) {
+				if (C.patLoc[i] >= insertAt) {
+					C.patLoc[i] = (short)(C.patLoc[i] + delta);
+				}
 			}
 		}
-		for (int i = 0; i < C.patC; i++) {
-			if (C.patLoc[i] >= insertAt) {
-				C.patLoc[i] = (short)(C.patLoc[i] + delta);
-			}
-		}
+		E.mark(lblEnd);
+	}
+
+	static int switchTarget(int label, int lblEnd) {
+		return C.lblAddr[label >= 0 ? label : lblEnd];
 	}
 
 	static void pSwitch() {
@@ -490,10 +496,7 @@ public class Stmt {
 
 		// Insert case table ahead of the already-emitted body.
 		int tableSize = caseCount * 8;
-		shiftTail(tableInsert, tableSize);
-
-		// Mark end label (at post-shift position)
-		E.mark(lblEnd);
+		insertDispatch(tableInsert, tableSize, lblEnd);
 
 		// Write sorted case table entries
 		for (int i = 0; i < caseCount; i++) {
@@ -503,11 +506,7 @@ public class Stmt {
 		}
 
 		// Patch default offset
-		if (defaultLabel >= 0) {
-			E.pBE(defaultLoc, C.lblAddr[defaultLabel] - switchPC);
-		} else {
-			E.pBE(defaultLoc, C.lblAddr[lblEnd] - switchPC);
-		}
+		E.pBE(defaultLoc, switchTarget(defaultLabel, lblEnd) - switchPC);
 
 		Lexer.expect(Tk.RBRACE);
 	}
@@ -566,9 +565,7 @@ public class Stmt {
 			dispatchSz += aloadSz + ldcSz + 3 + 3; // ALOAD + LDC/LDC_W + INVOKEVIRTUAL + IFNE
 		}
 
-		shiftTail(switchInsert, dispatchSz);
-
-		E.mark(lblEnd);
+		insertDispatch(switchInsert, dispatchSz, lblEnd);
 
 		// Write dispatch chain at switchInsert
 		int pos = switchInsert;
@@ -598,7 +595,7 @@ public class Stmt {
 			C.mcode[pos++] = (byte)((offset >> 8) & 0xFF);
 			C.mcode[pos++] = (byte)(offset & 0xFF);
 		}
-		int defTarget = defaultLabel >= 0 ? C.lblAddr[defaultLabel] : C.lblAddr[lblEnd];
+		int defTarget = switchTarget(defaultLabel, lblEnd);
 		int gotoPC = pos;
 		C.mcode[pos++] = (byte)E.GOTO;
 		int gotoOff = defTarget - gotoPC;

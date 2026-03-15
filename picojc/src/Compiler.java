@@ -265,9 +265,7 @@ class C {
 		return idx;
 	}
 
-	static boolean nameEquals(int a, int b) {
-		return a == b;
-	}
+	static int iN() { int n = intern(Tk.strBuf, Tk.strLen); Lexer.nextToken(); return n; }
 
 	// ==================== HELPERS ====================
 
@@ -310,39 +308,39 @@ class C {
 		return mi;
 	}
 
+	static int aN(int nm, int argc, int id, int ret) { return addNat(N_NATIVE, nm, argc, id, true, ret); }
+	static int aS(int nm, int argc, int id, int ret) { return addNat(N_STRING, nm, argc, id, false, ret); }
+
 	// Ensure a native method exists, return its index
 	static int ensNat(int classNm, int methodNm) {
-		// Object.<init>
 		if (classNm == N_OBJECT && methodNm == N_INIT)
 			return addNat(N_OBJECT, N_INIT, 1, 6, false, 0);
-		// Native class methods
 		if (classNm == N_NATIVE) {
-			if (methodNm == N_PUTCHAR) return addNat(N_NATIVE, N_PUTCHAR, 1, 0, true, 0);
-			if (methodNm == N_IN)      return addNat(N_NATIVE, N_IN, 1, 1, true, 1);
-			if (methodNm == N_OUT)     return addNat(N_NATIVE, N_OUT, 2, 2, true, 0);
-			if (methodNm == N_PEEK)    return addNat(N_NATIVE, N_PEEK, 1, 3, true, 1);
-			if (methodNm == N_POKE)    return addNat(N_NATIVE, N_POKE, 2, 4, true, 0);
-			if (methodNm == N_HALT)    return addNat(N_NATIVE, N_HALT, 0, 5, true, 0);
-			if (methodNm == N_PRINT)   return addNat(N_NATIVE, N_PRINT, 1, 11, true, 0);
-			if (methodNm == N_ARRAYCOPY)       return addNat(N_NATIVE, N_ARRAYCOPY, 5, 13, true, 0);
-			if (methodNm == N_MEMCMP)          return addNat(N_NATIVE, N_MEMCMP, 5, 14, true, 1);
-			if (methodNm == N_WRITE_BYTES)     return addNat(N_NATIVE, N_WRITE_BYTES, 3, 15, true, 0);
-			if (methodNm == N_STRING_FROM_BYTES) return addNat(N_NATIVE, N_STRING_FROM_BYTES, 3, 16, true, 2);
-			if (methodNm == N_FILE_OPEN)       return addNat(N_NATIVE, N_FILE_OPEN, 3, 17, true, 1);
-			if (methodNm == N_FILE_READ_BYTE)  return addNat(N_NATIVE, N_FILE_READ_BYTE, 0, 18, true, 1);
-			if (methodNm == N_FILE_WRITE_BYTE) return addNat(N_NATIVE, N_FILE_WRITE_BYTE, 1, 19, true, 0);
-			if (methodNm == N_FILE_READ)       return addNat(N_NATIVE, N_FILE_READ, 3, 20, true, 1);
-			if (methodNm == N_FILE_WRITE)      return addNat(N_NATIVE, N_FILE_WRITE, 3, 21, true, 0);
-			if (methodNm == N_FILE_CLOSE)      return addNat(N_NATIVE, N_FILE_CLOSE, 1, 22, true, 0);
-			if (methodNm == N_FILE_DELETE)     return addNat(N_NATIVE, N_FILE_DELETE, 2, 23, true, 1);
+			if (methodNm == N_PUTCHAR) return aN(N_PUTCHAR, 1, 0, 0);
+			if (methodNm == N_IN)      return aN(N_IN, 1, 1, 1);
+			if (methodNm == N_OUT)     return aN(N_OUT, 2, 2, 0);
+			if (methodNm == N_PEEK)    return aN(N_PEEK, 1, 3, 1);
+			if (methodNm == N_POKE)    return aN(N_POKE, 2, 4, 0);
+			if (methodNm == N_HALT)    return aN(N_HALT, 0, 5, 0);
+			if (methodNm == N_PRINT)   return aN(N_PRINT, 1, 11, 0);
+			if (methodNm == N_ARRAYCOPY)       return aN(N_ARRAYCOPY, 5, 13, 0);
+			if (methodNm == N_MEMCMP)          return aN(N_MEMCMP, 5, 14, 1);
+			if (methodNm == N_WRITE_BYTES)     return aN(N_WRITE_BYTES, 3, 15, 0);
+			if (methodNm == N_STRING_FROM_BYTES) return aN(N_STRING_FROM_BYTES, 3, 16, 2);
+			if (methodNm == N_FILE_OPEN)       return aN(N_FILE_OPEN, 3, 17, 1);
+			if (methodNm == N_FILE_READ_BYTE)  return aN(N_FILE_READ_BYTE, 0, 18, 1);
+			if (methodNm == N_FILE_WRITE_BYTE) return aN(N_FILE_WRITE_BYTE, 1, 19, 0);
+			if (methodNm == N_FILE_READ)       return aN(N_FILE_READ, 3, 20, 1);
+			if (methodNm == N_FILE_WRITE)      return aN(N_FILE_WRITE, 3, 21, 0);
+			if (methodNm == N_FILE_CLOSE)      return aN(N_FILE_CLOSE, 1, 22, 0);
+			if (methodNm == N_FILE_DELETE)      return aN(N_FILE_DELETE, 2, 23, 1);
 		}
-		// String methods
 		if (classNm == N_STRING) {
-			if (methodNm == N_LENGTH)   return addNat(N_STRING, N_LENGTH, 1, 7, false, 1);
-			if (methodNm == N_CHARAT)   return addNat(N_STRING, N_CHARAT, 2, 8, false, 1);
-			if (methodNm == N_EQUALS)   return addNat(N_STRING, N_EQUALS, 2, 9, false, 1);
-			if (methodNm == N_TOSTRING) return addNat(N_STRING, N_TOSTRING, 1, 10, false, 2);
-			if (methodNm == N_HASHCODE) return addNat(N_STRING, N_HASHCODE, 1, 12, false, 1);
+			if (methodNm == N_LENGTH)   return aS(N_LENGTH, 1, 7, 1);
+			if (methodNm == N_CHARAT)   return aS(N_CHARAT, 2, 8, 1);
+			if (methodNm == N_EQUALS)   return aS(N_EQUALS, 2, 9, 1);
+			if (methodNm == N_TOSTRING) return aS(N_TOSTRING, 1, 10, 2);
+			if (methodNm == N_HASHCODE) return aS(N_HASHCODE, 1, 12, 1);
 		}
 		return -1;
 	}

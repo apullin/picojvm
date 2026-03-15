@@ -513,12 +513,10 @@ public class Stmt {
 			Lexer.expect(Tk.LPAREN);
 
 			// Exception type
-			int excNm = C.intern(Tk.strBuf, Tk.strLen);
-			Lexer.nextToken();
+			int excNm = C.iN();
 
 			// Exception variable name
-			int varNm = C.intern(Tk.strBuf, Tk.strLen);
-			Lexer.nextToken();
+			int varNm = C.iN();
 			Lexer.expect(Tk.RPAREN);
 
 			int handlerPC = C.mcLen;

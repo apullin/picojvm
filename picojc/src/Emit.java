@@ -153,8 +153,7 @@ class E {
 		Catalog.skipTy();
 
 		// Name
-		int nm = C.intern(Tk.strBuf, Tk.strLen);
-		Lexer.nextToken();
+		int nm = C.iN();
 
 		if (Tk.type == Tk.LPAREN) {
 			// Method
@@ -183,8 +182,7 @@ class E {
 		// Handle comma-separated: static int a = 1, b = 2;
 		while (Tk.type == Tk.COMMA) {
 			Lexer.nextToken();
-			int nm = C.intern(Tk.strBuf, Tk.strLen);
-			Lexer.nextToken();
+			int nm = C.iN();
 			if (Tk.type == Tk.ASSIGN) {
 				eStatFieldInit(ci, nm);
 			}
@@ -222,7 +220,7 @@ class E {
 		Expr.pExpr();
 		int fi = Resolver.fStatField(ci, nm);
 		if (fi >= 0) {
-			int cpIdx = aFCP(C.fSlot[fi]);
+			int cpIdx = aCP(C.fSlot[fi]);
 			eOp(0xB3, cpIdx); pop(); // PUTSTATIC
 		}
 
@@ -489,8 +487,7 @@ class E {
 			if (Tk.type == Tk.ELLIPSIS) {
 				// Varargs parameter — must be last
 				Lexer.nextToken(); // skip '...'
-				vaPN = C.intern(Tk.strBuf, Tk.strLen);
-				Lexer.nextToken(); // skip parameter name
+				vaPN = C.iN();
 				vaET = savedTyTok;
 				// Allocate MAX_VA_SLOTS hidden locals for spread values
 				byte[] sb = Tk.strBuf;
@@ -504,8 +501,7 @@ class E {
 				aLoc(C.intern(sb, 2), 0);
 				break;
 			}
-			int pNm = C.intern(Tk.strBuf, Tk.strLen);
-			Lexer.nextToken();
+			int pNm = C.iN();
 			aLoc(pNm, pType);
 			if (Tk.type == Tk.COMMA) Lexer.nextToken();
 		}
@@ -652,13 +648,6 @@ class E {
 		return idx;
 	}
 
-	static int aFCP(int fieldSlotVal) {
-		return aCP(fieldSlotVal);
-	}
-
-	static int aCCP(int classId) {
-		return aCP(classId);
-	}
 
 	static int aSCP(byte[] buf, int len) {
 		int strIdx = -1;

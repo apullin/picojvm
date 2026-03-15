@@ -29,8 +29,7 @@ public class Catalog {
 		}
 
 		// Class/interface name
-		int nm = C.intern(Tk.strBuf, Tk.strLen);
-		Lexer.nextToken();
+		int nm = C.iN();
 
 		int ci = C.initClass(nm);
 		C.cIsIface[ci] = isIface;
@@ -39,8 +38,7 @@ public class Catalog {
 		// extends?
 		if (Tk.type == Tk.EXTENDS) {
 			Lexer.nextToken();
-			int parentNm = C.intern(Tk.strBuf, Tk.strLen);
-			Lexer.nextToken();
+			int parentNm = C.iN();
 			// Resolve parent later; store name for now
 			C.cParent[ci] = (short)parentNm; // store as name index, resolve in Pass 2
 		}
@@ -202,8 +200,7 @@ public class Catalog {
 		}
 
 		// Name
-		int nm = C.intern(Tk.strBuf, Tk.strLen);
-		Lexer.nextToken();
+		int nm = C.iN();
 
 		// Method or field?
 		if (Tk.type == Tk.LPAREN) {
@@ -247,8 +244,7 @@ public class Catalog {
 		while (Tk.type != Tk.SEMI && Tk.type != Tk.EOF) {
 			if (Tk.type == Tk.COMMA) {
 				Lexer.nextToken();
-				int nm2 = C.intern(Tk.strBuf, Tk.strLen);
-				Lexer.nextToken();
+				int nm2 = C.iN();
 				int fi2 = initField(ci, nm2, isStat, isFinal, arrKind);
 				// Record initializer for comma-separated fields: static int A=0, B=1;
 				if (Tk.type == Tk.ASSIGN && isStat) {

@@ -85,11 +85,10 @@ public class Expr {
 					E.cmpBool(tok == Tk.EQ ? 0x9F : 0xA0);
 				type = 1;
 			} else if (tok == Tk.INSTANCEOF) {
-				int classNm = C.intern(Tk.strBuf, Tk.strLen);
-				Lexer.nextToken();
+				int classNm = C.iN();
 				E.pop();
 				int ci = Resolver.fClsByNm(classNm);
-				int cpIdx = E.aCCP(ci >= 0 ? ci : 0);
+				int cpIdx = E.aCP(ci >= 0 ? ci : 0);
 				E.eOp(0xC1, cpIdx); E.push();
 				type = 1;
 			} else if (prec == 7) {
@@ -140,8 +139,7 @@ public class Expr {
 		if (Tk.type == Tk.INC || Tk.type == Tk.DEC) {
 			int op = Tk.type;
 			Lexer.nextToken();
-			int nm = C.intern(Tk.strBuf, Tk.strLen);
-			Lexer.nextToken();
+			int nm = C.iN();
 			int li = E.fLoc(nm);
 			if (li >= 0) {
 				int slot = C.locSlot[li];
@@ -180,7 +178,7 @@ public class Expr {
 					else if (castType == Tk.IDENT && castNm >= 0) {
 						// Object cast = CHECKCAST
 						int ci = Resolver.fClsByNm(castNm);
-						int cpIdx = E.aCCP(ci >= 0 ? ci : 0);
+						int cpIdx = E.aCP(ci >= 0 ? ci : 0);
 						E.eOp(0xC0, cpIdx); // CHECKCAST
 					}
 					return castType == Tk.IDENT ? 2 : 1;
@@ -200,8 +198,7 @@ public class Expr {
 		while (true) {
 			if (Tk.type == Tk.DOT) {
 				Lexer.nextToken();
-				int memberNm = C.intern(Tk.strBuf, Tk.strLen);
-				Lexer.nextToken();
+				int memberNm = C.iN();
 
 				if (memberNm == C.N_LENGTH && Tk.type != Tk.LPAREN) {
 					// array.length
@@ -305,8 +302,7 @@ public class Expr {
 			return pNew();
 		}
 		if (Tk.type == Tk.IDENT || Tk.type == Tk.STRING_KW) {
-			int nm = C.intern(Tk.strBuf, Tk.strLen);
-			Lexer.nextToken();
+			int nm = C.iN();
 
 			// Check for static method call or field access: Name.member
 			if (Tk.type == Tk.DOT) {
@@ -314,8 +310,7 @@ public class Expr {
 				int ci = Resolver.fClsByNm(nm);
 				if (ci >= 0 || nm == C.N_NATIVE || nm == C.N_STRING) {
 					Lexer.nextToken();
-					int memberNm = C.intern(Tk.strBuf, Tk.strLen);
-					Lexer.nextToken();
+					int memberNm = C.iN();
 
 					if (Tk.type == Tk.LPAREN) {
 						// Static method call
@@ -328,7 +323,7 @@ public class Expr {
 							E.eIC(C.fConstVal[fi]); E.push(); return 1;
 						}
 						// ClassName.field — no return value on assign
-						lvK = 2; lvI = E.aFCP(C.fSlot[fi]); lvArr = C.fArrKind[fi]; lvRV = false;
+						lvK = 2; lvI = E.aCP(C.fSlot[fi]); lvArr = C.fArrKind[fi]; lvRV = false;
 						return lvOps();
 					}
 				}
@@ -347,7 +342,7 @@ public class Expr {
 				int fi = Resolver.fField(C.curCi, nm);
 				if (fi >= 0 && !C.fStatic[fi]) {
 					// Implicit this.field lvalue
-					lvK = 1; lvI = E.aFCP(C.fSlot[fi]); lvArr = C.fArrKind[fi]; lvRV = false;
+					lvK = 1; lvI = E.aCP(C.fSlot[fi]); lvArr = C.fArrKind[fi]; lvRV = false;
 					return lvOps();
 				}
 			}
@@ -360,7 +355,7 @@ public class Expr {
 						E.eIC(C.fConstVal[fi]); E.push(); return 1;
 					}
 					// Static field lvalue (in-class, returns value on assign)
-					lvK = 2; lvI = E.aFCP(C.fSlot[fi]); lvArr = C.fArrKind[fi]; lvRV = true;
+					lvK = 2; lvI = E.aCP(C.fSlot[fi]); lvArr = C.fArrKind[fi]; lvRV = true;
 					return lvOps();
 				}
 			}
@@ -415,13 +410,13 @@ public class Expr {
 				if (Tk.type == Tk.RBRACKET) {
 					// new type[N][] — array of references, size N
 					Lexer.nextToken();
-					int cpIdx = E.aCCP(0);
+					int cpIdx = E.aCP(0);
 					E.eOp(0xBD, cpIdx); // ANEWARRAY
 					return 2; // reference array
 				}
 				pExpr();
 				Lexer.expect(Tk.RBRACKET);
-				int cpIdx = E.aCCP(0);
+				int cpIdx = E.aCP(0);
 				E.eOp(0xC5, cpIdx); // MULTIANEWARRAY
 				E.eb(2); // 2 dimensions
 				E.pop(); // second dimension
@@ -440,8 +435,7 @@ public class Expr {
 		}
 
 		// Object or reference array: new ClassName(...) or new ClassName[size]
-		int classNm = C.intern(Tk.strBuf, Tk.strLen);
-		Lexer.nextToken();
+		int classNm = C.iN();
 
 		if (Tk.type == Tk.LBRACKET) {
 			// Reference array: new ClassName[size]
@@ -450,7 +444,7 @@ public class Expr {
 			Lexer.expect(Tk.RBRACKET);
 
 			int ci = Resolver.fClsByNm(classNm);
-			int cpIdx = E.aCCP(ci >= 0 ? ci : 0);
+			int cpIdx = E.aCP(ci >= 0 ? ci : 0);
 
 			// Check for 2D
 			if (Tk.type == Tk.LBRACKET) {
@@ -470,7 +464,7 @@ public class Expr {
 		// Object creation: new ClassName(args)
 		int ci = Resolver.fClsByNm(classNm);
 		if (ci < 0) ci = Resolver.synthExcCls(classNm);
-		int cpIdx = E.aCCP(ci);
+		int cpIdx = E.aCP(ci);
 		E.eOp(0xBB, cpIdx); // NEW
 		E.push();
 		E.edup();
@@ -651,7 +645,7 @@ public class Expr {
 	static int eFldAcc(int fieldNm) {
 		int fi = Resolver.fInstField(fieldNm);
 		if (fi < 0) { Lexer.error(206); return 0; }
-		lvK = 3; lvI = E.aFCP(C.fSlot[fi]); lvArr = C.fArrKind[fi]; lvRV = false;
+		lvK = 3; lvI = E.aCP(C.fSlot[fi]); lvArr = C.fArrKind[fi]; lvRV = false;
 		return lvOps();
 	}
 

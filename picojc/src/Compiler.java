@@ -332,6 +332,32 @@ class C {
 
 	static void initBuiltins() {
 		cCount = 0; mCount = 0; fCount = 0;
+		natTable = new int[] {
+			N_PUTCHAR, packNat(0, 1, 0),
+			N_IN, packNat(1, 1, 1),
+			N_OUT, packNat(2, 2, 0),
+			N_PEEK, packNat(3, 1, 1),
+			N_POKE, packNat(4, 2, 0),
+			N_HALT, packNat(5, 0, 0),
+			N_INIT, packNat(6, 1, 0),
+			N_LENGTH, packNat(7, 1, 1),
+			N_CHARAT, packNat(8, 2, 1),
+			N_EQUALS, packNat(9, 2, 1),
+			N_TOSTRING, packNat(10, 1, 2),
+			N_PRINT, packNat(11, 1, 0),
+			N_HASHCODE, packNat(12, 1, 1),
+			N_ARRAYCOPY, packNat(13, 5, 0),
+			N_MEMCMP, packNat(14, 5, 1),
+			N_WRITE_BYTES, packNat(15, 3, 0),
+			N_STRING_FROM_BYTES, packNat(16, 3, 2),
+			N_FILE_OPEN, packNat(17, 3, 1),
+			N_FILE_READ_BYTE, packNat(18, 0, 1),
+			N_FILE_WRITE_BYTE, packNat(19, 1, 0),
+			N_FILE_READ, packNat(20, 3, 1),
+			N_FILE_WRITE, packNat(21, 3, 0),
+			N_FILE_CLOSE, packNat(22, 1, 0),
+			N_FILE_DELETE, packNat(23, 2, 1)
+		};
 	}
 
 	static int addNat(int classNm, int methodNm, int argCount,
@@ -354,33 +380,15 @@ class C {
 		return (id << 8) | (argc << 2) | retType;
 	}
 
+	static int[] natTable;
+
 	// Packed native method info: (nativeId << 8) | (argc << 2) | retType
 	// Single source of truth for all native method metadata.
 	static int natInfo(int nm) {
-		if (nm == N_PUTCHAR)           return packNat(0, 1, 0);
-		if (nm == N_IN)                return packNat(1, 1, 1);
-		if (nm == N_OUT)               return packNat(2, 2, 0);
-		if (nm == N_PEEK)              return packNat(3, 1, 1);
-		if (nm == N_POKE)              return packNat(4, 2, 0);
-		if (nm == N_HALT)              return packNat(5, 0, 0);
-		if (nm == N_INIT)              return packNat(6, 1, 0);
-		if (nm == N_LENGTH)            return packNat(7, 1, 1);
-		if (nm == N_CHARAT)            return packNat(8, 2, 1);
-		if (nm == N_EQUALS)            return packNat(9, 2, 1);
-		if (nm == N_TOSTRING)          return packNat(10, 1, 2);
-		if (nm == N_PRINT)             return packNat(11, 1, 0);
-		if (nm == N_HASHCODE)          return packNat(12, 1, 1);
-		if (nm == N_ARRAYCOPY)         return packNat(13, 5, 0);
-		if (nm == N_MEMCMP)            return packNat(14, 5, 1);
-		if (nm == N_WRITE_BYTES)       return packNat(15, 3, 0);
-		if (nm == N_STRING_FROM_BYTES) return packNat(16, 3, 2);
-		if (nm == N_FILE_OPEN)         return packNat(17, 3, 1);
-		if (nm == N_FILE_READ_BYTE)    return packNat(18, 0, 1);
-		if (nm == N_FILE_WRITE_BYTE)   return packNat(19, 1, 0);
-		if (nm == N_FILE_READ)         return packNat(20, 3, 1);
-		if (nm == N_FILE_WRITE)        return packNat(21, 3, 0);
-		if (nm == N_FILE_CLOSE)        return packNat(22, 1, 0);
-		if (nm == N_FILE_DELETE)       return packNat(23, 2, 1);
+		if (natTable == null) return -1;
+		for (int i = 0; i < natTable.length; i += 2) {
+			if (natTable[i] == nm) return natTable[i + 1];
+		}
 		return -1;
 	}
 

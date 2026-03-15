@@ -28,7 +28,9 @@ TESTS = T01_Empty T02_Literal T03_Arithmetic T04_IfElse T05_WhileLoop \
         T27_Fib T28_BubbleSort T29_StringTest T30_MultiClass \
         T31_Shapes T32_ExceptionTest T33_Counter T34_StaticInit T35_ByteArray \
         T36_CharArray T37_Recursion T38_LinkedList T39_NativeOps T41_FileIO \
-        T42_ShortArray T43_FinalInline T44_Enum T45_ForEach T46_Varargs
+        T42_ShortArray T43_FinalInline T44_Enum T45_ForEach T46_Varargs \
+        T47_MultiDimArray T48_CompoundAssign T49_MultiInterface T50_SwitchEdge \
+        T51_ObjectCast T52_CommaLocal T53_Precedence T54_InheritField
 
 # Tests requiring lib/ (platform package)
 LIB_SRCS = ../lib/Console.java ../lib/Arrays.java ../lib/IO.java

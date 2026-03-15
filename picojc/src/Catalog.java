@@ -127,6 +127,69 @@ public class Catalog {
 		return C.NK_NONE;
 	}
 
+	static int tyBase = -1;   // -1=invalid, 0=void, 1=primitive int-like, 2=reference
+	static int tyDims;
+	static int tyRefNm = -1;
+	static int tyNarrow = C.NK_NONE;
+	static int tyArrKind;
+
+	static int primArrKind(int typeTok) {
+		if (typeTok == Tk.BYTE || typeTok == Tk.BOOLEAN) return 4;
+		if (typeTok == Tk.CHAR) return 5;
+		if (typeTok == Tk.SHORT) return 8;
+		return 0;
+	}
+
+	static void scanTy(boolean allowVoid) {
+		tyBase = -1;
+		tyDims = 0;
+		tyRefNm = -1;
+		tyNarrow = C.NK_NONE;
+		tyArrKind = 0;
+
+		int typeTok = Tk.type;
+		if (allowVoid && typeTok == Tk.VOID) {
+			tyBase = 0;
+			Lexer.nextToken();
+			return;
+		}
+		if (typeTok == Tk.INT || typeTok == Tk.BYTE ||
+			typeTok == Tk.CHAR || typeTok == Tk.SHORT ||
+			typeTok == Tk.BOOLEAN) {
+			tyBase = 1;
+			tyNarrow = scalarNarrow(typeTok);
+			tyArrKind = primArrKind(typeTok);
+			Lexer.nextToken();
+		} else if (typeTok == Tk.STRING_KW) {
+			tyBase = 2;
+			tyRefNm = C.N_STRING;
+			Lexer.nextToken();
+		} else if (typeTok == Tk.IDENT) {
+			tyBase = 2;
+			tyRefNm = C.iN();
+		} else {
+			return;
+		}
+
+		while (Tk.type == Tk.LBRACKET) {
+			Lexer.nextToken();
+			Lexer.expect(Tk.RBRACKET);
+			tyDims++;
+		}
+		if (tyDims > 0) {
+			tyNarrow = C.NK_NONE;
+			if (tyBase == 1) {
+				if (tyDims > 1) {
+					if (tyArrKind == 4) tyArrKind = 6;
+					else if (tyArrKind == 5) tyArrKind = 7;
+					else tyArrKind = 0;
+				}
+			} else if (tyDims > 1) {
+				tyRefNm = -1;
+			}
+		}
+	}
+
 	static void catMember(int ci) {
 		if (parseMods()) {
 			// Static initializer block: static { ... }
@@ -150,75 +213,27 @@ public class Catalog {
 			return;
 		}
 
-		// Parse return type
+		// Parse return/field type once, then map it for methods or fields.
 		int retType = 0;
 		int retNarrow = C.NK_NONE;
 		int fieldType = 0;
 		int fieldNarrow = C.NK_NONE;
 		int arrayKind = 0;
 		int refNm = -1;
-		int retTypeToken = Tk.type;
 
-		if (Tk.type == Tk.VOID) { retType = 0; Lexer.nextToken(); }
-		else if (Tk.type == Tk.INT || Tk.type == Tk.BYTE ||
-				 Tk.type == Tk.CHAR || Tk.type == Tk.SHORT ||
-				 Tk.type == Tk.BOOLEAN) {
-			retType = 1;
-			retNarrow = scalarNarrow(Tk.type);
-			fieldNarrow = retNarrow;
-			Lexer.nextToken();
-			{
-				int dimCount = 0;
-				while (Tk.type == Tk.LBRACKET) {
-					Lexer.nextToken();
-					Lexer.expect(Tk.RBRACKET);
-					dimCount++;
-					if (retType == 1) {
-						if (retTypeToken == Tk.BYTE || retTypeToken == Tk.BOOLEAN) arrayKind = 4;
-						else if (retTypeToken == Tk.CHAR) arrayKind = 5;
-						else if (retTypeToken == Tk.SHORT) arrayKind = 8;
-					}
-					retType = 2;
-				}
-				if (dimCount > 1) {
-					if (arrayKind == 4) arrayKind = 6;
-					else if (arrayKind == 5) arrayKind = 7;
-					else arrayKind = 0;
-				}
-				if (dimCount > 0) {
-					retNarrow = C.NK_NONE;
-					fieldNarrow = C.NK_NONE;
-				}
-			}
-		}
-		else if (Tk.type == Tk.STRING_KW) {
+		scanTy(true);
+		if (tyBase == 0) {
+			retType = 0;
+		} else if (tyBase == 1) {
+			retType = tyDims == 0 ? 1 : 2;
+			retNarrow = tyNarrow;
+			fieldNarrow = tyNarrow;
+			arrayKind = tyArrKind;
+		} else if (tyBase == 2) {
 			retType = 2;
-			fieldType = 1;
-			refNm = C.N_STRING;
-			Lexer.nextToken();
-			int dimCount = 0;
-			while (Tk.type == Tk.LBRACKET) {
-				Lexer.nextToken();
-				Lexer.expect(Tk.RBRACKET);
-				dimCount++;
-			}
-			if (dimCount == 1) fieldType = 2;
-			else if (dimCount > 1) refNm = -1;
-		}
-		else if (Tk.type == Tk.IDENT) {
-			retType = 2;
-			fieldType = 1;
-			refNm = C.iN();
-			int dimCount = 0;
-			while (Tk.type == Tk.LBRACKET) {
-				Lexer.nextToken();
-				Lexer.expect(Tk.RBRACKET);
-				dimCount++;
-			}
-			if (dimCount == 1) fieldType = 2;
-			else if (dimCount > 1) refNm = -1;
-		}
-		else {
+			fieldType = tyDims == 1 ? 2 : 1;
+			refNm = tyRefNm;
+		} else {
 			Native.putchar('T'); Lexer.printNum(Tk.type);
 			Native.putchar('P'); Lexer.printNum(Lexer.pos);
 			Native.putchar('K'); Lexer.printNum(Lexer.kwCount);
@@ -366,12 +381,8 @@ public class Catalog {
 	}
 
 	static void skipTy() {
-		// Skip a type declaration (int, String, ClassName, arrays)
-		Lexer.nextToken(); // consume type keyword/name
-		while (Tk.type == Tk.LBRACKET) {
-			Lexer.nextToken(); // [
-			if (Tk.type == Tk.RBRACKET) Lexer.nextToken(); // ]
-		}
+		// Skip a type declaration or method return type using the shared scanner.
+		scanTy(true);
 	}
 
 	static void skipBlk() {

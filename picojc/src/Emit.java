@@ -448,51 +448,23 @@ class E {
 
 	static int pTypeLoc() {
 		// Returns: 0=int, 1=ref, 2=object[], 3=int[], 4=byte[], 5=char[], 8=short[]
-		int baseType = 0;
-		int elemKind = 0; // 0=int-like, 1=byte, 2=char, 3=short
+		Catalog.scanTy(false);
+		tyRefNm = Catalog.tyRefNm;
+		tyNarrow = Catalog.tyNarrow;
+		if (Catalog.tyBase == 2) {
+			if (Catalog.tyDims == 0) return 1;
+			if (Catalog.tyDims == 1 && tyRefNm >= 0) return 2; // object[]
+			tyRefNm = -1;
+			return 1; // generic reference array
+		}
+		if (Catalog.tyDims == 0) return 0;
 		tyRefNm = -1;
 		tyNarrow = C.NK_NONE;
-		if (Tk.type == Tk.BYTE || Tk.type == Tk.BOOLEAN) {
-			if (Tk.type == Tk.BYTE) tyNarrow = C.NK_BYTE;
-			elemKind = 1; Lexer.nextToken();
-		} else if (Tk.type == Tk.CHAR) {
-			tyNarrow = C.NK_CHAR;
-			elemKind = 2; Lexer.nextToken();
-		} else if (Tk.type == Tk.SHORT) {
-			tyNarrow = C.NK_SHORT;
-			elemKind = 3; Lexer.nextToken();
-		} else if (Tk.type == Tk.INT) {
-			elemKind = 0; Lexer.nextToken();
-		} else if (Tk.type == Tk.STRING_KW) {
-			baseType = 1;
-			tyRefNm = C.N_STRING;
-			Lexer.nextToken();
-		} else {
-			baseType = 1; // reference
-			tyRefNm = C.iN();
-		}
-		// Array dimensions
-		int dimCount = 0;
-		while (Tk.type == Tk.LBRACKET) {
-			Lexer.nextToken();
-			if (Tk.type == Tk.RBRACKET) Lexer.nextToken();
-			dimCount++;
-		}
-		if (dimCount > 0) {
-			tyNarrow = C.NK_NONE;
-			if (baseType == 1) {
-				if (dimCount == 1 && tyRefNm >= 0) return 2; // object[]
-				tyRefNm = -1;
-				return 1; // generic reference array
-			}
-			tyRefNm = -1;
-			if (dimCount > 1) return 1;
-			if (elemKind == 1) return 4; // byte[]
-			if (elemKind == 2) return 5; // char[]
-			if (elemKind == 3) return 8; // short[]
-			return 3; // int[]
-		}
-		return baseType; // 0=int, 1=ref
+		if (Catalog.tyDims > 1) return 1;
+		if (Catalog.tyArrKind == 4) return 4; // byte[] or boolean[]
+		if (Catalog.tyArrKind == 5) return 5; // char[]
+		if (Catalog.tyArrKind == 8) return 8; // short[]
+		return 3; // int[]
 	}
 
 	static int tyRefNm = -1; // declared ref type for the last parsed local/param type

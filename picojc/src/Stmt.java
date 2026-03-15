@@ -197,10 +197,42 @@ public class Stmt {
 
 		int savedLocalCount = C.locCount;
 
-		// Init
+		// Init — check for for-each: for (type name : expr)
 		if (Tk.type != Tk.SEMI) {
 			if (isTyTok(Tk.type)) {
-				pLocal(); // includes semicolon
+				int varType = E.pTypeLoc();
+				int nm = C.intern(Tk.strBuf, Tk.strLen);
+				int slot = C.locCount;
+				E.aLoc(nm, varType);
+				Lexer.nextToken(); // consume name
+
+				if (Tk.type == Tk.COLON) {
+					pForEach(varType, slot);
+					C.locCount = savedLocalCount;
+					return;
+				}
+
+				// Traditional for — already declared the local, handle initializer
+				if (Tk.type == Tk.ASSIGN) {
+					Lexer.nextToken();
+					Expr.pExpr();
+					E.eSt(slot, varType);
+					E.pop();
+				}
+				while (Tk.type == Tk.COMMA) {
+					Lexer.nextToken();
+					int nm2 = C.intern(Tk.strBuf, Tk.strLen);
+					int slot2 = C.locCount;
+					E.aLoc(nm2, varType);
+					Lexer.nextToken();
+					if (Tk.type == Tk.ASSIGN) {
+						Lexer.nextToken();
+						Expr.pExpr();
+						E.eSt(slot2, varType);
+						E.pop();
+					}
+				}
+				Lexer.expect(Tk.SEMI);
 			} else {
 				int type = Expr.pExpr();
 				if (type != 0) E.epop();
@@ -256,6 +288,64 @@ public class Stmt {
 		E.mark(lblEnd);
 
 		C.locCount = savedLocalCount;
+	}
+
+	static void pForEach(int elemType, int elemSlot) {
+		Lexer.nextToken(); // skip ':'
+
+		// Parse array expression
+		int arrType = Expr.pExpr(); // array ref on stack
+
+		// Allocate hidden locals: $a (array ref), $i (index), $n (length)
+		byte[] sb = Tk.strBuf;
+		sb[0] = (byte)'$';
+		int arrSlot = C.locCount;
+		sb[1] = (byte)'a'; E.aLoc(C.intern(sb, 2), 1);
+		int iSlot = C.locCount;
+		sb[1] = (byte)'i'; E.aLoc(C.intern(sb, 2), 0);
+		int lenSlot = C.locCount;
+		sb[1] = (byte)'n'; E.aLoc(C.intern(sb, 2), 0);
+
+		// $a = arrayExpr (already on stack)
+		E.eSt(arrSlot, 1); E.pop();
+		// $n = $a.length
+		E.eLd(arrSlot, 1); E.push();
+		E.eb(0xBE); // ARRAYLENGTH (replaces ref with int, no stack change)
+		E.eSt(lenSlot, 0); E.pop();
+		// $i = 0
+		E.ic0();
+		E.eSt(iSlot, 0); E.pop();
+
+		Lexer.expect(Tk.RPAREN);
+
+		int lblCond = E.label();
+		int lblEnd = E.label();
+		int lblUpdate = E.label();
+
+		// Condition: if ($i >= $n) goto end
+		E.mark(lblCond);
+		E.eLd(iSlot, 0); E.push();
+		E.eLd(lenSlot, 0); E.push();
+		E.eBr(0xA2, lblEnd); // IF_ICMPGE
+		E.pop(); E.pop();
+
+		// elem = $a[$i]
+		E.eLd(arrSlot, 1); E.push();
+		E.eLd(iSlot, 0); E.push();
+		E.eALd(arrType); E.pop(); // xALOAD: pops index+ref, pushes element = net -1
+		E.eSt(elemSlot, elemType >= 3 ? 1 : 0); E.pop();
+
+		// Body
+		E.pushLp(lblEnd, lblUpdate);
+		pStmt();
+		E.popLp();
+
+		// Update: $i++
+		E.mark(lblUpdate);
+		E.eb(0x84); E.eb(iSlot); E.eb(1); // IINC iSlot, 1
+		E.eBr(E.GOTO, lblCond);
+
+		E.mark(lblEnd);
 	}
 
 	static void pRet() {

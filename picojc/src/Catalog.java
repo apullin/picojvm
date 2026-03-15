@@ -14,8 +14,12 @@ public class Catalog {
 		}
 
 		boolean isIface = false;
+		boolean isEnum = false;
 		if (Tk.type == Tk.INTERFACE) {
 			isIface = true;
+			Lexer.nextToken();
+		} else if (Tk.type == Tk.ENUM) {
+			isEnum = true;
 			Lexer.nextToken();
 		} else if (Tk.type == Tk.CLASS) {
 			Lexer.nextToken();
@@ -30,6 +34,7 @@ public class Catalog {
 
 		int ci = C.initClass(nm);
 		C.cIsIface[ci] = isIface;
+		C.cIsEnum[ci] = isEnum;
 
 		// extends?
 		if (Tk.type == Tk.EXTENDS) {
@@ -56,6 +61,21 @@ public class Catalog {
 		Lexer.expect(Tk.LBRACE);
 		C.cBodyS[ci] = Lexer.pos;
 
+		// Enum constants: NAME, NAME, NAME [;]
+		if (isEnum) {
+			int ordinal = 0;
+			while (Tk.type == Tk.IDENT) {
+				int cnm = C.intern(Tk.strBuf, Tk.strLen);
+				int fi = initField(ci, cnm, true, true, 0);
+				C.fHasConst[fi] = true;
+				C.fConstVal[fi] = ordinal++;
+				Lexer.nextToken();
+				if (Tk.type == Tk.COMMA) Lexer.nextToken();
+				else break;
+			}
+			if (Tk.type == Tk.SEMI) Lexer.nextToken();
+		}
+
 		// Scan class body for fields and methods
 		while (Tk.type != Tk.RBRACE && Tk.type != Tk.EOF) {
 			catMember(ci);
@@ -69,6 +89,7 @@ public class Catalog {
 		boolean isStat = false;
 		boolean isNat = false;
 		boolean isAbstract = false;
+		boolean isFinal = false;
 		while (Tk.type == Tk.PUBLIC || Tk.type == Tk.PRIVATE ||
 			   Tk.type == Tk.PROTECTED || Tk.type == Tk.STATIC ||
 			   Tk.type == Tk.FINAL || Tk.type == Tk.NATIVE ||
@@ -76,6 +97,7 @@ public class Catalog {
 			if (Tk.type == Tk.STATIC) isStat = true;
 			if (Tk.type == Tk.NATIVE) isNat = true;
 			if (Tk.type == Tk.ABSTRACT) isAbstract = true;
+			if (Tk.type == Tk.FINAL) isFinal = true;
 			Lexer.nextToken();
 		}
 
@@ -189,15 +211,16 @@ public class Catalog {
 			catMethod(ci, nm, isStat, false, isNat, isAbstract, retType);
 		} else {
 			// Field
-			catField(ci, nm, isStat, retType, arrayKind);
+			catField(ci, nm, isStat, isFinal, retType, arrayKind);
 		}
 	}
 
-	static int initField(int ci, int nm, boolean isStat, int arrKind) {
+	static int initField(int ci, int nm, boolean isStat, boolean isFinal, int arrKind) {
 		int fi = C.fCount++;
 		C.fClass[fi] = (byte)ci; C.fName[fi] = (short)nm; C.fStatic[fi] = isStat;
 		C.fArrKind[fi] = (byte)arrKind; C.fSlot[fi] = (short)-1;
 		C.fInitPos[fi] = -1; C.fInitLn[fi] = (short)0;
+		C.fFinal[fi] = isFinal; C.fHasConst[fi] = false;
 		if (!isStat) C.cOwnF[ci]++;
 		return fi;
 	}
@@ -210,12 +233,14 @@ public class Catalog {
 		}
 	}
 
-	static void catField(int ci, int nm, boolean isStat, int retType, int arrKind) {
-		int fi = initField(ci, nm, isStat, arrKind);
+	static void catField(int ci, int nm, boolean isStat, boolean isFinal,
+						   int retType, int arrKind) {
+		int fi = initField(ci, nm, isStat, isFinal, arrKind);
 
 		if (Tk.type == Tk.ASSIGN && isStat) {
 			C.fInitPos[fi] = Lexer.pos;
 			C.fInitLn[fi] = (short)Lexer.line;
+			if (isFinal) extractConst(fi);
 			ensClinitFor(ci);
 		}
 
@@ -224,11 +249,12 @@ public class Catalog {
 				Lexer.nextToken();
 				int nm2 = C.intern(Tk.strBuf, Tk.strLen);
 				Lexer.nextToken();
-				int fi2 = initField(ci, nm2, isStat, arrKind);
+				int fi2 = initField(ci, nm2, isStat, isFinal, arrKind);
 				// Record initializer for comma-separated fields: static int A=0, B=1;
 				if (Tk.type == Tk.ASSIGN && isStat) {
 					C.fInitPos[fi2] = Lexer.pos;
 					C.fInitLn[fi2] = (short)Lexer.line;
+					if (isFinal) extractConst(fi2);
 					ensClinitFor(ci);
 				}
 			} else {
@@ -236,6 +262,29 @@ public class Catalog {
 			}
 		}
 		Lexer.expect(Tk.SEMI);
+	}
+
+	// Extract compile-time constant from simple literal initializer.
+	// Lexer is positioned AT the '='. Peek ahead without consuming.
+	static void extractConst(int fi) {
+		Lexer.save();
+		Lexer.nextToken(); // skip '='
+		boolean neg = false;
+		if (Tk.type == Tk.MINUS) { neg = true; Lexer.nextToken(); }
+		if (Tk.type == Tk.INT_LIT) {
+			C.fConstVal[fi] = neg ? -Tk.intValue : Tk.intValue;
+			C.fHasConst[fi] = true;
+		} else if (!neg && Tk.type == Tk.CHAR_LIT) {
+			C.fConstVal[fi] = Tk.intValue;
+			C.fHasConst[fi] = true;
+		} else if (!neg && Tk.type == Tk.TRUE) {
+			C.fConstVal[fi] = 1;
+			C.fHasConst[fi] = true;
+		} else if (!neg && Tk.type == Tk.FALSE) {
+			C.fConstVal[fi] = 0;
+			C.fHasConst[fi] = true;
+		}
+		Lexer.restore();
 	}
 
 	static void catMethod(int ci, int nm, boolean isStat, boolean isCtor,

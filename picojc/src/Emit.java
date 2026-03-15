@@ -45,6 +45,16 @@ class E {
 		cinitMaxStk = 0;
 		cinitMaxLoc = 0;
 
+		// Skip enum constant list
+		if (C.cIsEnum[ci]) {
+			while (Tk.type == Tk.IDENT) {
+				Lexer.nextToken();
+				if (Tk.type == Tk.COMMA) Lexer.nextToken();
+				else break;
+			}
+			if (Tk.type == Tk.SEMI) Lexer.nextToken();
+		}
+
 		while (Tk.type != Tk.RBRACE && Tk.type != Tk.EOF) {
 			eMem(ci);
 		}
@@ -70,6 +80,17 @@ class E {
 				C.mMaxLoc[mi] = (byte)(cinitMaxLoc > 0 ? cinitMaxLoc : 1);
 				C.mMaxStk[mi] = (byte)(cinitMaxStk > 0 ? cinitMaxStk : 1);
 			}
+		} else if (cinitLen == 0 && C.cClinit[ci] != 0xFF) {
+			// All field inits were inlined — emit minimal RETURN-only clinit
+			int mi = C.cClinit[ci];
+			initMC(mi);
+			C.curMStatic = true;
+			C.locCount = 0; C.stkDepth = 0;
+			C.cpMCount = 0;
+			eb(0xB1); // RETURN
+			commitMC(mi);
+			C.mMaxLoc[mi] = (byte)1;
+			C.mMaxStk[mi] = (byte)1;
 		}
 
 		if (Tk.type == Tk.RBRACE) Lexer.nextToken();
@@ -174,6 +195,16 @@ class E {
 
 	// Parse a single static field initializer expression into clinit buffer
 	static void eStatFieldInit(int ci, int nm) {
+		// Skip inlined final constants — no runtime init needed
+		int fi0 = Resolver.fStatField(ci, nm);
+		if (fi0 >= 0 && C.fFinal[fi0] && C.fHasConst[fi0]) {
+			Lexer.nextToken(); // skip '='
+			// Skip the initializer expression tokens
+			while (Tk.type != Tk.SEMI && Tk.type != Tk.COMMA && Tk.type != Tk.EOF)
+				Lexer.nextToken();
+			return;
+		}
+
 		// Set up temp method context — load clinit CP staging into cpEnt/cpEntH
 		C.mcLen = 0;
 		C.cpMBase = C.cpSz;

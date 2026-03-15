@@ -35,6 +35,7 @@ public class Resolver {
 		C.sfCount = 0;
 		for (int fi = 0; fi < C.fCount; fi++) {
 			if (C.fStatic[fi]) {
+				if (C.fFinal[fi] && C.fHasConst[fi]) continue; // inlined, no slot needed
 				C.fSlot[fi] = (short)C.sfCount++;
 			} else {
 				// Instance field: slot = parent field count + own offset

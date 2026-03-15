@@ -324,6 +324,9 @@ public class Expr {
 						// Static field access
 						int fi = Resolver.fStatField(ci, memberNm);
 						if (fi < 0) { Lexer.error(207); return 0; }
+						if (C.fFinal[fi] && C.fHasConst[fi]) {
+							E.eIC(C.fConstVal[fi]); E.push(); return 1;
+						}
 						// ClassName.field — no return value on assign
 						lvK = 2; lvI = E.aFCP(C.fSlot[fi]); lvArr = C.fArrKind[fi]; lvRV = false;
 						return lvOps();
@@ -353,6 +356,9 @@ public class Expr {
 			{
 				int fi = Resolver.fStatField(C.curCi, nm);
 				if (fi >= 0) {
+					if (C.fFinal[fi] && C.fHasConst[fi]) {
+						E.eIC(C.fConstVal[fi]); E.push(); return 1;
+					}
 					// Static field lvalue (in-class, returns value on assign)
 					lvK = 2; lvI = E.aFCP(C.fSlot[fi]); lvArr = C.fArrKind[fi]; lvRV = true;
 					return lvOps();

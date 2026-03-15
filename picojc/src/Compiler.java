@@ -41,6 +41,7 @@ class C {
 	static byte[] cIfaceS = new byte[MAX_CLASSES]; // start in iface list
 	static byte[] cIfaceC = new byte[MAX_CLASSES];
 	static boolean[] cIsIface = new boolean[MAX_CLASSES];
+	static boolean[] cIsEnum = new boolean[MAX_CLASSES];
 	static int[] cBodyS = new int[MAX_CLASSES]; // source offset (must be int: >32KB sources)
 	static int[] cBodyE   = new int[MAX_CLASSES];
 	static short[] vtable = new short[MAX_VTABLE]; // flat: class vtables concatenated
@@ -58,6 +59,9 @@ class C {
 	static int[] fInitPos  = new int[MAX_FIELDS]; // source pos of initializer (must be int: >32KB sources)
 	static short[] fInitLn = new short[MAX_FIELDS]; // line of initializer
 	static byte[] fArrKind = new byte[MAX_FIELDS]; // 0=non-array/int[], 4=byte[], 5=char[], 8=short[]
+	static boolean[] fFinal = new boolean[MAX_FIELDS];
+	static boolean[] fHasConst = new boolean[MAX_FIELDS]; // compile-time constant?
+	static int[] fConstVal = new int[MAX_FIELDS]; // constant value (if fHasConst)
 
 	// --- Method table ---
 	static int mCount;

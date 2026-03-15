@@ -299,6 +299,7 @@ public class Lexer {
 		addKw("final",      Tk.FINAL);
 		addKw("abstract",   Tk.ABSTRACT);
 		addKw("String",     Tk.STRING_KW);
+		addKw("enum",       Tk.ENUM);
 	}
 
 	static void addKw(String name, int tok) {

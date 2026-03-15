@@ -211,6 +211,7 @@ class C {
 
 	// ==================== NAME INTERNING ====================
 
+	// Seed names in a fixed order so the N_* constants stay stable across passes.
 	static void initNames() {
 		npLen = 0;
 		nCount = 0;

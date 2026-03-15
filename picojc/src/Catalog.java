@@ -127,6 +127,7 @@ public class Catalog {
 		return C.NK_NONE;
 	}
 
+	// Shared type scan state: cataloging and emit both read types through this view.
 	static int tyBase = -1;   // -1=invalid, 0=void, 1=primitive int-like, 2=reference
 	static int tyDims;
 	static int tyRefNm = -1;
@@ -140,6 +141,7 @@ public class Catalog {
 		return 0;
 	}
 
+	// Scan one declared type and leave its shape in tyBase/tyDims/tyRefNm/tyNarrow.
 	static void scanTy(boolean allowVoid) {
 		tyBase = -1;
 		tyDims = 0;

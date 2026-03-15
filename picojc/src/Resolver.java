@@ -255,6 +255,7 @@ public class Resolver {
 		return fMethodExact(ci, nm, isStatic, -1);
 	}
 
+	// Shared call matching: keep staticness, arity, and varargs rules in one place.
 	static boolean sameSig(int mi, int mj) {
 		return C.mName[mi] == C.mName[mj] && C.mArgC[mi] == C.mArgC[mj];
 	}
@@ -289,6 +290,7 @@ public class Resolver {
 		return -1;
 	}
 
+	// Resolve a direct call against natives first, then user classes.
 	static int fCallTarget(int ownerNm, int methodNm, boolean isStatic, int argc) {
 		int mi = C.ensNat(ownerNm, methodNm);
 		if (mi >= 0 && callShapeFits(mi, methodNm, isStatic, argc)) return mi;

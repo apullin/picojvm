@@ -381,6 +381,7 @@ public class Stmt {
 		Lexer.expect(Tk.SEMI);
 	}
 
+	// Shared switch relocation: make room for dispatch code in front of emitted bodies.
 	static void insertDispatch(int insertAt, int delta, int lblEnd) {
 		if (delta > 0) {
 			int bodyLen = C.mcLen - insertAt;
@@ -402,6 +403,7 @@ public class Stmt {
 		E.mark(lblEnd);
 	}
 
+	// Missing default falls through to the shared end label.
 	static int switchTarget(int label, int lblEnd) {
 		return C.lblAddr[label >= 0 ? label : lblEnd];
 	}

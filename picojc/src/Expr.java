@@ -15,6 +15,7 @@ public class Expr {
 	static boolean exprConst;
 	static int exprConstVal;
 
+	// Expression result bookkeeping: the parser threads exact ref/narrow info forward.
 	static void clearRefInfo() {
 		exprRefNm = -1;
 		exprArrRefNm = -1;
@@ -691,7 +692,7 @@ public class Expr {
 
 	// ==================== METHOD CALLS ====================
 
-	// Pop args, push return value if non-void
+	// Normalize stack bookkeeping and result typing after any invoke.
 	static int eCallRet(int mi, int argc) {
 		for (int j = 0; j < argc; j++) E.pop();
 		int rt = C.mRetT[mi];
@@ -702,6 +703,7 @@ public class Expr {
 		return rt;
 	}
 
+	// Shared invoke emission keeps direct, virtual, and interface calls aligned.
 	static void emitInvoke(int mi, int invokeKind, int argc) {
 		int cpIdx = E.aCP(mi);
 		if (invokeKind == E.INVOKESTATIC || invokeKind == E.INVOKESPECIAL) {
@@ -718,6 +720,7 @@ public class Expr {
 		}
 	}
 
+	// Unqualified calls inside a method prefer an instance target, then static.
 	static int eSelfCall(int methodNm) {
 		int ownerNm = C.cName[C.curCi];
 		if (!C.curMStatic && Resolver.fMethod(C.curCi, methodNm, false) >= 0) {
@@ -727,6 +730,7 @@ public class Expr {
 		return eCall(ownerNm, methodNm, E.INVOKESTATIC, 204);
 	}
 
+	// Resolve, varargs-pack, emit, then fold the call back into expression typing.
 	static int eCall(int ownerNm, int methodNm, int invokeKind, int errCode) {
 		Lexer.expect(Tk.LPAREN);
 		boolean isStatic = invokeKind == E.INVOKESTATIC;

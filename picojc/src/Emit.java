@@ -33,6 +33,7 @@ class E {
 	static int cinitMaxLoc;
 	static int tyNarrow; // declared scalar narrow kind for the last parsed local/param type
 
+	// Reset the per-class <clinit> staging buffer before scanning a class body.
 	static void resetClinitState() {
 		cinitLen = 0;
 		cinitCpC = 0;
@@ -40,6 +41,7 @@ class E {
 		cinitMaxLoc = 0;
 	}
 
+	// Materialize the staged static-init chunks as the class's real <clinit> body.
 	static void emitClinitMethod(int mi) {
 		initMC(mi);
 		C.curMStatic = true;
@@ -176,6 +178,7 @@ class E {
 		Lexer.expect(Tk.SEMI);
 	}
 
+	// Shared static-init chunk helpers: reuse normal statement emission, then append it.
 	static void beginClinitChunk(int nextLoc) {
 		C.mcLen = 0;
 		C.cpMBase = C.cpSz;
@@ -194,6 +197,7 @@ class E {
 		C.lpDepth = 0;
 	}
 
+	// Merge the temporary chunk back into the class-level <clinit> staging area.
 	static void endClinitChunk(boolean trackLocals) {
 		for (int i = 0; i < C.patC; i++) {
 			int loc = C.patLoc[i];

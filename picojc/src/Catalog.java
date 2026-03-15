@@ -37,7 +37,7 @@ public class Catalog {
 			int parentNm = C.intern(Tk.strBuf, Tk.strLen);
 			Lexer.nextToken();
 			// Resolve parent later; store name for now
-			C.cParent[ci] = parentNm; // store as name index, resolve in Pass 2
+			C.cParent[ci] = (short)parentNm; // store as name index, resolve in Pass 2
 		}
 
 		// implements?
@@ -45,7 +45,7 @@ public class Catalog {
 			Lexer.nextToken();
 			while (Tk.type == Tk.IDENT || Tk.type == Tk.STRING_KW) {
 				int ifNm = C.intern(Tk.strBuf, Tk.strLen);
-				C.ifList[C.ifListLen++] = ifNm; // store as name, resolve later
+				C.ifList[C.ifListLen++] = (byte)ifNm; // store as name, resolve later
 				C.cIfaceC[ci]++;
 				Lexer.nextToken();
 				if (Tk.type == Tk.COMMA) Lexer.nextToken();
@@ -87,7 +87,7 @@ public class Catalog {
 				mi = C.cClinit[ci];
 			} else {
 				mi = C.initMethod(ci, C.N_CLINIT, 0, true, false, false, 0);
-				C.cClinit[ci] = mi;
+				C.cClinit[ci] = (short)mi;
 			}
 			Lexer.nextToken(); // skip {
 			C.mBodyS[mi] = Lexer.pos;
@@ -143,6 +143,7 @@ public class Catalog {
 					if (retType == 1) {
 						if (retTypeToken == Tk.BYTE || retTypeToken == Tk.BOOLEAN) arrayKind = 4;
 						else if (retTypeToken == Tk.CHAR) arrayKind = 5;
+						else if (retTypeToken == Tk.SHORT) arrayKind = 8;
 					}
 					retType = 2; // array = ref
 				}
@@ -165,6 +166,15 @@ public class Catalog {
 			}
 		}
 		else {
+			Native.putchar('T'); Lexer.printNum(Tk.type);
+			Native.putchar('P'); Lexer.printNum(Lexer.pos);
+			Native.putchar('K'); Lexer.printNum(Lexer.kwCount);
+			Native.putchar('S'); Lexer.printNum(Tk.strLen);
+			Native.putchar('[');
+			for (int di = 0; di < Tk.strLen && di < 10; di++)
+				Native.putchar(Tk.strBuf[di] & 0xFF);
+			Native.putchar(']');
+			Native.putchar('\n');
 			Lexer.error(100);
 			return;
 		}
@@ -185,9 +195,9 @@ public class Catalog {
 
 	static int initField(int ci, int nm, boolean isStat, int arrKind) {
 		int fi = C.fCount++;
-		C.fClass[fi] = ci; C.fName[fi] = nm; C.fStatic[fi] = isStat;
-		C.fArrKind[fi] = arrKind; C.fSlot[fi] = -1;
-		C.fInitPos[fi] = -1; C.fInitLn[fi] = 0;
+		C.fClass[fi] = (byte)ci; C.fName[fi] = (short)nm; C.fStatic[fi] = isStat;
+		C.fArrKind[fi] = (byte)arrKind; C.fSlot[fi] = (short)-1;
+		C.fInitPos[fi] = -1; C.fInitLn[fi] = (short)0;
 		if (!isStat) C.cOwnF[ci]++;
 		return fi;
 	}
@@ -196,7 +206,7 @@ public class Catalog {
 		if (C.cClinit[ci] == 0xFF) {
 			int smi = C.initMethod(ci, C.N_CLINIT, 0, true, false, false, 0);
 			C.mBodyS[smi] = -2; C.mBodyE[smi] = -2;
-			C.cClinit[ci] = smi;
+			C.cClinit[ci] = (short)smi;
 		}
 	}
 
@@ -205,7 +215,7 @@ public class Catalog {
 
 		if (Tk.type == Tk.ASSIGN && isStat) {
 			C.fInitPos[fi] = Lexer.pos;
-			C.fInitLn[fi] = Lexer.line;
+			C.fInitLn[fi] = (short)Lexer.line;
 			ensClinitFor(ci);
 		}
 
@@ -218,7 +228,7 @@ public class Catalog {
 				// Record initializer for comma-separated fields: static int A=0, B=1;
 				if (Tk.type == Tk.ASSIGN && isStat) {
 					C.fInitPos[fi2] = Lexer.pos;
-					C.fInitLn[fi2] = Lexer.line;
+					C.fInitLn[fi2] = (short)Lexer.line;
 					ensClinitFor(ci);
 				}
 			} else {
@@ -244,7 +254,7 @@ public class Catalog {
 			if (Tk.type == Tk.COMMA) Lexer.nextToken();
 		}
 		Lexer.expect(Tk.RPAREN);
-		C.mArgC[mi] = argc;
+		C.mArgC[mi] = (byte)argc;
 
 		if (isNat || isAbstract || C.cIsIface[ci]) {
 			// Native/abstract/interface method: no body

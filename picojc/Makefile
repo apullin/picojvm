@@ -27,7 +27,8 @@ TESTS = T01_Empty T02_Literal T03_Arithmetic T04_IfElse T05_WhileLoop \
         T24_Exception T25_TypeConversion \
         T27_Fib T28_BubbleSort T29_StringTest T30_MultiClass \
         T31_Shapes T32_ExceptionTest T33_Counter T34_StaticInit T35_ByteArray \
-        T36_CharArray T37_Recursion T38_LinkedList T39_NativeOps T41_FileIO
+        T36_CharArray T37_Recursion T38_LinkedList T39_NativeOps T41_FileIO \
+        T42_ShortArray
 # TODO: T23_StringSwitch (needs hashCode/equals pattern), T26_Interface (vmid dispatch)
 
 # Tests requiring lib/ (platform package)

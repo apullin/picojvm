@@ -32,53 +32,53 @@ class C {
 
 	// --- Class table ---
 	static int cCount;
-	static int[] cName   = new int[MAX_CLASSES]; // name index
-	static int[] cParent = new int[MAX_CLASSES]; // class id (-1 = Object)
-	static int[] cFieldC = new int[MAX_CLASSES]; // instance field count (incl inherited)
-	static int[] cOwnF  = new int[MAX_CLASSES]; // own instance fields
-	static int[] cVtSize = new int[MAX_CLASSES];
-	static int[] cClinit   = new int[MAX_CLASSES]; // 0xFF=none
-	static int[] cIfaceS = new int[MAX_CLASSES]; // start in iface list
-	static int[] cIfaceC = new int[MAX_CLASSES];
+	static short[] cName   = new short[MAX_CLASSES]; // name index
+	static short[] cParent = new short[MAX_CLASSES]; // class id (-1 = Object)
+	static byte[] cFieldC = new byte[MAX_CLASSES]; // instance field count (incl inherited)
+	static byte[] cOwnF  = new byte[MAX_CLASSES]; // own instance fields
+	static byte[] cVtSize = new byte[MAX_CLASSES];
+	static short[] cClinit   = new short[MAX_CLASSES]; // 0xFF=none
+	static byte[] cIfaceS = new byte[MAX_CLASSES]; // start in iface list
+	static byte[] cIfaceC = new byte[MAX_CLASSES];
 	static boolean[] cIsIface = new boolean[MAX_CLASSES];
-	static int[] cBodyS = new int[MAX_CLASSES]; // source offset
+	static int[] cBodyS = new int[MAX_CLASSES]; // source offset (must be int: >32KB sources)
 	static int[] cBodyE   = new int[MAX_CLASSES];
-	static int[] vtable = new int[MAX_VTABLE]; // flat: class vtables concatenated
-	static int[] vtBase = new int[MAX_CLASSES]; // offset into vtable[]
+	static short[] vtable = new short[MAX_VTABLE]; // flat: class vtables concatenated
+	static byte[] vtBase = new byte[MAX_CLASSES]; // offset into vtable[]
 	// Interface list (flat)
-	static int[] ifList = new int[64]; // class IDs
+	static byte[] ifList = new byte[64]; // class IDs
 	static int ifListLen;
 
 	// --- Field table ---
 	static int fCount;
-	static int[] fClass  = new int[MAX_FIELDS];
-	static int[] fName   = new int[MAX_FIELDS]; // name index
+	static byte[] fClass  = new byte[MAX_FIELDS];
+	static short[] fName   = new short[MAX_FIELDS]; // name index
 	static boolean[] fStatic = new boolean[MAX_FIELDS];
-	static int[] fSlot   = new int[MAX_FIELDS]; // assigned in resolve
-	static int[] fInitPos  = new int[MAX_FIELDS]; // source pos of initializer (-1=none)
-	static int[] fInitLn = new int[MAX_FIELDS]; // line of initializer
-	static int[] fArrKind = new int[MAX_FIELDS]; // 0=non-array/int[], 4=byte[], 5=char[]
+	static short[] fSlot   = new short[MAX_FIELDS]; // assigned in resolve
+	static int[] fInitPos  = new int[MAX_FIELDS]; // source pos of initializer (must be int: >32KB sources)
+	static short[] fInitLn = new short[MAX_FIELDS]; // line of initializer
+	static byte[] fArrKind = new byte[MAX_FIELDS]; // 0=non-array/int[], 4=byte[], 5=char[], 8=short[]
 
 	// --- Method table ---
 	static int mCount;
-	static int[] mClass     = new int[MAX_METHODS];
-	static int[] mName      = new int[MAX_METHODS]; // name index
-	static int[] mArgC  = new int[MAX_METHODS];
-	static int[] mMaxLoc = new int[MAX_METHODS];
-	static int[] mMaxStk  = new int[MAX_METHODS];
-	static int[] mFlags     = new int[MAX_METHODS]; // native encoding
-	static int[] mCodeOff   = new int[MAX_METHODS];
-	static int[] mCpBase    = new int[MAX_METHODS];
-	static int[] mVtSlot= new int[MAX_METHODS];
-	static int[] mVmid      = new int[MAX_METHODS];
-	static int[] mExcC  = new int[MAX_METHODS];
-	static int[] mExcIdx    = new int[MAX_METHODS];
+	static byte[] mClass     = new byte[MAX_METHODS];
+	static short[] mName      = new short[MAX_METHODS]; // name index
+	static byte[] mArgC  = new byte[MAX_METHODS];
+	static byte[] mMaxLoc = new byte[MAX_METHODS];
+	static byte[] mMaxStk  = new byte[MAX_METHODS];
+	static byte[] mFlags     = new byte[MAX_METHODS]; // native encoding
+	static short[] mCodeOff   = new short[MAX_METHODS];
+	static short[] mCpBase    = new short[MAX_METHODS];
+	static byte[] mVtSlot= new byte[MAX_METHODS];
+	static byte[] mVmid      = new byte[MAX_METHODS];
+	static byte[] mExcC  = new byte[MAX_METHODS];
+	static byte[] mExcIdx    = new byte[MAX_METHODS];
 	static boolean[] mStatic     = new boolean[MAX_METHODS];
 	static boolean[] mIsCtor= new boolean[MAX_METHODS];
 	static boolean[] mNative     = new boolean[MAX_METHODS];
-	static int[] mBodyS = new int[MAX_METHODS]; // source pos
-	static int[] mBodyE   = new int[MAX_METHODS]; // source pos
-	static int[] mRetT   = new int[MAX_METHODS]; // 0=void,1=int,2=ref
+	static int[] mBodyS = new int[MAX_METHODS]; // source pos (must be int: >32KB sources)
+	static int[] mBodyE   = new int[MAX_METHODS]; // source pos (must be int: >32KB sources)
+	static byte[] mRetT   = new byte[MAX_METHODS]; // 0=void,1=int,2=ref
 	static int mainMi;
 
 	// --- CP resolution table (16-bit entries, stored as lo/hi byte arrays) ---
@@ -101,25 +101,25 @@ class C {
 	static int mcLen;
 
 	// --- Integer constants ---
-	static int[] intC = new int[MAX_INT_CONST];
+	static int[] intC = new int[MAX_INT_CONST]; // must be int: stores 32-bit constant values
 	static int intCC;
 
 	// --- String constants ---
 	static byte[][] strC = new byte[MAX_STR_CONST][];
-	static int[] strCLen = new int[MAX_STR_CONST];
+	static byte[] strCLen = new byte[MAX_STR_CONST];
 	static int strCC;
 
 	// --- Exception table ---
-	static int[] excSPc  = new int[MAX_EXC];
-	static int[] excEPc    = new int[MAX_EXC];
-	static int[] excHPc= new int[MAX_EXC];
-	static int[] excCCls= new int[MAX_EXC];
+	static short[] excSPc  = new short[MAX_EXC];
+	static short[] excEPc    = new short[MAX_EXC];
+	static short[] excHPc= new short[MAX_EXC];
+	static byte[] excCCls= new byte[MAX_EXC];
 	static int excC;
 
 	// --- Locals (per method, during emit) ---
-	static int[] locName = new int[MAX_LOCALS]; // name index
-	static int[] locSlot = new int[MAX_LOCALS];
-	static int[] locType = new int[MAX_LOCALS]; // 0=int,1=ref,3=int[],4=byte[],5=char[]
+	static short[] locName = new short[MAX_LOCALS]; // name index
+	static byte[] locSlot = new byte[MAX_LOCALS];
+	static byte[] locType = new byte[MAX_LOCALS]; // 0=int,1=ref,3=int[],4=byte[],5=char[],8=short[]
 	static int locCount;
 	static int locNext;
 	static int maxLoc;
@@ -127,20 +127,20 @@ class C {
 	static int maxStk;
 
 	// --- Backpatch / Labels ---
-	static int[] patLoc   = new int[320]; // offset in mcode of branch operand
-	static int[] patLbl = new int[320]; // which label
+	static short[] patLoc   = new short[320]; // offset in mcode of branch operand
+	static short[] patLbl = new short[320]; // which label
 	static int patC;
-	static int[] lblAddr  = new int[320]; // address for each label
+	static short[] lblAddr  = new short[320]; // address for each label
 	static int lblCount;
 
 	// --- Loop context stack (break/continue targets) ---
-	static int[] lpBrkLbl = new int[32];
-	static int[] lpContLbl  = new int[32];
+	static short[] lpBrkLbl = new short[32];
+	static short[] lpContLbl  = new short[32];
 	static int lpDepth;
 
 	// --- Switch case arrays (reused, not nested) ---
-	static int[] caseVals   = new int[64];
-	static int[] caseLbls = new int[64];
+	static short[] caseVals   = new short[64];
+	static short[] caseLbls = new short[64];
 
 	// --- Current context ---
 	static int curCi;
@@ -267,16 +267,16 @@ class C {
 	static int initMethod(int ci, int nm, int argc, boolean isStat,
 						  boolean isCtor, boolean isNat, int retType) {
 		int mi = mCount++;
-		mClass[mi] = ci; mName[mi] = nm; mArgC[mi] = argc;
+		mClass[mi] = (byte)ci; mName[mi] = (short)nm; mArgC[mi] = (byte)argc;
 		mStatic[mi] = isStat; mIsCtor[mi] = isCtor; mNative[mi] = isNat;
-		mRetT[mi] = retType; mVtSlot[mi] = 0xFF; mVmid[mi] = 0xFF; mExcC[mi] = 0;
+		mRetT[mi] = (byte)retType; mVtSlot[mi] = (byte)0xFF; mVmid[mi] = (byte)0xFF; mExcC[mi] = 0;
 		return mi;
 	}
 
 	static int initClass(int nm) {
 		int ci = cCount++;
-		cName[ci] = nm; cParent[ci] = -1; cIsIface[ci] = false;
-		cClinit[ci] = 0xFF; cIfaceS[ci] = ifListLen; cIfaceC[ci] = 0; cOwnF[ci] = 0;
+		cName[ci] = (short)nm; cParent[ci] = -1; cIsIface[ci] = false;
+		cClinit[ci] = 0xFF; cIfaceS[ci] = (byte)ifListLen; cIfaceC[ci] = 0; cOwnF[ci] = 0;
 		return ci;
 	}
 
@@ -290,14 +290,14 @@ class C {
 					  int nativeId, boolean isStatic, int retType) {
 		for (int i = 0; i < mCount; i++) {
 			if (mNative[i] && mName[i] == methodNm && mClass[i] == classNm) {
-				mFlags[i] = (nativeId << 1) | 1;
+				mFlags[i] = (byte)((nativeId << 1) | 1);
 				return i;
 			}
 		}
 		int mi = initMethod(classNm, methodNm, argCount, isStatic, false, true, retType);
-		mMaxLoc[mi] = argCount;
-		mMaxStk[mi] = argCount > 0 ? argCount : 1;
-		mFlags[mi] = (nativeId << 1) | 1;
+		mMaxLoc[mi] = (byte)argCount;
+		mMaxStk[mi] = (byte)(argCount > 0 ? argCount : 1);
+		mFlags[mi] = (byte)((nativeId << 1) | 1);
 		mBodyS[mi] = -1; mBodyE[mi] = -1;
 		return mi;
 	}

@@ -8,7 +8,7 @@ public class Resolver {
 			if (C.cParent[ci] != -1) {
 				int parentNm = C.cParent[ci]; // currently a name index
 				int pid = fClsByNm(parentNm);
-				C.cParent[ci] = pid; // now a class index, -1 if not found (Object)
+				C.cParent[ci] = (short)pid; // now a class index, -1 if not found (Object)
 			}
 		}
 
@@ -18,7 +18,7 @@ public class Resolver {
 			for (int j = 0; j < C.cIfaceC[ci]; j++) {
 				int ifNm = C.ifList[start + j]; // name index
 				int ifId = fClsByNm(ifNm);
-				C.ifList[start + j] = ifId; // now class index
+				C.ifList[start + j] = (byte)ifId; // now class index
 			}
 		}
 
@@ -28,14 +28,14 @@ public class Resolver {
 			if (C.cParent[ci] >= 0) {
 				inherited = C.cFieldC[C.cParent[ci]];
 			}
-			C.cFieldC[ci] = inherited + C.cOwnF[ci];
+			C.cFieldC[ci] = (byte)(inherited + C.cOwnF[ci]);
 		}
 
 		// Assign field slots
 		C.sfCount = 0;
 		for (int fi = 0; fi < C.fCount; fi++) {
 			if (C.fStatic[fi]) {
-				C.fSlot[fi] = C.sfCount++;
+				C.fSlot[fi] = (short)C.sfCount++;
 			} else {
 				// Instance field: slot = parent field count + own offset
 				int ci = C.fClass[fi];
@@ -49,7 +49,7 @@ public class Resolver {
 						ownIdx++;
 					}
 				}
-				C.fSlot[fi] = inherited + ownIdx;
+				C.fSlot[fi] = (short)(inherited + ownIdx);
 			}
 		}
 
@@ -75,7 +75,7 @@ public class Resolver {
 		// Build vtables
 		for (int ci = 0; ci < C.cCount; ci++) {
 			if (C.cIsIface[ci]) continue;
-			C.vtBase[ci] = vtableLen();
+			C.vtBase[ci] = (byte)vtableLen();
 			int parentVtSize = 0;
 			if (C.cParent[ci] >= 0) {
 				// Copy parent vtable
@@ -86,7 +86,7 @@ public class Resolver {
 					C.vtable[C.vtBase[ci] + j] = C.vtable[pBase + j];
 				}
 			}
-			C.cVtSize[ci] = parentVtSize;
+			C.cVtSize[ci] = (byte)parentVtSize;
 
 			// Add/override methods
 			for (int mi = 0; mi < C.mCount; mi++) {
@@ -104,12 +104,12 @@ public class Resolver {
 					}
 				}
 				if (slot >= 0) {
-					C.vtable[C.vtBase[ci] + slot] = mi;
-					C.mVtSlot[mi] = slot;
+					C.vtable[C.vtBase[ci] + slot] = (short)mi;
+					C.mVtSlot[mi] = (byte)slot;
 				} else {
 					slot = C.cVtSize[ci]++;
-					C.vtable[C.vtBase[ci] + slot] = mi;
-					C.mVtSlot[mi] = slot;
+					C.vtable[C.vtBase[ci] + slot] = (short)mi;
+					C.mVtSlot[mi] = (byte)slot;
 				}
 			}
 		}
@@ -120,7 +120,7 @@ public class Resolver {
 			if (!C.cIsIface[ci]) continue;
 			for (int mi = 0; mi < C.mCount; mi++) {
 				if (C.mClass[mi] != ci) continue;
-				C.mVmid[mi] = nextVmid++;
+				C.mVmid[mi] = (byte)nextVmid++;
 			}
 		}
 		// Copy vmids to implementing class methods
@@ -165,7 +165,7 @@ public class Resolver {
 				else if (nm == C.N_MEMCMP)          nid = 14;
 				else if (nm == C.N_WRITE_BYTES)     nid = 15;
 				else if (nm == C.N_STRING_FROM_BYTES) nid = 16;
-				if (nid >= 0) C.mFlags[mi] = (nid << 1) | 1;
+				if (nid >= 0) C.mFlags[mi] = (byte)((nid << 1) | 1);
 			}
 		}
 
@@ -226,8 +226,8 @@ public class Resolver {
 		}
 
 		int ci = C.initClass(nm);
-		C.cParent[ci] = parentNm == -1 ? -1 : fClsByNm(parentNm);
-		C.vtBase[ci] = vtableLen();
+		C.cParent[ci] = (short)(parentNm == -1 ? -1 : fClsByNm(parentNm));
+		C.vtBase[ci] = (byte)vtableLen();
 		C.cBodyS[ci] = -1; C.cBodyE[ci] = -1;
 		return ci;
 	}

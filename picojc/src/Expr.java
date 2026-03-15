@@ -429,7 +429,8 @@ public class Expr {
 			// Return specific array type for proper BALOAD/BASTORE emission
 			if (typeCode == 8 || typeCode == 4) return 4;  // byte[] or boolean[]
 			if (typeCode == 5) return 5;  // char[]
-			return 3; // int[] (or short[])
+			if (typeCode == 9) return 8;  // short[]
+			return 3; // int[]
 		}
 
 		// Object or reference array: new ClassName(...) or new ClassName[size]

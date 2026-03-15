@@ -67,8 +67,8 @@ class E {
 				}
 				eb(0xB1); // RETURN
 				commitMC(mi);
-				C.mMaxLoc[mi] = cinitMaxLoc > 0 ? cinitMaxLoc : 1;
-				C.mMaxStk[mi] = cinitMaxStk > 0 ? cinitMaxStk : 1;
+				C.mMaxLoc[mi] = (byte)(cinitMaxLoc > 0 ? cinitMaxLoc : 1);
+				C.mMaxStk[mi] = (byte)(cinitMaxStk > 0 ? cinitMaxStk : 1);
 			}
 		}
 
@@ -365,12 +365,12 @@ class E {
 		}
 
 		commitMC(mi);
-		C.mMaxLoc[mi] = C.locNext > 0 ? C.locNext : 1;
-		C.mMaxStk[mi] = C.maxStk > 0 ? C.maxStk : 1;
+		C.mMaxLoc[mi] = (byte)(C.locNext > 0 ? C.locNext : 1);
+		C.mMaxStk[mi] = (byte)(C.maxStk > 0 ? C.maxStk : 1);
 	}
 
 	static void commitMC(int mi) {
-		C.mCodeOff[mi] = C.cdLen;
+		C.mCodeOff[mi] = (short)C.cdLen;
 		if (C.diskSpill) {
 			for (int i = 0; i < C.mcLen; i++) {
 				Native.fileWriteByte(C.mcode[i] & 0xFF); C.cdLen++;
@@ -380,7 +380,7 @@ class E {
 				Native.poke(C.cdBase + C.cdLen, C.mcode[i] & 0xFF); C.cdLen++;
 			}
 		}
-		C.mCpBase[mi] = C.cpMBase;
+		C.mCpBase[mi] = (short)C.cpMBase;
 		// Entries already in cpEnt/cpEntH — just advance cpSz
 		int end = C.cpMBase + C.cpMCount;
 		if (end > C.cpSz) C.cpSz = end;
@@ -405,22 +405,24 @@ class E {
 				eb(0xB1); // RETURN
 
 				commitMC(mi);
-				C.mMaxLoc[mi] = 1;
-				C.mMaxStk[mi] = 1;
+				C.mMaxLoc[mi] = (byte)1;
+				C.mMaxStk[mi] = (byte)1;
 			}
 			// Synthetic clinits are now handled in eClsMethods via cinitBuf
 		}
 	}
 
 	static int pTypeLoc() {
-		// Returns: 0=int, 1=ref, 3=int[], 4=byte[], 5=char[]
+		// Returns: 0=int, 1=ref, 3=int[], 4=byte[], 5=char[], 8=short[]
 		int baseType = 0;
-		int elemKind = 0; // 0=int-like, 1=byte, 2=char
+		int elemKind = 0; // 0=int-like, 1=byte, 2=char, 3=short
 		if (Tk.type == Tk.BYTE || Tk.type == Tk.BOOLEAN) {
 			elemKind = 1; Lexer.nextToken();
 		} else if (Tk.type == Tk.CHAR) {
 			elemKind = 2; Lexer.nextToken();
-		} else if (Tk.type == Tk.INT || Tk.type == Tk.SHORT) {
+		} else if (Tk.type == Tk.SHORT) {
+			elemKind = 3; Lexer.nextToken();
+		} else if (Tk.type == Tk.INT) {
 			elemKind = 0; Lexer.nextToken();
 		} else {
 			baseType = 1; // reference
@@ -437,6 +439,7 @@ class E {
 			if (baseType == 1 || dimCount > 1) return 1; // Object[]/multi-dim = reference
 			if (elemKind == 1) return 4; // byte[]
 			if (elemKind == 2) return 5; // char[]
+			if (elemKind == 3) return 8; // short[]
 			return 3; // int[]
 		}
 		return baseType; // 0=int, 1=ref
@@ -467,11 +470,11 @@ class E {
 	static void eOp(int op, int cp) { eb(op); eSBE(cp); }
 	static void epop() { eb(0x57); pop(); } // POP
 	static void ethis() { eLd(0, 1); push(); } // ALOAD_0 this
-	static void eALd(int t) { eb(t==4 ? 0x33 : t==5 ? 0x34 : 0x2E); } // BALOAD/CALOAD/IALOAD
-	static void eASt(int t) { eb(t==4 ? 0x54 : t==5 ? 0x55 : 0x4F); } // BASTORE/CASTORE/IASTORE
+	static void eALd(int t) { eb(t==4 ? 0x33 : t==5 ? 0x34 : t==8 ? 0x35 : 0x2E); } // BALOAD/CALOAD/SALOAD/IALOAD
+	static void eASt(int t) { eb(t==4 ? 0x54 : t==5 ? 0x55 : t==8 ? 0x56 : 0x4F); } // BASTORE/CASTORE/SASTORE/IASTORE
 	static void pushLp(int brk, int cont) {
-		C.lpBrkLbl[C.lpDepth] = brk;
-		C.lpContLbl[C.lpDepth] = cont;
+		C.lpBrkLbl[C.lpDepth] = (short)brk;
+		C.lpContLbl[C.lpDepth] = (short)cont;
 		C.lpDepth++;
 	}
 	static void popLp() { C.lpDepth--; }
@@ -504,15 +507,15 @@ class E {
 	}
 
 	static void mark(int lbl) {
-		C.lblAddr[lbl] = C.mcLen;
+		C.lblAddr[lbl] = (short)C.mcLen;
 	}
 
 	static void eBr(int opcode, int label) {
 		int branchPC = C.mcLen;
 		eb(opcode);
 		int loc = eBrPH();
-		C.patLoc[C.patC] = loc;
-		C.patLbl[C.patC] = label;
+		C.patLoc[C.patC] = (short)loc;
+		C.patLbl[C.patC] = (short)label;
 		C.patC++;
 	}
 
@@ -526,9 +529,9 @@ class E {
 	}
 
 	static void aLoc(int nm, int type) {
-		C.locName[C.locCount] = nm;
-		C.locSlot[C.locCount] = C.locCount;
-		C.locType[C.locCount] = type;
+		C.locName[C.locCount] = (short)nm;
+		C.locSlot[C.locCount] = (byte)C.locCount;
+		C.locType[C.locCount] = (byte)type;
 		C.locCount++;
 		if (C.locCount > C.locNext) C.locNext = C.locCount;
 	}
@@ -574,7 +577,7 @@ class E {
 			strIdx = C.strCC++;
 			C.strC[strIdx] = new byte[len];
 			Native.arraycopy(buf, 0, C.strC[strIdx], 0, len);
-			C.strCLen[strIdx] = len;
+			C.strCLen[strIdx] = (byte)len;
 		}
 		return aCP(0x8000 | strIdx);
 	}

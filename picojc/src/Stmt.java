@@ -328,9 +328,9 @@ public class Stmt {
 				Lexer.nextToken();
 				Lexer.expect(Tk.COLON);
 
-				C.caseLbls[caseCount] = E.label();
+				C.caseLbls[caseCount] = (short)E.label();
 				E.mark(C.caseLbls[caseCount]);
-				C.caseVals[caseCount] = val;
+				C.caseVals[caseCount] = (short)val;
 				caseCount++;
 			} else if (Tk.type == Tk.DEFAULT) {
 				Lexer.nextToken();
@@ -350,12 +350,12 @@ public class Stmt {
 			int kl = C.caseLbls[i];
 			int j = i - 1;
 			while (j >= 0 && C.caseVals[j] > kv) {
-				C.caseVals[j + 1] = C.caseVals[j];
-				C.caseLbls[j + 1] = C.caseLbls[j];
+				C.caseVals[j + 1] = (short)C.caseVals[j];
+				C.caseLbls[j + 1] = (short)C.caseLbls[j];
 				j--;
 			}
-			C.caseVals[j + 1] = kv;
-			C.caseLbls[j + 1] = kl;
+			C.caseVals[j + 1] = (short)kv;
+			C.caseLbls[j + 1] = (short)kl;
 		}
 
 		// Patch npairs
@@ -373,13 +373,13 @@ public class Stmt {
 			// Adjust label addresses in shifted region
 			for (int lbl = 0; lbl < C.lblCount; lbl++) {
 				if (C.lblAddr[lbl] >= tableInsert) {
-					C.lblAddr[lbl] = C.lblAddr[lbl] + tableSize;
+					C.lblAddr[lbl] = (short)(C.lblAddr[lbl] + tableSize);
 				}
 			}
 			// Adjust backpatch locations in shifted region
 			for (int i = 0; i < C.patC; i++) {
 				if (C.patLoc[i] >= tableInsert) {
-					C.patLoc[i] = C.patLoc[i] + tableSize;
+					C.patLoc[i] = (short)(C.patLoc[i] + tableSize);
 				}
 			}
 		}
@@ -443,10 +443,10 @@ public class Stmt {
 			// Record exception table entry
 			int catchClassId = Resolver.fClsByNm(excNm);
 			if (catchClassId < 0) catchClassId = 0xFF;
-			C.excSPc[C.excC] = startPC;
-			C.excEPc[C.excC] = endPC;
-			C.excHPc[C.excC] = handlerPC;
-			C.excCCls[C.excC] = catchClassId;
+			C.excSPc[C.excC] = (short)startPC;
+			C.excEPc[C.excC] = (short)endPC;
+			C.excHPc[C.excC] = (short)handlerPC;
+			C.excCCls[C.excC] = (byte)catchClassId;
 			C.excC++;
 			C.mExcC[C.curMi]++;
 
@@ -470,10 +470,10 @@ public class Stmt {
 			E.eSt(excSlot, 1); // ASTORE exception (from JVM stack)
 			E.eBr(E.GOTO, lblFinally);
 
-			C.excSPc[C.excC] = startPC;
-			C.excEPc[C.excC] = endPC;
-			C.excHPc[C.excC] = handlerPC;
-			C.excCCls[C.excC] = 0xFF; // catch all
+			C.excSPc[C.excC] = (short)startPC;
+			C.excEPc[C.excC] = (short)endPC;
+			C.excHPc[C.excC] = (short)handlerPC;
+			C.excCCls[C.excC] = (byte)0xFF; // catch all
 			C.excC++;
 			C.mExcC[C.curMi]++;
 

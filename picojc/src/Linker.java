@@ -45,7 +45,7 @@ public class Linker {
 		// Compute exc_off_idx: cumulative exception entry count per method
 		int excRunning = 0;
 		for (int mi = 0; mi < C.mCount; mi++) {
-			C.mExcIdx[mi] = excRunning;
+			C.mExcIdx[mi] = (byte)excRunning;
 			excRunning += C.mExcC[mi];
 		}
 

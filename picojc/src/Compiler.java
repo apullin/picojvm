@@ -1,17 +1,17 @@
 // Compiler -> C (size)
 class C {
 	// Limits — sized to fit in picoJVM 64KB heap
-	static int MAX_CLASSES  = 32;
-	static int MAX_METHODS  = 192;
-	static int MAX_FIELDS   = 320;
-	static int MAX_NAMES    = 640;
-	static int MAX_CP       = 2560;
-	static int MAX_CODE     = 19456;
-	static int MAX_LOCALS   = 64;
-	static int MAX_EXC      = 32;
-	static int MAX_VTABLE   = 128;
-	static int MAX_INT_CONST= 80;
-	static int MAX_STR_CONST= 80;
+	static final int MAX_CLASSES  = 32;
+	static final int MAX_METHODS  = 192;
+	static final int MAX_FIELDS   = 320;
+	static final int MAX_NAMES    = 640;
+	static final int MAX_CP       = 2560;
+	static final int MAX_CODE     = 19456;
+	static final int MAX_LOCALS   = 64;
+	static final int MAX_EXC      = 32;
+	static final int MAX_VTABLE   = 128;
+	static final int MAX_INT_CONST= 80;
+	static final int MAX_STR_CONST= 80;
 
 	// --- Name pool (interning) ---
 	static byte[] nPool = new byte[6144];
@@ -152,8 +152,8 @@ class C {
 	static boolean curMStatic;
 
 	// Source address
-	static int SRC_BASE = 0xC000;
-	static int SRC_LEN_ADDR = 0xBFFC;
+	static final int SRC_BASE = 0xC000;
+	static final int SRC_LEN_ADDR = 0xBFFC;
 
 	// Output to stdout via putchar
 	static int outLen;

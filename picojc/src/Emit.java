@@ -1,7 +1,7 @@
 // Emit -> E (size)
 class E {
 	// Branch opcodes
-	static int IFEQ = 0x99, IFNE = 0x9A, GOTO = 0xA7;
+	static final int IFEQ = 0x99, IFNE = 0x9A, GOTO = 0xA7;
 
 	// Per-class clinit accumulation buffer (field inits + static blocks)
 	static byte[] cinitBuf = new byte[1024];

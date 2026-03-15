@@ -14,8 +14,8 @@ public class DiskMain {
 	static byte[] fname = new byte[10];
 
 	// Multi-file manifest support
-	static int MAX_FILES = 16;
-	static int MAX_FNAME = 64;
+	static final int MAX_FILES = 16;
+	static final int MAX_FNAME = 64;
 	static byte[][] fileNames;
 	static int[] fileNameLens;
 	static int fileCount;

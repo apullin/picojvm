@@ -147,9 +147,6 @@ class E {
 		if (Tk.type == Tk.LPAREN) {
 			int argc = Catalog.peekParamArgc(Catalog.mStat);
 			int mi = Resolver.fDeclaredMethod(ci, nm, Catalog.mStat, argc);
-			if (mi < 0 && nm == C.N_MAIN && Catalog.mStat && argc == 1) {
-				mi = Resolver.fDeclaredMethod(ci, nm, true, 0);
-			}
 			if (mi >= 0 && !C.mNative[mi] && C.mBodyS[mi] >= 0) {
 				eMBody(mi);
 			} else {

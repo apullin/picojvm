@@ -38,11 +38,13 @@ TESTS = T01_Empty T02_Literal T03_Arithmetic T04_IfElse T05_WhileLoop \
 NEGTESTS = N01_InvalidStaticCall N02_OverloadSameClass \
            N03_OverloadInherited N04_SwitchTooManyCases \
            N05_InvalidLocalNarrowing N06_InvalidStaticInitNarrowing \
-           N07_InvalidFieldAssignNarrowing N08_InvalidReturnNarrowing
+           N07_InvalidFieldAssignNarrowing N08_InvalidReturnNarrowing \
+           N09_InvalidMainSig
 
 # Tests requiring lib/ (platform package)
 LIB_SRCS = ../lib/Console.java ../lib/Arrays.java ../lib/IO.java
 LIB_TESTS = T40_PlatformPkg
+ARGV_TESTS = T61_MainArgs
 
 all: $(BUILDDIR)/picojc.pjvm
 
@@ -109,6 +111,10 @@ $(BUILDDIR)/%.out: $(BUILDDIR)/%.pjvm $(PICOJVM)
 	$(PICOJVM) $< > $@ 2> $(BUILDDIR)/$*_run.log || true
 	@cat $(BUILDDIR)/$*_run.log | grep -E '^(picoJVM|HALT)' || true
 
+$(BUILDDIR)/T61_MainArgs.out: $(BUILDDIR)/T61_MainArgs.pjvm $(PICOJVM)
+	$(PICOJVM) $< -- alpha beta z > $@ 2> $(BUILDDIR)/T61_MainArgs_run.log || true
+	@cat $(BUILDDIR)/T61_MainArgs_run.log | grep -E '^(picoJVM|HALT)' || true
+
 # Test a single program: compile with picojc, run, compare output
 test-%: $(BUILDDIR)/%.out $(EXPDIR)/%.txt
 	@if diff -q $(BUILDDIR)/$*.out $(EXPDIR)/$*.txt > /dev/null 2>&1; then \
@@ -155,6 +161,15 @@ test: $(PICOJVM) $(BUILDDIR)/picojc.pjvm
 	for t in $(LIB_TESTS); do \
 		echo "--- $$t (lib) ---"; \
 		if $(MAKE) --no-print-directory test-lib-$$t 2>&1; then \
+			pass=$$((pass + 1)); \
+		else \
+			fail=$$((fail + 1)); \
+		fi; \
+	done; \
+	echo ""; \
+	for t in $(ARGV_TESTS); do \
+		echo "--- $$t (argv) ---"; \
+		if $(MAKE) --no-print-directory test-$$t 2>&1; then \
 			pass=$$((pass + 1)); \
 		else \
 			fail=$$((fail + 1)); \

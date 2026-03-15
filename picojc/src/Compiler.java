@@ -87,6 +87,7 @@ class C {
 	static boolean[] mIsCtor= new boolean[MAX_METHODS];
 	static boolean[] mNative     = new boolean[MAX_METHODS];
 	static boolean[] mVarargs    = new boolean[MAX_METHODS];
+	static boolean[] mMainStrArgs = new boolean[MAX_METHODS];
 	static byte[] mFixedArgs = new byte[MAX_METHODS];
 	static int[] mBodyS = new int[MAX_METHODS]; // source pos (must be int: >32KB sources)
 	static int[] mBodyE   = new int[MAX_METHODS]; // source pos (must be int: >32KB sources)
@@ -291,11 +292,12 @@ class C {
 		mClass[mi] = (byte)ci; mName[mi] = (short)nm; mArgC[mi] = (byte)argc;
 		mStatic[mi] = isStat; mIsCtor[mi] = isCtor; mNative[mi] = isNat;
 		mRetT[mi] = (byte)retType; mVtSlot[mi] = (byte)0xFF; mVmid[mi] = (byte)0xFF; mExcC[mi] = 0;
-		mRetNarrow[mi] = (byte)NK_NONE;
-		mRetRefNm[mi] = (short)-1;
-		mVarargs[mi] = false; mFixedArgs[mi] = 0;
-		return mi;
-	}
+			mRetNarrow[mi] = (byte)NK_NONE;
+			mRetRefNm[mi] = (short)-1;
+			mVarargs[mi] = false; mFixedArgs[mi] = 0;
+			mMainStrArgs[mi] = false;
+			return mi;
+		}
 
 	static int initClass(int nm) {
 		chk(cCount, MAX_CLASSES, 253);

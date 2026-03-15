@@ -152,20 +152,21 @@ public class Resolver {
 			}
 		}
 
-		// Find main method
+		// Find main method. Prefer the real String[] form, then fall back to main().
 		C.mainMi = -1;
+		int zeroArgMain = -1;
 		for (int mi = 0; mi < C.mCount; mi++) {
 			if (C.mName[mi] == C.N_MAIN && C.mStatic[mi] && !C.mNative[mi]) {
-				C.mainMi = mi;
-				break;
+				if (C.mMainStrArgs[mi]) {
+					C.mainMi = mi;
+					break;
+				}
+				if (C.mArgC[mi] == 0 && zeroArgMain < 0) zeroArgMain = mi;
 			}
 		}
+		if (C.mainMi < 0) C.mainMi = zeroArgMain;
 		if (C.mainMi < 0) {
 			Lexer.error(200); // No main method found
-		}
-		// picoJVM calls main without pushing arguments, so arg_count must be 0
-		if (C.mainMi >= 0) {
-			C.mArgC[C.mainMi] = 0;
 		}
 	}
 

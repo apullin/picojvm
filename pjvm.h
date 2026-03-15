@@ -82,6 +82,8 @@ typedef struct {
     uint16_t heap_ptr;
     uint16_t sp_max, lt_max;
     uint8_t  fdepth_max;
+    const char **prog_argv;
+    uint8_t prog_argc;
 #ifdef PJVM_PAGED
     PJVMPager *pager;  /* NULL = non-paged */
 #endif

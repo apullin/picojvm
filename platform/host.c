@@ -284,19 +284,27 @@ static void load_pjvm(const char *path) {
 int main(int argc, char **argv) {
     PJVMCtx ctx = {0};
     const char *save_spec = NULL;
+    int prog_argi = argc;
 
     if (argc < 2) {
-        fprintf(stderr, "Usage: picojvm <program.pjvm> [--preload ADDR:FILE] [--save-raw ADDR:FILE]\n");
+        fprintf(stderr, "Usage: picojvm <program.pjvm> [vm options] [-- program args]\n");
         return 1;
     }
 
-    /* Pre-parse --preload and --save-raw before loading .pjvm */
     for (int i = 2; i < argc; i++) {
-        if (strcmp(argv[i], "--preload") == 0 && i + 1 < argc) {
+        if (strcmp(argv[i], "--") == 0) {
+            prog_argi = i + 1;
+            break;
+        }
+    }
+
+    /* Pre-parse --preload and --save-raw before loading .pjvm */
+    for (int i = 2; i < prog_argi; i++) {
+        if (strcmp(argv[i], "--preload") == 0 && i + 1 < prog_argi) {
             preload_raw(argv[++i]);
         } else if (strncmp(argv[i], "--preload=", 10) == 0) {
             preload_raw(argv[i] + 10);
-        } else if (strcmp(argv[i], "--save-raw") == 0 && i + 1 < argc) {
+        } else if (strcmp(argv[i], "--save-raw") == 0 && i + 1 < prog_argi) {
             save_spec = argv[++i];
         } else if (strncmp(argv[i], "--save-raw=", 11) == 0) {
             save_spec = argv[i] + 11;
@@ -312,7 +320,7 @@ int main(int argc, char **argv) {
     }
 
     const char *dump_raw_path = NULL;
-    for (int i = 2; i < argc; i++) {
+    for (int i = 2; i < prog_argi; i++) {
         if (strncmp(argv[i], "--dump-raw=", 11) == 0)
             dump_raw_path = argv[i] + 11;
     }
@@ -330,7 +338,7 @@ int main(int argc, char **argv) {
     uint16_t page_size = 1024;
     uint8_t  n_pages = 4;
 
-    for (int i = 2; i < argc; i++) {
+    for (int i = 2; i < prog_argi; i++) {
         if (strncmp(argv[i], "--page-size=", 12) == 0)
             page_size = (uint16_t)atoi(argv[i] + 12);
         else if (strncmp(argv[i], "--pages=", 8) == 0)
@@ -366,7 +374,7 @@ int main(int argc, char **argv) {
     }
 
     /* Apply explicit CLI pin overrides (pin chunks) */
-    for (int i = 2; i < argc; i++) {
+    for (int i = 2; i < prog_argi; i++) {
         if (strncmp(argv[i], "--pin=", 6) == 0) {
             const char *s = argv[i] + 6;
             while (*s) {
@@ -385,6 +393,8 @@ int main(int argc, char **argv) {
 #endif
 
     ctx.heap_ptr = HEAP_BASE;
+    ctx.prog_argc = (uint8_t)(argc - prog_argi);
+    ctx.prog_argv = (const char **)(argv + prog_argi);
     pjvm_run(&ctx);
     fflush(stdout);
 

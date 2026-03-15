@@ -265,6 +265,30 @@ NI static void pjvm_push32(int32_t v) {
     spush((uint16_t)v, (uint16_t)((uint32_t)v >> 16));
 }
 
+static uint16_t pjvm_make_string(PJVMCtx *j, const uint8_t *buf, uint16_t len) {
+    uint16_t a = heap_alloc(j, (uint16_t)(4 + len));
+    w16(a, len);
+    w16((uint16_t)(a + 2), 0);
+    for (uint16_t i = 0; i < len; i++) w8((uint16_t)(a + 4 + i), buf[i]);
+    return a;
+}
+
+static uint16_t pjvm_make_main_args(PJVMCtx *j) {
+    uint16_t argc = j->prog_argc;
+    uint16_t a = heap_alloc(j, (uint16_t)(4 + argc * 4));
+    w16(a, argc);
+    w16((uint16_t)(a + 2), 0);
+    for (uint16_t i = 0; i < argc; i++) {
+        const char *arg = j->prog_argv ? j->prog_argv[i] : 0;
+        uint16_t len = 0;
+        if (arg != 0) while (arg[len] != 0) len++;
+        uint16_t sref = pjvm_make_string(j, (const uint8_t *)arg, len);
+        w16((uint16_t)(a + 4 + i * 4), sref);
+        w16((uint16_t)(a + 4 + i * 4 + 2), 0);
+    }
+    return a;
+}
+
 /* --- .pjvm loader ----------------------------------------------------- */
 void pjvm_parse(uint8_t *data) {
     uint8_t version = data[1];  /* 0x4A = v1, 0x4B = v2, 0x4C = v3 */
@@ -704,7 +728,11 @@ void pjvm_run(PJVMCtx *j) {
     j->lt = m_ml[main_mi]; j->pc = m_co[main_mi];
     j->fdepth = 0; j->sp = 0;
     if (j->lt > j->lt_max) j->lt_max = j->lt;
-    if (m_ac[main_mi] > 0) { j->loc_lo[0] = 0; j->loc_hi[0] = 0; }
+    if (m_ac[main_mi] > 0) {
+        uint16_t args_ref = pjvm_make_main_args(j);
+        j->loc_lo[0] = args_ref;
+        j->loc_hi[0] = 0;
+    }
     pjvm_exec();
 }
 

@@ -136,6 +136,7 @@ public class Catalog {
 	static int sigArgc;
 	static boolean sigVarargs;
 	static int sigFixedArgs;
+	static boolean sigOneStringArray;
 
 	static int primArrKind(int typeTok) {
 		if (typeTok == Tk.BYTE || typeTok == Tk.BOOLEAN) return 4;
@@ -344,6 +345,7 @@ public class Catalog {
 
 		scanParamShape(isStat);
 		C.mArgC[mi] = (byte)sigArgc;
+		if (!isCtor && isStat && nm == C.N_MAIN) C.mMainStrArgs[mi] = sigOneStringArray;
 		if (sigVarargs) {
 			C.mVarargs[mi] = true;
 			C.mFixedArgs[mi] = (byte)sigFixedArgs;
@@ -375,18 +377,27 @@ public class Catalog {
 		sigArgc = isStat ? 0 : 1;
 		sigVarargs = false;
 		sigFixedArgs = 0;
+		sigOneStringArray = false;
+		int userArgc = 0;
+		boolean firstIsStringArray = false;
 		while (Tk.type != Tk.RPAREN && Tk.type != Tk.EOF) {
 			skipTy();
+			boolean isStringArray = Catalog.tyBase == 2 && Catalog.tyRefNm == C.N_STRING &&
+									Catalog.tyDims == 1;
 			if (Tk.type == Tk.ELLIPSIS) {
 				sigVarargs = true;
 				sigFixedArgs = sigArgc - (isStat ? 0 : 1);
+				isStringArray = false;
 				Lexer.nextToken();
 			}
 			Lexer.nextToken();
+			if (userArgc == 0) firstIsStringArray = isStringArray;
+			userArgc++;
 			sigArgc++;
 			if (Tk.type == Tk.COMMA) Lexer.nextToken();
 		}
 		Lexer.expect(Tk.RPAREN);
+		sigOneStringArray = !sigVarargs && userArgc == 1 && firstIsStringArray;
 		if (sigVarargs) {
 			sigArgc = sigArgc - 1 + C.MAX_VA_SLOTS + 1;
 		}

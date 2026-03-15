@@ -93,6 +93,28 @@ public class Expr {
 		return Resolver.fInstField(ci, fieldNm);
 	}
 
+	// Lvalue sites reuse the same descriptor shape across locals, statics, and fields.
+	static void setLValue(int kind, int index, int type, int narrowKind, int arrKind, int refNm, boolean returnsValue) {
+		lvK = kind;
+		lvI = index;
+		lvT = type;
+		lvN = narrowKind;
+		lvArr = arrKind;
+		lvRefNm = refNm;
+		lvRV = returnsValue;
+	}
+
+	static int storedType(int type, int arrKind, int refNm, int narrowKind) {
+		return fRetType(arrKind != 0 ? arrKind : type, arrKind != 0 ? -1 : refNm, narrowKind);
+	}
+
+	static int emitConstField(int fi) {
+		E.eIC(C.fConstVal[fi]);
+		E.push();
+		setConstInt(C.fConstVal[fi], C.fNarrow[fi]);
+		return 1;
+	}
+
 	static int fRetType(int t, int refNm, int narrowKind) {
 		if (t == 2) {
 			setObjArrayRef(refNm);
@@ -122,6 +144,21 @@ public class Expr {
 		if (arrType == 5) return C.NK_CHAR;
 		if (arrType == 8) return C.NK_SHORT;
 		return C.NK_NONE;
+	}
+
+	static int primArrKind(int elemTok) {
+		if (elemTok == Tk.BYTE || elemTok == Tk.BOOLEAN) return 4;
+		if (elemTok == Tk.CHAR) return 5;
+		if (elemTok == Tk.SHORT) return 8;
+		return 3;
+	}
+
+	static int newArrayTypeCode(int elemTok) {
+		if (elemTok == Tk.BYTE) return 8;
+		if (elemTok == Tk.CHAR) return 5;
+		if (elemTok == Tk.SHORT) return 9;
+		if (elemTok == Tk.BOOLEAN) return 4;
+		return 10;
 	}
 
 	// Count top-level elements so array creation can emit its size before the stores.
@@ -575,8 +612,7 @@ public class Expr {
 			int fi = fInstFieldTarget(parentNm, memberNm);
 			if (fi < 0) { Lexer.error(206); return 0; }
 			E.ethis();
-			lvK = 3; lvI = E.aCP(C.fSlot[fi]); lvT = C.fType[fi];
-			lvN = C.fNarrow[fi]; lvArr = C.fArrKind[fi]; lvRefNm = C.fRefNm[fi]; lvRV = false;
+			setLValue(3, E.aCP(C.fSlot[fi]), C.fType[fi], C.fNarrow[fi], C.fArrKind[fi], C.fRefNm[fi], false);
 			return lvOps();
 		}
 		if (Tk.type == Tk.NEW) {
@@ -601,12 +637,9 @@ public class Expr {
 							// Static field access
 							int fi = Resolver.fStatField(ci, memberNm);
 							if (fi < 0) { Lexer.error(207); return 0; }
-							if (C.fFinal[fi] && C.fHasConst[fi]) {
-								E.eIC(C.fConstVal[fi]); E.push(); setConstInt(C.fConstVal[fi], C.fNarrow[fi]); return 1;
-							}
+							if (C.fFinal[fi] && C.fHasConst[fi]) return emitConstField(fi);
 							// ClassName.field — no return value on assign
-							lvK = 2; lvI = E.aCP(C.fSlot[fi]); lvT = C.fType[fi];
-							lvN = C.fNarrow[fi]; lvArr = C.fArrKind[fi]; lvRefNm = C.fRefNm[fi]; lvRV = false;
+							setLValue(2, E.aCP(C.fSlot[fi]), C.fType[fi], C.fNarrow[fi], C.fArrKind[fi], C.fRefNm[fi], false);
 							return lvOps();
 						}
 					}
@@ -616,8 +649,7 @@ public class Expr {
 				int li = E.fLoc(nm);
 				if (li >= 0) {
 					// Local var lvalue
-					lvK = 0; lvI = C.locSlot[li]; lvT = C.locType[li];
-					lvN = C.locNarrow[li]; lvArr = 0; lvRefNm = C.locRefNm[li]; lvRV = true;
+					setLValue(0, C.locSlot[li], C.locType[li], C.locNarrow[li], 0, C.locRefNm[li], true);
 					return lvOps();
 				}
 
@@ -626,8 +658,7 @@ public class Expr {
 					int fi = Resolver.fField(C.curCi, nm);
 					if (fi >= 0 && !C.fStatic[fi]) {
 						// Implicit this.field lvalue
-						lvK = 1; lvI = E.aCP(C.fSlot[fi]); lvT = C.fType[fi];
-						lvN = C.fNarrow[fi]; lvArr = C.fArrKind[fi]; lvRefNm = C.fRefNm[fi]; lvRV = false;
+						setLValue(1, E.aCP(C.fSlot[fi]), C.fType[fi], C.fNarrow[fi], C.fArrKind[fi], C.fRefNm[fi], false);
 						return lvOps();
 					}
 				}
@@ -636,12 +667,9 @@ public class Expr {
 				{
 					int fi = Resolver.fStatField(C.curCi, nm);
 						if (fi >= 0) {
-							if (C.fFinal[fi] && C.fHasConst[fi]) {
-								E.eIC(C.fConstVal[fi]); E.push(); setConstInt(C.fConstVal[fi], C.fNarrow[fi]); return 1;
-							}
+							if (C.fFinal[fi] && C.fHasConst[fi]) return emitConstField(fi);
 						// Static field lvalue (in-class, returns value on assign)
-						lvK = 2; lvI = E.aCP(C.fSlot[fi]); lvT = C.fType[fi];
-						lvN = C.fNarrow[fi]; lvArr = C.fArrKind[fi]; lvRefNm = C.fRefNm[fi]; lvRV = true;
+						setLValue(2, E.aCP(C.fSlot[fi]), C.fType[fi], C.fNarrow[fi], C.fArrKind[fi], C.fRefNm[fi], true);
 						return lvOps();
 					}
 				}
@@ -675,11 +703,7 @@ public class Expr {
 			if (Tk.type == Tk.RBRACKET) {
 				Lexer.nextToken();
 				if (Tk.type == Tk.LBRACE) {
-					int arrType = 3;
-					if (elemType == Tk.BYTE || elemType == Tk.BOOLEAN) arrType = 4;
-					else if (elemType == Tk.CHAR) arrType = 5;
-					else if (elemType == Tk.SHORT) arrType = 8;
-					return pArrayInit(arrType, -1);
+					return pArrayInit(primArrKind(elemType), -1);
 				}
 				Lexer.error(203);
 				clearRefInfo();
@@ -688,11 +712,8 @@ public class Expr {
 			pExpr();
 			Lexer.expect(Tk.RBRACKET);
 
-			int typeCode = 10; // int
-			if (elemType == Tk.BYTE) typeCode = 8;
-			else if (elemType == Tk.CHAR) typeCode = 5;
-			else if (elemType == Tk.SHORT) typeCode = 9;
-			else if (elemType == Tk.BOOLEAN) typeCode = 4;
+			int arrType = primArrKind(elemType);
+			int typeCode = newArrayTypeCode(elemType);
 
 			// Check for 2D array: new type[N][M] or new type[N][]
 			if (Tk.type == Tk.LBRACKET) {
@@ -721,10 +742,7 @@ public class Expr {
 			// Stack: count consumed, array ref pushed = net 0
 			// Return specific array type for proper BALOAD/BASTORE emission
 			clearRefInfo();
-			if (typeCode == 8 || typeCode == 4) return 4;  // byte[] or boolean[]
-			if (typeCode == 5) return 5;  // char[]
-			if (typeCode == 9) return 8;  // short[]
-			return 3; // int[]
+			return arrType;
 		}
 
 		// Object or reference array: new ClassName(...), new ClassName[size], new ClassName[]{...}
@@ -862,7 +880,7 @@ public class Expr {
 			if (k == 0) { E.eNarrow(n); E.edup(); E.eSt(i, t); E.pop(); return fRetType(t, refNm, n); }
 			if (k == 2) {
 				E.eNarrow(n);
-				if (rv) { E.edup(); E.eOp(E.PUTSTATIC, i); E.pop(); return fRetType(arr != 0 ? arr : t, arr != 0 ? -1 : refNm, n); }
+				if (rv) { E.edup(); E.eOp(E.PUTSTATIC, i); E.pop(); return storedType(t, arr, refNm, n); }
 				E.eOp(E.PUTSTATIC, i); E.pop(); return 0;
 			}
 			E.eNarrow(n);
@@ -882,7 +900,7 @@ public class Expr {
 			}
 			if (k == 2) {
 				E.eOp(E.GETSTATIC, i); E.push(); pExpr(); E.eCO(op); E.pop();
-				E.eNarrow(n); E.edup(); E.eOp(E.PUTSTATIC, i); E.pop(); return fRetType(arr != 0 ? arr : t, arr != 0 ? -1 : refNm, n);
+				E.eNarrow(n); E.edup(); E.eOp(E.PUTSTATIC, i); E.pop(); return storedType(t, arr, refNm, n);
 			}
 			// k == 3: obj already on stack
 			E.edup(); E.eOp(E.GETFIELD, i); pExpr(); E.eCO(op); E.pop();
@@ -914,7 +932,7 @@ public class Expr {
 			E.eOp(E.GETSTATIC, i); E.push(); E.edup();
 			E.ic1(); E.eb(op == Tk.INC ? E.IADD : E.ISUB); E.pop();
 			E.eNarrow(n);
-			E.eOp(E.PUTSTATIC, i); E.pop(); return fRetType(arr != 0 ? arr : t, arr != 0 ? -1 : refNm, n);
+			E.eOp(E.PUTSTATIC, i); E.pop(); return storedType(t, arr, refNm, n);
 			// k == 3: not supported, falls through to load
 		}
 		// Load
@@ -933,8 +951,7 @@ public class Expr {
 	static int eFldAcc(int recvNm, int fieldNm) {
 		int fi = recvNm >= 0 ? fInstFieldTarget(recvNm, fieldNm) : -1;
 		if (fi < 0) { Lexer.error(206); return 0; }
-		lvK = 3; lvI = E.aCP(C.fSlot[fi]); lvT = C.fType[fi];
-		lvN = C.fNarrow[fi]; lvArr = C.fArrKind[fi]; lvRefNm = C.fRefNm[fi]; lvRV = false;
+		setLValue(3, E.aCP(C.fSlot[fi]), C.fType[fi], C.fNarrow[fi], C.fArrKind[fi], C.fRefNm[fi], false);
 		return lvOps();
 	}
 

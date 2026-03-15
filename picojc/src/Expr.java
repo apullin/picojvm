@@ -411,6 +411,31 @@ public class Expr {
 			setObjRef(C.cName[C.curCi]);
 			return 2;
 		}
+		if (Tk.type == Tk.SUPER) {
+			if (C.curMStatic) { Lexer.error(205); return 0; }
+			int parentCi = C.cParent[C.curCi];
+			if (parentCi < 0) { Lexer.error(205); return 0; }
+			int parentNm = C.cName[parentCi];
+			Lexer.nextToken();
+			Lexer.expect(Tk.DOT);
+			int memberNm = C.iN();
+			if (Tk.type == Tk.LPAREN) {
+				E.ethis();
+				Lexer.expect(Tk.LPAREN);
+				int argc = pArgs(1);
+				int mi = fVirtCallTarget(parentNm, memberNm, argc);
+				argc = mi >= 0 ? packVarargs(mi, argc) : -1;
+				if (mi < 0 || argc < 0) { Lexer.error(205); return 0; }
+				E.eOp(E.INVOKESPECIAL, E.aCP(mi));
+				return eCallRet(mi, argc);
+			}
+			int fi = fInstFieldTarget(parentNm, memberNm);
+			if (fi < 0) { Lexer.error(206); return 0; }
+			E.ethis();
+			lvK = 3; lvI = E.aCP(C.fSlot[fi]); lvT = C.fType[fi];
+			lvArr = C.fArrKind[fi]; lvRefNm = C.fRefNm[fi]; lvRV = false;
+			return lvOps();
+		}
 		if (Tk.type == Tk.NEW) {
 			return pNew();
 		}
@@ -722,7 +747,6 @@ public class Expr {
 		lvArr = C.fArrKind[fi]; lvRefNm = C.fRefNm[fi]; lvRV = false;
 		return lvOps();
 	}
-
 
 	static int pArgs(int start) {
 		int argc = start;

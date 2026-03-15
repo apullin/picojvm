@@ -338,7 +338,6 @@ class E {
 		return -1;
 	}
 
-
 	// Shared method context init
 	static void initMC(int mi) {
 		C.curMi = mi; C.mcLen = 0; C.patC = 0; C.lblCount = 0;
@@ -361,15 +360,29 @@ class E {
 			// Parse constructor parameters
 			pParams();
 
-			// Emit super() call
-			ethis();
-			int objInitMi = C.ensNat(C.N_OBJECT, C.N_INIT);
-			int cpIdx = aCP(objInitMi);
-			eOp(INVOKESPECIAL, cpIdx);
-			pop(); // 'this' consumed
-
 			// Parse body
 			Lexer.expect(Tk.LBRACE);
+			if (Tk.type == Tk.SUPER) {
+				ethis();
+				Lexer.expect(Tk.SUPER);
+				Lexer.expect(Tk.LPAREN);
+				int argc = Expr.pArgs(1);
+				int parentCi = C.cParent[C.curCi];
+				int targetMi = parentCi >= 0 ? fCtor(parentCi, argc) : (argc == 1 ? C.ensNat(C.N_OBJECT, C.N_INIT) : -1);
+				argc = targetMi >= 0 ? Expr.packVarargs(targetMi, argc) : -1;
+				if (targetMi < 0 || argc < 0) { Lexer.error(205); return; }
+				eOp(INVOKESPECIAL, aCP(targetMi));
+				for (int i = 0; i < argc; i++) pop();
+				Lexer.expect(Tk.SEMI);
+			} else {
+				ethis();
+				int targetMi = -1;
+				if (C.cParent[C.curCi] >= 0) targetMi = fCtor(C.cParent[C.curCi], 1);
+				if (targetMi < 0) targetMi = C.ensNat(C.N_OBJECT, C.N_INIT);
+				if (targetMi < 0) { Lexer.error(205); return; }
+				eOp(INVOKESPECIAL, aCP(targetMi));
+				pop();
+			}
 			Stmt.pBlock();
 			Lexer.expect(Tk.RBRACE);
 

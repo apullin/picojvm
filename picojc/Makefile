@@ -23,13 +23,12 @@ TESTS = T01_Empty T02_Literal T03_Arithmetic T04_IfElse T05_WhileLoop \
         T06_ForLoop T07_MethodCall T08_IntArray T09_Bitwise T10_StringLiteral \
         T11_SimpleClass T12_DoWhile T13_BreakContinue T14_Ternary \
         T15_ObjectCreate T16_Constructor T17_Inheritance T18_StaticInit T19_InstanceOf \
-        T20_NullRef T21_ObjectArray T22_Switch \
-        T24_Exception T25_TypeConversion \
+        T20_NullRef T21_ObjectArray T22_Switch T23_StringSwitch \
+        T24_Exception T25_TypeConversion T26_Interface \
         T27_Fib T28_BubbleSort T29_StringTest T30_MultiClass \
         T31_Shapes T32_ExceptionTest T33_Counter T34_StaticInit T35_ByteArray \
         T36_CharArray T37_Recursion T38_LinkedList T39_NativeOps T41_FileIO \
         T42_ShortArray T43_FinalInline T44_Enum T45_ForEach T46_Varargs
-# TODO: T23_StringSwitch (needs hashCode/equals pattern), T26_Interface (vmid dispatch)
 
 # Tests requiring lib/ (platform package)
 LIB_SRCS = ../lib/Console.java ../lib/Arrays.java ../lib/IO.java

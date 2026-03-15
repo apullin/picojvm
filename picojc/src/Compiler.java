@@ -146,7 +146,7 @@ class C {
 	static int lpDepth;
 
 	// --- Switch case arrays (reused, not nested) ---
-	static short[] caseVals   = new short[64];
+	static int[] caseVals     = new int[64];
 	static short[] caseLbls = new short[64];
 
 	// --- Current context ---

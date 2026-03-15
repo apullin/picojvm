@@ -3,11 +3,8 @@ public class Linker {
 		C.outLen = 0;
 		int userClassCount = C.cCount - C.uClsStart;
 
-		// Count non-interface user classes
-		int pjvmClassCount = 0;
-		for (int ci = C.uClsStart; ci < C.cCount; ci++) {
-			if (!C.cIsIface[ci]) pjvmClassCount++;
-		}
+		// All user classes (including interfaces as stubs for class ID consistency)
+		int pjvmClassCount = C.cCount - C.uClsStart;
 
 		// v3 Header (16 bytes)
 		wB(0x85); // magic
@@ -22,9 +19,8 @@ public class Linker {
 		wILE(C.cdLen); // bytecodes_size (32-bit LE)
 		wSLE(0); // reserved
 
-		// Class table
+		// Class table (interfaces included as stubs for class ID mapping)
 		for (int ci = C.uClsStart; ci < C.cCount; ci++) {
-			if (C.cIsIface[ci]) continue;
 			int parentId = 0xFF;
 			if (C.cParent[ci] >= 0) {
 				parentId = C.cParent[ci] - C.uClsStart;

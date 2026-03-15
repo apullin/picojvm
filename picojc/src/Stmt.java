@@ -374,8 +374,15 @@ public class Stmt {
 	static void pSwitch() {
 		Lexer.nextToken(); // skip 'switch'
 		Lexer.expect(Tk.LPAREN);
-		Expr.pExpr();
+		int switchType = Expr.pExpr();
 		Lexer.expect(Tk.RPAREN);
+
+		if (switchType == 2) {
+			// String switch — value still on stack
+			pStringSwitch();
+			return;
+		}
+
 		E.pop();
 
 		int lblEnd = E.label();
@@ -420,7 +427,7 @@ public class Stmt {
 
 				C.caseLbls[caseCount] = (short)E.label();
 				E.mark(C.caseLbls[caseCount]);
-				C.caseVals[caseCount] = (short)val;
+				C.caseVals[caseCount] = val;
 				caseCount++;
 			} else if (Tk.type == Tk.DEFAULT) {
 				Lexer.nextToken();
@@ -440,11 +447,11 @@ public class Stmt {
 			int kl = C.caseLbls[i];
 			int j = i - 1;
 			while (j >= 0 && C.caseVals[j] > kv) {
-				C.caseVals[j + 1] = (short)C.caseVals[j];
-				C.caseLbls[j + 1] = (short)C.caseLbls[j];
+				C.caseVals[j + 1] = C.caseVals[j];
+				C.caseLbls[j + 1] = C.caseLbls[j];
 				j--;
 			}
-			C.caseVals[j + 1] = (short)kv;
+			C.caseVals[j + 1] = kv;
 			C.caseLbls[j + 1] = (short)kl;
 		}
 
@@ -490,6 +497,115 @@ public class Stmt {
 		} else {
 			E.pBE(defaultLoc, C.lblAddr[lblEnd] - switchPC);
 		}
+
+		Lexer.expect(Tk.RBRACE);
+	}
+
+	static void pStringSwitch() {
+		// String value on JVM stack — store in hidden local
+		int swSlot = C.locCount;
+		byte[] sb = Tk.strBuf;
+		sb[0] = (byte)'$'; sb[1] = (byte)'s'; sb[2] = (byte)'w';
+		E.aLoc(C.intern(sb, 3), 1);
+		E.eSt(swSlot, 1); E.pop();
+
+		int lblEnd = E.label();
+		int eqMi = C.ensNat(C.N_STRING, C.N_EQUALS);
+		int switchInsert = C.mcLen;
+
+		int caseCount = 0;
+		int defaultLabel = -1;
+
+		Lexer.expect(Tk.LBRACE);
+		E.pushLp(lblEnd, lblEnd);
+
+		while (Tk.type != Tk.RBRACE && Tk.type != Tk.EOF) {
+			if (Tk.type == Tk.CASE) {
+				Lexer.nextToken();
+				// Parse string literal — register in CP
+				byte[] buf = new byte[Tk.strLen];
+				Native.arraycopy(Tk.strBuf, 0, buf, 0, Tk.strLen);
+				C.caseVals[caseCount] = E.aSCP(buf, Tk.strLen);
+				Lexer.nextToken(); // skip string
+				Lexer.expect(Tk.COLON);
+
+				C.caseLbls[caseCount] = (short)E.label();
+				E.mark(C.caseLbls[caseCount]);
+				caseCount++;
+			} else if (Tk.type == Tk.DEFAULT) {
+				Lexer.nextToken();
+				Lexer.expect(Tk.COLON);
+				defaultLabel = E.label();
+				E.mark(defaultLabel);
+			} else {
+				pStmt();
+			}
+		}
+
+		E.popLp();
+
+		// Build dispatch chain: for each case, ALOAD $sw + LDC str + INVOKEVIRTUAL equals + IFNE
+		int eqCpIdx = E.aCP(eqMi);
+		int aloadSz = swSlot <= 3 ? 1 : 2;
+		int perCase = aloadSz + 2 + 3 + 3; // ALOAD + LDC(2) + INVOKEVIRTUAL(3) + IFNE(3)
+		int dispatchSz = caseCount * perCase + 3; // + GOTO default/end
+
+		// Shift body bytecodes right
+		int bodyLen = C.mcLen - switchInsert;
+		for (int i = bodyLen - 1; i >= 0; i--) {
+			C.mcode[switchInsert + dispatchSz + i] = C.mcode[switchInsert + i];
+		}
+		C.mcLen += dispatchSz;
+
+		// Adjust labels and backpatches in shifted region
+		for (int lbl = 0; lbl < C.lblCount; lbl++) {
+			if (C.lblAddr[lbl] >= switchInsert) {
+				C.lblAddr[lbl] = (short)(C.lblAddr[lbl] + dispatchSz);
+			}
+		}
+		for (int bp = 0; bp < C.patC; bp++) {
+			if (C.patLoc[bp] >= switchInsert) {
+				C.patLoc[bp] = (short)(C.patLoc[bp] + dispatchSz);
+			}
+		}
+
+		E.mark(lblEnd);
+
+		// Write dispatch chain at switchInsert
+		int pos = switchInsert;
+		for (int i = 0; i < caseCount; i++) {
+			// ALOAD $sw
+			if (swSlot <= 3) {
+				C.mcode[pos++] = (byte)(0x2A + swSlot);
+			} else {
+				C.mcode[pos++] = (byte)0x19;
+				C.mcode[pos++] = (byte)swSlot;
+			}
+			// LDC string CP index
+			C.mcode[pos++] = (byte)0x12;
+			C.mcode[pos++] = (byte)C.caseVals[i];
+			// INVOKEVIRTUAL String.equals
+			C.mcode[pos++] = (byte)0xB6;
+			C.mcode[pos++] = (byte)((eqCpIdx >> 8) & 0xFF);
+			C.mcode[pos++] = (byte)(eqCpIdx & 0xFF);
+			// IFNE → case body
+			int target = C.lblAddr[C.caseLbls[i]];
+			int ifnePC = pos;
+			C.mcode[pos++] = (byte)0x9A; // IFNE
+			int offset = target - ifnePC;
+			C.mcode[pos++] = (byte)((offset >> 8) & 0xFF);
+			C.mcode[pos++] = (byte)(offset & 0xFF);
+		}
+		// GOTO default/end
+		int defTarget = defaultLabel >= 0 ? C.lblAddr[defaultLabel] : C.lblAddr[lblEnd];
+		int gotoPC = pos;
+		C.mcode[pos++] = (byte)0xA7; // GOTO
+		int gotoOff = defTarget - gotoPC;
+		C.mcode[pos++] = (byte)((gotoOff >> 8) & 0xFF);
+		C.mcode[pos++] = (byte)(gotoOff & 0xFF);
+
+		// Dispatch chain uses 2 stack slots (ALOAD + LDC before INVOKEVIRTUAL)
+		if (C.maxStk < 2) C.maxStk = 2;
 
 		Lexer.expect(Tk.RBRACE);
 	}

@@ -5,6 +5,7 @@ public class Expr {
 	static int lvK;      // 0=local, 1=this_field, 2=static, 3=obj_field
 	static int lvI;      // slot (local) or cpIdx (field)
 	static int lvT;      // local type (0=int, 1=ref, 3+=array)
+	static int lvN;      // scalar narrow kind (0=none/int/bool, 1=byte, 2=char, 3=short)
 	static int lvArr;    // field array kind
 	static int lvRefNm;  // declared ref type name, -1 if unknown/non-ref
 	static boolean lvRV; // assign DUPs and returns value
@@ -26,13 +27,6 @@ public class Expr {
 		exprArrRefNm = refNm;
 	}
 
-	static boolean callMatches(int mi, int argc, boolean isStatic) {
-		if (mi < 0 || C.mStatic[mi] != isStatic || C.mIsCtor[mi]) return false;
-		if (!C.mVarargs[mi]) return C.mArgC[mi] == argc;
-		int minArgc = (isStatic ? 0 : 1) + C.mFixedArgs[mi];
-		return argc >= minArgc && argc <= minArgc + C.MAX_VA_SLOTS;
-	}
-
 	static int packVarargs(int mi, int argc) {
 		if (!C.mVarargs[mi]) return argc == C.mArgC[mi] ? argc : -1;
 		int minArgc = (C.mStatic[mi] ? 0 : 1) + C.mFixedArgs[mi];
@@ -46,24 +40,6 @@ public class Expr {
 		E.eIC(vaCount);
 		E.push();
 		return argc + 1;
-	}
-
-	static int fStaticCallTarget(int classNm, int methodNm, int argc) {
-		int mi = C.ensNat(classNm, methodNm);
-		if (callMatches(mi, argc, true)) return mi;
-		int ci = Resolver.fClsByNm(classNm);
-		if (ci < 0) return -1;
-		return Resolver.fMethodExact(ci, methodNm, true, argc);
-	}
-
-	static int fVirtCallTarget(int recvNm, int methodNm, int argc) {
-		if (recvNm == C.N_STRING) {
-			int mi = C.ensNat(C.N_STRING, methodNm);
-			if (callMatches(mi, argc, false)) return mi;
-		}
-		int ci = Resolver.fClsByNm(recvNm);
-		if (ci < 0) return -1;
-		return Resolver.fMethodExact(ci, methodNm, false, argc);
 	}
 
 	static int fInstFieldTarget(int recvNm, int fieldNm) {
@@ -239,18 +215,20 @@ public class Expr {
 			int li = E.fLoc(nm);
 			if (li >= 0) {
 				int slot = C.locSlot[li];
+				int narrowKind = C.locNarrow[li];
 				// Pre-increment: load, add/sub 1, dup, store
 				E.eLd(slot, 0);
 				E.push();
 				E.ic1();
 				E.eb(op == Tk.INC ? E.IADD : E.ISUB);
 				E.pop();
-					E.edup();
-					E.eSt(slot, 0);
-					E.pop();
-					clearRefInfo();
-					return 1;
-				}
+				E.eNarrow(narrowKind);
+				E.edup();
+				E.eSt(slot, 0);
+				E.pop();
+				clearRefInfo();
+				return 1;
+			}
 			Lexer.error(201);
 			return 1;
 		}
@@ -306,7 +284,8 @@ public class Expr {
 					clearRefInfo();
 				} else if (Tk.type == Tk.LPAREN) {
 					// Method call on object
-					type = eMethCall(recvRefNm, memberNm);
+					if (recvRefNm < 0) { Lexer.error(205); return 0; }
+					type = eCall(recvRefNm, memberNm, E.INVOKEVIRTUAL, 205);
 				} else {
 					// Field access
 					type = eFldAcc(recvRefNm, memberNm);
@@ -421,19 +400,13 @@ public class Expr {
 			int memberNm = C.iN();
 			if (Tk.type == Tk.LPAREN) {
 				E.ethis();
-				Lexer.expect(Tk.LPAREN);
-				int argc = pArgs(1);
-				int mi = fVirtCallTarget(parentNm, memberNm, argc);
-				argc = mi >= 0 ? packVarargs(mi, argc) : -1;
-				if (mi < 0 || argc < 0) { Lexer.error(205); return 0; }
-				E.eOp(E.INVOKESPECIAL, E.aCP(mi));
-				return eCallRet(mi, argc);
+				return eCall(parentNm, memberNm, E.INVOKESPECIAL, 205);
 			}
 			int fi = fInstFieldTarget(parentNm, memberNm);
 			if (fi < 0) { Lexer.error(206); return 0; }
 			E.ethis();
 			lvK = 3; lvI = E.aCP(C.fSlot[fi]); lvT = C.fType[fi];
-			lvArr = C.fArrKind[fi]; lvRefNm = C.fRefNm[fi]; lvRV = false;
+			lvN = C.fNarrow[fi]; lvArr = C.fArrKind[fi]; lvRefNm = C.fRefNm[fi]; lvRV = false;
 			return lvOps();
 		}
 		if (Tk.type == Tk.NEW) {
@@ -452,7 +425,7 @@ public class Expr {
 
 						if (Tk.type == Tk.LPAREN) {
 							// Static method call
-							return eStatCall(nm, memberNm);
+							return eCall(nm, memberNm, E.INVOKESTATIC, 204);
 						} else {
 							// Static field access
 							int fi = Resolver.fStatField(ci, memberNm);
@@ -462,7 +435,7 @@ public class Expr {
 							}
 							// ClassName.field — no return value on assign
 							lvK = 2; lvI = E.aCP(C.fSlot[fi]); lvT = C.fType[fi];
-							lvArr = C.fArrKind[fi]; lvRefNm = C.fRefNm[fi]; lvRV = false;
+							lvN = C.fNarrow[fi]; lvArr = C.fArrKind[fi]; lvRefNm = C.fRefNm[fi]; lvRV = false;
 							return lvOps();
 						}
 					}
@@ -473,7 +446,7 @@ public class Expr {
 				if (li >= 0) {
 					// Local var lvalue
 					lvK = 0; lvI = C.locSlot[li]; lvT = C.locType[li];
-					lvArr = 0; lvRefNm = C.locRefNm[li]; lvRV = true;
+					lvN = C.locNarrow[li]; lvArr = 0; lvRefNm = C.locRefNm[li]; lvRV = true;
 					return lvOps();
 				}
 
@@ -483,7 +456,7 @@ public class Expr {
 					if (fi >= 0 && !C.fStatic[fi]) {
 						// Implicit this.field lvalue
 						lvK = 1; lvI = E.aCP(C.fSlot[fi]); lvT = C.fType[fi];
-						lvArr = C.fArrKind[fi]; lvRefNm = C.fRefNm[fi]; lvRV = false;
+						lvN = C.fNarrow[fi]; lvArr = C.fArrKind[fi]; lvRefNm = C.fRefNm[fi]; lvRV = false;
 						return lvOps();
 					}
 				}
@@ -497,7 +470,7 @@ public class Expr {
 							}
 						// Static field lvalue (in-class, returns value on assign)
 						lvK = 2; lvI = E.aCP(C.fSlot[fi]); lvT = C.fType[fi];
-						lvArr = C.fArrKind[fi]; lvRefNm = C.fRefNm[fi]; lvRV = true;
+						lvN = C.fNarrow[fi]; lvArr = C.fArrKind[fi]; lvRefNm = C.fRefNm[fi]; lvRV = true;
 						return lvOps();
 					}
 				}
@@ -508,9 +481,9 @@ public class Expr {
 					if (!C.curMStatic && Resolver.fMethod(C.curCi, nm, false) >= 0) {
 						E.ethis();
 						setObjRef(C.cName[C.curCi]);
-						return eMethCall(C.cName[C.curCi], nm);
+						return eCall(C.cName[C.curCi], nm, E.INVOKEVIRTUAL, 205);
 					}
-					return eStatCall(C.cName[C.curCi], nm);
+					return eCall(C.cName[C.curCi], nm, E.INVOKESTATIC, 204);
 				}
 
 				Lexer.error(202); // Undefined identifier
@@ -647,29 +620,23 @@ public class Expr {
 		return rt;
 	}
 
-	static int eStatCall(int classNm, int methodNm) {
+	static int eCall(int ownerNm, int methodNm, int invokeKind, int errCode) {
 		Lexer.expect(Tk.LPAREN);
-		int argc = pArgs(0);
-		int mi = fStaticCallTarget(classNm, methodNm, argc);
+		boolean isStatic = invokeKind == E.INVOKESTATIC;
+		int argc = pArgs(isStatic ? 0 : 1);
+		int mi = ownerNm >= 0 ? Resolver.fCallTarget(ownerNm, methodNm, isStatic, argc) : -1;
 		argc = mi >= 0 ? packVarargs(mi, argc) : -1;
-		if (mi < 0 || argc < 0) { Lexer.error(204); return 0; }
-		E.eOp(E.INVOKESTATIC, E.aCP(mi));
-		return eCallRet(mi, argc);
-	}
-
-	static int eMethCall(int recvNm, int methodNm) {
-		Lexer.expect(Tk.LPAREN);
-		int argc = pArgs(1);
-		int mi = recvNm >= 0 ? fVirtCallTarget(recvNm, methodNm, argc) : -1;
-		argc = mi >= 0 ? packVarargs(mi, argc) : -1;
-		if (mi < 0 || argc < 0) { Lexer.error(205); return 0; }
+		if (mi < 0 || argc < 0) { Lexer.error(errCode); return 0; }
 		int cpIdx = E.aCP(mi);
-		int mci = C.mClass[mi];
-		// Interface dispatch only for non-native user methods
-		if (!C.mNative[mi] && mci < C.cCount && C.cIsIface[mci]) {
-			E.eOp(E.INVOKEINTERFACE, cpIdx); E.eb(argc); E.eb(0);
+		if (invokeKind == E.INVOKESTATIC || invokeKind == E.INVOKESPECIAL) {
+			E.eOp(invokeKind, cpIdx);
 		} else {
-			E.eOp(E.INVOKEVIRTUAL, cpIdx);
+			int mci = C.mClass[mi];
+			if (!C.mNative[mi] && mci < C.cCount && C.cIsIface[mci]) {
+				E.eOp(E.INVOKEINTERFACE, cpIdx); E.eb(argc); E.eb(0);
+			} else {
+				E.eOp(E.INVOKEVIRTUAL, cpIdx);
+			}
 		}
 		return eCallRet(mi, argc);
 	}
@@ -678,40 +645,52 @@ public class Expr {
 
 	// Snapshot descriptors into locals — pExpr() may recurse into lvOps
 	static int lvOps() {
-		int k = lvK, i = lvI, t = lvT, arr = lvArr, refNm = lvRefNm; boolean rv = lvRV;
+		int k = lvK, i = lvI, t = lvT, n = lvN, arr = lvArr, refNm = lvRefNm; boolean rv = lvRV;
 		if (Tk.type == Tk.ASSIGN) {
 			Lexer.nextToken();
 			if (k == 1) E.ethis();
 			pExpr();
-			if (k == 0) { E.edup(); E.eSt(i, t); E.pop(); return fRetType(t, refNm); }
+			if (k == 0) { E.eNarrow(n); E.edup(); E.eSt(i, t); E.pop(); return fRetType(t, refNm); }
 			if (k == 2) {
+				E.eNarrow(n);
 				if (rv) { E.edup(); E.eOp(E.PUTSTATIC, i); E.pop(); return fRetType(arr != 0 ? arr : t, arr != 0 ? -1 : refNm); }
 				E.eOp(E.PUTSTATIC, i); E.pop(); return 0;
 			}
+			E.eNarrow(n);
 			E.eOp(E.PUTFIELD, i); E.pop(); E.pop(); return 0; // PUTFIELD
 		}
 		if (Tk.type >= Tk.PLUS_EQ && Tk.type <= Tk.USHR_EQ) {
 			int op = Tk.type; Lexer.nextToken();
 			if (k == 0) {
 				E.eLd(i, t); E.push(); pExpr(); E.eCO(op); E.pop();
-				E.edup(); E.eSt(i, t); E.pop(); return 1;
+				E.eNarrow(n); E.edup(); E.eSt(i, t); E.pop(); return 1;
 			}
 			if (k == 1) {
 				E.ethis(); E.ethis(); E.eOp(E.GETFIELD, i);
 				pExpr(); E.eCO(op); E.pop();
+				E.eNarrow(n);
 				E.eOp(E.PUTFIELD, i); E.pop(); E.pop(); return 0;
 			}
 			if (k == 2) {
 				E.eOp(E.GETSTATIC, i); E.push(); pExpr(); E.eCO(op); E.pop();
-				E.edup(); E.eOp(E.PUTSTATIC, i); E.pop(); return 1;
+				E.eNarrow(n); E.edup(); E.eOp(E.PUTSTATIC, i); E.pop(); return 1;
 			}
 			// k == 3: obj already on stack
 			E.edup(); E.eOp(E.GETFIELD, i); pExpr(); E.eCO(op); E.pop();
+			E.eNarrow(n);
 			E.eOp(E.PUTFIELD, i); E.pop(); E.pop(); return 0;
 		}
 		if (Tk.type == Tk.INC || Tk.type == Tk.DEC) {
 			int op = Tk.type; Lexer.nextToken();
 			if (k == 0) {
+				if (n != C.NK_NONE) {
+					E.eLd(i, 0); E.push();
+					E.edup(); E.push();
+					E.ic1(); E.eb(op == Tk.INC ? E.IADD : E.ISUB); E.pop();
+					E.eNarrow(n);
+					E.eSt(i, 0); E.pop();
+					return 1;
+				}
 				E.eLd(i, 0); E.push();
 				E.eb(E.IINC); E.eb(i); E.eb(op == Tk.INC ? 1 : 0xFF); return 1;
 			}
@@ -719,11 +698,13 @@ public class Expr {
 				E.ethis(); E.eOp(E.GETFIELD, i);
 				E.ethis(); E.ethis(); E.eOp(E.GETFIELD, i);
 				E.ic1(); E.eb(op == Tk.INC ? E.IADD : E.ISUB); E.pop();
+				E.eNarrow(n);
 				E.eOp(E.PUTFIELD, i); E.pop(); E.pop(); return 1;
 			}
 			// k == 2: GETSTATIC + DUP + 1 + op + PUTSTATIC
 			E.eOp(E.GETSTATIC, i); E.push(); E.edup();
 			E.ic1(); E.eb(op == Tk.INC ? E.IADD : E.ISUB); E.pop();
+			E.eNarrow(n);
 			E.eOp(E.PUTSTATIC, i); E.pop(); return 1;
 			// k == 3: not supported, falls through to load
 		}
@@ -744,7 +725,7 @@ public class Expr {
 		int fi = recvNm >= 0 ? fInstFieldTarget(recvNm, fieldNm) : -1;
 		if (fi < 0) { Lexer.error(206); return 0; }
 		lvK = 3; lvI = E.aCP(C.fSlot[fi]); lvT = C.fType[fi];
-		lvArr = C.fArrKind[fi]; lvRefNm = C.fRefNm[fi]; lvRV = false;
+		lvN = C.fNarrow[fi]; lvArr = C.fArrKind[fi]; lvRefNm = C.fRefNm[fi]; lvRV = false;
 		return lvOps();
 	}
 

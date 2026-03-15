@@ -101,16 +101,17 @@ public class Stmt {
 	static void pLocal() {
 		int varType = E.pTypeLoc(); // 0=int, 1=ref
 		int refNm = E.tyRefNm;
+		int varNarrow = E.tyNarrow;
 		do {
 			int nm = C.intern(Tk.strBuf, Tk.strLen);
 			int slot = C.locCount;
-			E.aLoc(nm, varType, refNm);
+			E.aLoc(nm, varType, refNm, varNarrow);
 			Lexer.nextToken();
 
 			if (Tk.type == Tk.ASSIGN) {
 				Lexer.nextToken();
 				Expr.pExpr();
-				E.eSt(slot, varType);
+				E.eStN(slot, varType, varNarrow);
 				E.pop();
 			}
 
@@ -202,13 +203,14 @@ public class Stmt {
 		if (Tk.type != Tk.SEMI) {
 			if (isTyTok(Tk.type)) {
 				int varType = E.pTypeLoc();
+				int varNarrow = E.tyNarrow;
 				int nm = C.intern(Tk.strBuf, Tk.strLen);
 				int slot = C.locCount;
-				E.aLoc(nm, varType);
+				E.aLoc(nm, varType, -1, varNarrow);
 				Lexer.nextToken(); // consume name
 
 				if (Tk.type == Tk.COLON) {
-					pForEach(varType, slot);
+					pForEach(varType, E.tyNarrow, slot);
 					C.locCount = savedLocalCount;
 					return;
 				}
@@ -217,19 +219,19 @@ public class Stmt {
 				if (Tk.type == Tk.ASSIGN) {
 					Lexer.nextToken();
 					Expr.pExpr();
-					E.eSt(slot, varType);
+					E.eStN(slot, varType, varNarrow);
 					E.pop();
 				}
 				while (Tk.type == Tk.COMMA) {
 					Lexer.nextToken();
 					int nm2 = C.intern(Tk.strBuf, Tk.strLen);
 					int slot2 = C.locCount;
-					E.aLoc(nm2, varType);
+					E.aLoc(nm2, varType, -1, varNarrow);
 					Lexer.nextToken();
 					if (Tk.type == Tk.ASSIGN) {
 						Lexer.nextToken();
 						Expr.pExpr();
-						E.eSt(slot2, varType);
+						E.eStN(slot2, varType, varNarrow);
 						E.pop();
 					}
 				}
@@ -291,7 +293,7 @@ public class Stmt {
 		C.locCount = savedLocalCount;
 	}
 
-	static void pForEach(int elemType, int elemSlot) {
+	static void pForEach(int elemType, int elemNarrow, int elemSlot) {
 		Lexer.nextToken(); // skip ':'
 
 		// Parse array expression
@@ -334,7 +336,7 @@ public class Stmt {
 		E.eLd(arrSlot, 1); E.push();
 		E.eLd(iSlot, 0); E.push();
 		E.eALd(arrType); E.pop(); // xALOAD: pops index+ref, pushes element = net -1
-		E.eSt(elemSlot, elemType >= 3 ? 1 : 0); E.pop();
+		E.eStN(elemSlot, elemType >= 3 ? 1 : 0, elemNarrow); E.pop();
 
 		// Body
 		E.pushLp(lblEnd, lblUpdate);
@@ -359,7 +361,10 @@ public class Stmt {
 			Expr.pExpr();
 			E.pop();
 			if (retType == 2) E.eb(E.ARETURN);
-			else E.eb(E.IRETURN);
+			else {
+				E.eNarrow(C.mRetNarrow[C.curMi]);
+				E.eb(E.IRETURN);
+			}
 			Lexer.expect(Tk.SEMI);
 		}
 	}
@@ -370,6 +375,25 @@ public class Stmt {
 		E.pop();
 		E.eb(E.ATHROW);
 		Lexer.expect(Tk.SEMI);
+	}
+
+	static void shiftTail(int insertAt, int delta) {
+		if (delta <= 0) return;
+		int bodyLen = C.mcLen - insertAt;
+		for (int i = bodyLen - 1; i >= 0; i--) {
+			C.mcode[insertAt + delta + i] = C.mcode[insertAt + i];
+		}
+		C.mcLen += delta;
+		for (int lbl = 0; lbl < C.lblCount; lbl++) {
+			if (C.lblAddr[lbl] >= insertAt) {
+				C.lblAddr[lbl] = (short)(C.lblAddr[lbl] + delta);
+			}
+		}
+		for (int i = 0; i < C.patC; i++) {
+			if (C.patLoc[i] >= insertAt) {
+				C.patLoc[i] = (short)(C.patLoc[i] + delta);
+			}
+		}
 	}
 
 	static void pSwitch() {
@@ -460,28 +484,9 @@ public class Stmt {
 		// Patch npairs
 		E.pBE(npairsLoc, caseCount);
 
-		// Insert case table: shift body bytecodes right to make room
+		// Insert case table ahead of the already-emitted body.
 		int tableSize = caseCount * 8;
-		if (tableSize > 0) {
-			int bodyLen = C.mcLen - tableInsert;
-			for (int i = bodyLen - 1; i >= 0; i--) {
-				C.mcode[tableInsert + tableSize + i] = C.mcode[tableInsert + i];
-			}
-			C.mcLen += tableSize;
-
-			// Adjust label addresses in shifted region
-			for (int lbl = 0; lbl < C.lblCount; lbl++) {
-				if (C.lblAddr[lbl] >= tableInsert) {
-					C.lblAddr[lbl] = (short)(C.lblAddr[lbl] + tableSize);
-				}
-			}
-			// Adjust backpatch locations in shifted region
-			for (int i = 0; i < C.patC; i++) {
-				if (C.patLoc[i] >= tableInsert) {
-					C.patLoc[i] = (short)(C.patLoc[i] + tableSize);
-				}
-			}
-		}
+		shiftTail(tableInsert, tableSize);
 
 		// Mark end label (at post-shift position)
 		E.mark(lblEnd);
@@ -557,24 +562,7 @@ public class Stmt {
 			dispatchSz += aloadSz + ldcSz + 3 + 3; // ALOAD + LDC/LDC_W + INVOKEVIRTUAL + IFNE
 		}
 
-		// Shift body bytecodes right
-		int bodyLen = C.mcLen - switchInsert;
-		for (int i = bodyLen - 1; i >= 0; i--) {
-			C.mcode[switchInsert + dispatchSz + i] = C.mcode[switchInsert + i];
-		}
-		C.mcLen += dispatchSz;
-
-		// Adjust labels and backpatches in shifted region
-		for (int lbl = 0; lbl < C.lblCount; lbl++) {
-			if (C.lblAddr[lbl] >= switchInsert) {
-				C.lblAddr[lbl] = (short)(C.lblAddr[lbl] + dispatchSz);
-			}
-		}
-		for (int bp = 0; bp < C.patC; bp++) {
-			if (C.patLoc[bp] >= switchInsert) {
-				C.patLoc[bp] = (short)(C.patLoc[bp] + dispatchSz);
-			}
-		}
+		shiftTail(switchInsert, dispatchSz);
 
 		E.mark(lblEnd);
 

@@ -65,7 +65,7 @@ public class Catalog {
 				int ordinal = 0;
 				while (Tk.type == Tk.IDENT) {
 					int cnm = C.intern(Tk.strBuf, Tk.strLen);
-					int fi = initField(ci, cnm, true, true, 0, 0, -1);
+					int fi = initField(ci, cnm, true, true, 0, 0, -1, C.NK_NONE);
 					C.fHasConst[fi] = true;
 					C.fConstVal[fi] = ordinal++;
 				Lexer.nextToken();
@@ -120,6 +120,13 @@ public class Catalog {
 		return false;
 	}
 
+	static int scalarNarrow(int typeTok) {
+		if (typeTok == Tk.BYTE) return C.NK_BYTE;
+		if (typeTok == Tk.CHAR) return C.NK_CHAR;
+		if (typeTok == Tk.SHORT) return C.NK_SHORT;
+		return C.NK_NONE;
+	}
+
 	static void catMember(int ci) {
 		if (parseMods()) {
 			// Static initializer block: static { ... }
@@ -139,13 +146,15 @@ public class Catalog {
 		}
 
 		if (isCtor(ci)) {
-			catMethod(ci, C.cName[ci], mStat, true, mNat, mAbst, 0, -1);
+			catMethod(ci, C.cName[ci], mStat, true, mNat, mAbst, 0, -1, C.NK_NONE);
 			return;
 		}
 
 		// Parse return type
 		int retType = 0;
+		int retNarrow = C.NK_NONE;
 		int fieldType = 0;
+		int fieldNarrow = C.NK_NONE;
 		int arrayKind = 0;
 		int refNm = -1;
 		int retTypeToken = Tk.type;
@@ -155,6 +164,8 @@ public class Catalog {
 				 Tk.type == Tk.CHAR || Tk.type == Tk.SHORT ||
 				 Tk.type == Tk.BOOLEAN) {
 			retType = 1;
+			retNarrow = scalarNarrow(Tk.type);
+			fieldNarrow = retNarrow;
 			Lexer.nextToken();
 			{
 				int dimCount = 0;
@@ -173,6 +184,10 @@ public class Catalog {
 					if (arrayKind == 4) arrayKind = 6;
 					else if (arrayKind == 5) arrayKind = 7;
 					else arrayKind = 0;
+				}
+				if (dimCount > 0) {
+					retNarrow = C.NK_NONE;
+					fieldNarrow = C.NK_NONE;
 				}
 			}
 		}
@@ -219,18 +234,19 @@ public class Catalog {
 
 		int nm = C.iN();
 		if (Tk.type == Tk.LPAREN) {
-			catMethod(ci, nm, mStat, false, mNat, mAbst, retType, fieldType == 2 ? -1 : refNm);
+			catMethod(ci, nm, mStat, false, mNat, mAbst, retType, fieldType == 2 ? -1 : refNm, retNarrow);
 		} else {
-			catField(ci, nm, mStat, mFinal, fieldType, arrayKind, refNm);
+			catField(ci, nm, mStat, mFinal, fieldType, arrayKind, refNm, fieldNarrow);
 		}
 	}
 
 	static int initField(int ci, int nm, boolean isStat, boolean isFinal,
-					 int fieldType, int arrKind, int refNm) {
+					 int fieldType, int arrKind, int refNm, int narrowKind) {
 		C.chk(C.fCount, C.MAX_FIELDS, 254);
 		int fi = C.fCount++;
 		C.fClass[fi] = (byte)ci; C.fName[fi] = (short)nm; C.fStatic[fi] = isStat;
 		C.fType[fi] = (byte)fieldType;
+		C.fNarrow[fi] = (byte)narrowKind;
 		C.fArrKind[fi] = (byte)arrKind; C.fSlot[fi] = (short)-1;
 		C.fRefNm[fi] = (short)refNm;
 		C.fInitPos[fi] = -1; C.fInitLn[fi] = (short)0;
@@ -248,8 +264,8 @@ public class Catalog {
 	}
 
 	static void catField(int ci, int nm, boolean isStat, boolean isFinal,
-						   int fieldType, int arrKind, int refNm) {
-		int fi = initField(ci, nm, isStat, isFinal, fieldType, arrKind, refNm);
+						   int fieldType, int arrKind, int refNm, int narrowKind) {
+		int fi = initField(ci, nm, isStat, isFinal, fieldType, arrKind, refNm, narrowKind);
 
 		if (Tk.type == Tk.ASSIGN && isStat) {
 			C.fInitPos[fi] = Lexer.pos;
@@ -262,7 +278,7 @@ public class Catalog {
 				if (Tk.type == Tk.COMMA) {
 					Lexer.nextToken();
 					int nm2 = C.iN();
-					int fi2 = initField(ci, nm2, isStat, isFinal, fieldType, arrKind, refNm);
+					int fi2 = initField(ci, nm2, isStat, isFinal, fieldType, arrKind, refNm, narrowKind);
 					// Record initializer for comma-separated fields: static int A=0, B=1;
 				if (Tk.type == Tk.ASSIGN && isStat) {
 					C.fInitPos[fi2] = Lexer.pos;
@@ -301,8 +317,9 @@ public class Catalog {
 	}
 
 	static void catMethod(int ci, int nm, boolean isStat, boolean isCtor,
-							   boolean isNat, boolean isAbstract, int retType, int retRefNm) {
+							   boolean isNat, boolean isAbstract, int retType, int retRefNm, int retNarrow) {
 		int mi = C.initMethod(ci, isCtor ? C.N_INIT : nm, 0, isStat, isCtor, isNat, retType);
+		C.mRetNarrow[mi] = (byte)retNarrow;
 		C.mRetRefNm[mi] = (short)retRefNm;
 
 		// Parse parameters

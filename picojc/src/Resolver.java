@@ -254,16 +254,7 @@ public class Resolver {
 	}
 
 	static int fMethod(int ci, int nm, boolean isStatic) {
-		while (ci >= 0) {
-			for (int mi = 0; mi < C.mCount; mi++) {
-				if (C.mClass[mi] == ci && C.mName[mi] == nm &&
-					C.mStatic[mi] == isStatic && !C.mIsCtor[mi]) {
-					return mi;
-				}
-			}
-			ci = C.cParent[ci];
-		}
-		return -1;
+		return fMethodExact(ci, nm, isStatic, -1);
 	}
 
 	static int fMethodExact(int ci, int nm, boolean isStatic, int argc) {
@@ -274,18 +265,35 @@ public class Resolver {
 					C.mStatic[mi] != isStatic || C.mIsCtor[mi]) {
 					continue;
 				}
+				if (argc < 0) return mi;
 				if (!C.mVarargs[mi]) {
 					if (C.mArgC[mi] == argc) return mi;
-					continue;
-				}
-				int minArgc = (isStatic ? 0 : 1) + C.mFixedArgs[mi];
-				if (argc >= minArgc && argc <= minArgc + C.MAX_VA_SLOTS && varargsMi < 0) {
+				} else {
+					int minArgc = (C.mStatic[mi] ? 0 : 1) + C.mFixedArgs[mi];
+					if (argc >= minArgc && argc <= minArgc + C.MAX_VA_SLOTS && varargsMi < 0) {
 					varargsMi = mi;
+				}
 				}
 			}
 			if (varargsMi >= 0) return varargsMi;
 			ci = C.cParent[ci];
 		}
 		return -1;
+	}
+
+	static int fCallTarget(int ownerNm, int methodNm, boolean isStatic, int argc) {
+		int mi = C.ensNat(ownerNm, methodNm);
+		if (mi >= 0 && C.mName[mi] == methodNm &&
+			C.mStatic[mi] == isStatic && !C.mIsCtor[mi]) {
+			if (!C.mVarargs[mi]) {
+				if (C.mArgC[mi] == argc) return mi;
+			} else {
+				int minArgc = (C.mStatic[mi] ? 0 : 1) + C.mFixedArgs[mi];
+				if (argc >= minArgc && argc <= minArgc + C.MAX_VA_SLOTS) return mi;
+			}
+		}
+		int ci = fClsByNm(ownerNm);
+		if (ci < 0) return -1;
+		return fMethodExact(ci, methodNm, isStatic, argc);
 	}
 }

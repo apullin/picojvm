@@ -31,6 +31,7 @@ class E {
 	static int cinitCpC;
 	static int cinitMaxStk;
 	static int cinitMaxLoc;
+	static int tyNarrow; // declared scalar narrow kind for the last parsed local/param type
 
 	static void emit() {
 		C.cdLen = 0;
@@ -172,6 +173,46 @@ class E {
 		Lexer.expect(Tk.SEMI);
 	}
 
+	static void beginClinitChunk(int nextLoc) {
+		C.mcLen = 0;
+		C.cpMBase = C.cpSz;
+		C.cpMCount = cinitCpC;
+		for (int i = 0; i < cinitCpC; i++) {
+			C.cpEnt[C.cpMBase + i] = cinitCpL[i];
+			C.cpEntH[C.cpMBase + i] = cinitCpH[i];
+		}
+		C.stkDepth = 0;
+		C.maxStk = 0;
+		C.curMStatic = true;
+		C.locCount = 0;
+		C.locNext = nextLoc;
+		C.lblCount = 0;
+		C.patC = 0;
+		C.lpDepth = 0;
+	}
+
+	static void endClinitChunk(boolean trackLocals) {
+		for (int i = 0; i < C.patC; i++) {
+			int loc = C.patLoc[i];
+			int lbl = C.patLbl[i];
+			int target = C.lblAddr[lbl];
+			int offset = target - (loc - 1);
+			C.mcode[loc] = (byte)((offset >> 8) & 0xFF);
+			C.mcode[loc + 1] = (byte)(offset & 0xFF);
+		}
+		for (int i = 0; i < C.mcLen; i++) {
+			cinitBuf[cinitLen + i] = C.mcode[i];
+		}
+		cinitLen += C.mcLen;
+		cinitCpC = C.cpMCount;
+		for (int i = 0; i < cinitCpC; i++) {
+			cinitCpL[i] = C.cpEnt[C.cpMBase + i];
+			cinitCpH[i] = C.cpEntH[C.cpMBase + i];
+		}
+		if (C.maxStk > cinitMaxStk) cinitMaxStk = C.maxStk;
+		if (trackLocals && C.locNext > cinitMaxLoc) cinitMaxLoc = C.locNext;
+	}
+
 	// Parse a single static field initializer expression into clinit buffer
 	static void eStatFieldInit(int ci, int nm) {
 		// Skip inlined final constants — no runtime init needed
@@ -184,93 +225,27 @@ class E {
 			return;
 		}
 
-		// Set up temp method context — load clinit CP staging into cpEnt/cpEntH
-		C.mcLen = 0;
-		C.cpMBase = C.cpSz;
-		C.cpMCount = cinitCpC;
-		for (int i = 0; i < cinitCpC; i++) {
-			C.cpEnt[C.cpMBase + i] = cinitCpL[i];
-			C.cpEntH[C.cpMBase + i] = cinitCpH[i];
-		}
-		C.stkDepth = 0; C.maxStk = 0;
-		C.curMStatic = true;
-		C.locCount = 0; C.locNext = 0;
-		C.lblCount = 0; C.patC = 0; C.lpDepth = 0;
+		beginClinitChunk(0);
 
 		Lexer.nextToken(); // skip '='
 		Expr.pExpr();
 		int fi = Resolver.fStatField(ci, nm);
 		if (fi >= 0) {
+			eNarrow(C.fNarrow[fi]);
 			int cpIdx = aCP(C.fSlot[fi]);
 			eOp(PUTSTATIC, cpIdx); pop();
 		}
-
-		// Resolve backpatches (ternary expressions etc.)
-		for (int i = 0; i < C.patC; i++) {
-			int loc = C.patLoc[i];
-			int lbl = C.patLbl[i];
-			int target = C.lblAddr[lbl];
-			int offset = target - (loc - 1);
-			C.mcode[loc] = (byte)((offset >> 8) & 0xFF);
-			C.mcode[loc + 1] = (byte)(offset & 0xFF);
-		}
-
-		// Append to clinit buffer
-		for (int i = 0; i < C.mcLen; i++) {
-			cinitBuf[cinitLen + i] = C.mcode[i];
-		}
-		cinitLen = cinitLen + C.mcLen;
-
-		// Save clinit CP back to staging
-		cinitCpC = C.cpMCount;
-		for (int i = 0; i < cinitCpC; i++) {
-			cinitCpL[i] = C.cpEnt[C.cpMBase + i];
-			cinitCpH[i] = C.cpEntH[C.cpMBase + i];
-		}
-		if (C.maxStk > cinitMaxStk) cinitMaxStk = C.maxStk;
+		endClinitChunk(false);
 	}
 
 	// Accumulate explicit static { } block into clinit buffer
 	static void eStatBlock() {
-		C.mcLen = 0;
-		C.cpMBase = C.cpSz;
-		C.cpMCount = cinitCpC;
-		for (int i = 0; i < cinitCpC; i++) {
-			C.cpEnt[C.cpMBase + i] = cinitCpL[i];
-			C.cpEntH[C.cpMBase + i] = cinitCpH[i];
-		}
-		C.stkDepth = 0; C.maxStk = 0;
-		C.curMStatic = true;
-		C.locCount = 0; C.locNext = cinitMaxLoc;
-		C.lblCount = 0; C.patC = 0; C.lpDepth = 0;
+		beginClinitChunk(cinitMaxLoc);
 
 		Lexer.nextToken(); // skip {
 		Stmt.pBlock();
 		Lexer.expect(Tk.RBRACE);
-
-		// Resolve backpatches
-		for (int i = 0; i < C.patC; i++) {
-			int loc = C.patLoc[i];
-			int lbl = C.patLbl[i];
-			int target = C.lblAddr[lbl];
-			int offset = target - (loc - 1);
-			C.mcode[loc] = (byte)((offset >> 8) & 0xFF);
-			C.mcode[loc + 1] = (byte)(offset & 0xFF);
-		}
-
-		// Append to clinit buffer
-		for (int i = 0; i < C.mcLen; i++) {
-			cinitBuf[cinitLen + i] = C.mcode[i];
-		}
-		cinitLen = cinitLen + C.mcLen;
-
-		cinitCpC = C.cpMCount;
-		for (int i = 0; i < cinitCpC; i++) {
-			cinitCpL[i] = C.cpEnt[C.cpMBase + i];
-			cinitCpH[i] = C.cpEntH[C.cpMBase + i];
-		}
-		if (C.maxStk > cinitMaxStk) cinitMaxStk = C.maxStk;
-		if (C.locNext > cinitMaxLoc) cinitMaxLoc = C.locNext;
+		endClinitChunk(true);
 	}
 
 	static void skipMDecl() {
@@ -359,6 +334,7 @@ class E {
 			aLoc(C.N_INIT, 1, C.cName[C.curCi]); // 'this'
 			// Parse constructor parameters
 			pParams();
+			narrowScalarParams();
 
 			// Parse body
 			Lexer.expect(Tk.LBRACE);
@@ -394,6 +370,7 @@ class E {
 			}
 
 			pParams();
+			narrowScalarParams();
 
 			// Parse body
 			Lexer.expect(Tk.LBRACE);
@@ -470,11 +447,15 @@ class E {
 		int baseType = 0;
 		int elemKind = 0; // 0=int-like, 1=byte, 2=char, 3=short
 		tyRefNm = -1;
+		tyNarrow = C.NK_NONE;
 		if (Tk.type == Tk.BYTE || Tk.type == Tk.BOOLEAN) {
+			if (Tk.type == Tk.BYTE) tyNarrow = C.NK_BYTE;
 			elemKind = 1; Lexer.nextToken();
 		} else if (Tk.type == Tk.CHAR) {
+			tyNarrow = C.NK_CHAR;
 			elemKind = 2; Lexer.nextToken();
 		} else if (Tk.type == Tk.SHORT) {
+			tyNarrow = C.NK_SHORT;
 			elemKind = 3; Lexer.nextToken();
 		} else if (Tk.type == Tk.INT) {
 			elemKind = 0; Lexer.nextToken();
@@ -494,6 +475,7 @@ class E {
 			dimCount++;
 		}
 		if (dimCount > 0) {
+			tyNarrow = C.NK_NONE;
 			if (baseType == 1) {
 				if (dimCount == 1 && tyRefNm >= 0) return 2; // object[]
 				tyRefNm = -1;
@@ -520,6 +502,7 @@ class E {
 			int savedTyTok = Tk.type;
 			int pType = pTypeLoc();
 			int pRefNm = tyRefNm;
+			int pNarrow = tyNarrow;
 			if (Tk.type == Tk.ELLIPSIS) {
 				// Varargs parameter — must be last
 				Lexer.nextToken(); // skip '...'
@@ -538,7 +521,7 @@ class E {
 				break;
 			}
 			int pNm = C.iN();
-			aLoc(pNm, pType, pRefNm);
+			aLoc(pNm, pType, pRefNm, pNarrow);
 			if (Tk.type == Tk.COMMA) Lexer.nextToken();
 		}
 		Lexer.expect(Tk.RPAREN);
@@ -659,15 +642,20 @@ class E {
 	}
 
 	static void aLoc(int nm, int type) {
-		aLoc(nm, type, -1);
+		aLoc(nm, type, -1, C.NK_NONE);
 	}
 
 	static void aLoc(int nm, int type, int refNm) {
+		aLoc(nm, type, refNm, C.NK_NONE);
+	}
+
+	static void aLoc(int nm, int type, int refNm, int narrowKind) {
 		C.chk(C.locCount, C.MAX_LOCALS, 257);
 		C.locName[C.locCount] = (short)nm;
 		C.locSlot[C.locCount] = (byte)C.locCount;
 		C.locType[C.locCount] = (byte)type;
 		C.locRefNm[C.locCount] = (short)refNm;
+		C.locNarrow[C.locCount] = (byte)narrowKind;
 		C.locCount++;
 		if (C.locCount > C.locNext) C.locNext = C.locCount;
 	}
@@ -756,6 +744,23 @@ class E {
 		}
 	}
 
+	static void eNarrow(int narrowKind) {
+		if (narrowKind == C.NK_BYTE) eb(I2B);
+		else if (narrowKind == C.NK_CHAR) eb(I2C);
+		else if (narrowKind == C.NK_SHORT) eb(I2S);
+	}
+
+	static void narrowScalarParams() {
+		for (int li = 0; li < C.locCount; li++) {
+			int narrowKind = C.locNarrow[li] & 0xFF;
+			if (narrowKind == C.NK_NONE || C.locType[li] != 0) continue;
+			int slot = C.locSlot[li] & 0xFF;
+			eLd(slot, 0); push();
+			eNarrow(narrowKind);
+			eSt(slot, 0); pop();
+		}
+	}
+
 	static void eSt(int slot, int type) {
 		if (type != 0) {
 			if (slot <= 3) eb(ASTORE_0 + slot);
@@ -764,6 +769,11 @@ class E {
 			if (slot <= 3) eb(ISTORE_0 + slot);
 			else { eb(0x36); eb(slot); } // ISTORE
 		}
+	}
+
+	static void eStN(int slot, int type, int narrowKind) {
+		eNarrow(narrowKind);
+		eSt(slot, type);
 	}
 
 	static void eCO(int tok) {

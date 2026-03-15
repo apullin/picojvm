@@ -2,9 +2,10 @@
 class C {
 	// Limits — sized to fit in picoJVM 64KB heap
 	static final int MAX_CLASSES  = 32;
-	static final int MAX_METHODS  = 192;
-	static final int MAX_FIELDS   = 384;
-	static final int MAX_NAMES    = 768;
+	// Leave headroom for self-hosting feature work until method storage is dynamic.
+	static final int MAX_METHODS  = 224;
+	static final int MAX_FIELDS   = 416;
+	static final int MAX_NAMES    = 896;
 	static final int MAX_CP       = 2560;
 	static final int MAX_CODE     = 19456;
 	static final int MAX_LOCALS   = 64;
@@ -13,9 +14,10 @@ class C {
 	static final int MAX_INT_CONST= 80;
 	static final int MAX_STR_CONST= 80;
 	static final int MAX_VA_SLOTS = 8;
+	static final int NK_NONE = 0, NK_BYTE = 1, NK_CHAR = 2, NK_SHORT = 3;
 
 	// --- Name pool (interning) ---
-	static byte[] nPool = new byte[6144];
+	static byte[] nPool = new byte[7168];
 	static int npLen;
 	static int[] nOff = new int[MAX_NAMES];
 	static int[] nLen = new int[MAX_NAMES];
@@ -56,6 +58,7 @@ class C {
 	static byte[] fClass  = new byte[MAX_FIELDS];
 	static short[] fName   = new short[MAX_FIELDS]; // name index
 	static byte[] fType = new byte[MAX_FIELDS]; // 0=int-like, 1=ref, 2=object[]
+	static byte[] fNarrow = new byte[MAX_FIELDS]; // 0=none/int/bool, 1=byte, 2=char, 3=short
 	static boolean[] fStatic = new boolean[MAX_FIELDS];
 	static short[] fSlot   = new short[MAX_FIELDS]; // assigned in resolve
 	static int[] fInitPos  = new int[MAX_FIELDS]; // source pos of initializer (must be int: >32KB sources)
@@ -88,6 +91,7 @@ class C {
 	static int[] mBodyS = new int[MAX_METHODS]; // source pos (must be int: >32KB sources)
 	static int[] mBodyE   = new int[MAX_METHODS]; // source pos (must be int: >32KB sources)
 	static byte[] mRetT   = new byte[MAX_METHODS]; // 0=void,1=int,2=ref
+	static byte[] mRetNarrow = new byte[MAX_METHODS]; // 0=none/int/bool, 1=byte, 2=char, 3=short
 	static short[] mRetRefNm = new short[MAX_METHODS]; // declared ref return type, -1 if unknown/non-ref
 	static int mainMi;
 
@@ -130,6 +134,7 @@ class C {
 	static short[] locName = new short[MAX_LOCALS]; // name index
 	static byte[] locSlot = new byte[MAX_LOCALS];
 	static byte[] locType = new byte[MAX_LOCALS]; // 0=int,1=ref,2=object[],3=int[],4=byte[],5=char[],8=short[]
+	static byte[] locNarrow = new byte[MAX_LOCALS]; // 0=none/int/bool, 1=byte, 2=char, 3=short
 	static short[] locRefNm = new short[MAX_LOCALS]; // declared ref type name, -1 if unknown/non-ref
 	static int locCount;
 	static int locNext;
@@ -257,7 +262,7 @@ class C {
 			if (nLen[i] == len && Native.memcmp(nPool, nOff[i], buf, 0, len) == 0)
 				return i;
 		}
-		if (nCount >= MAX_NAMES || npLen + len > 6144) {
+		if (nCount >= MAX_NAMES || npLen + len > 7168) {
 			Lexer.error(251);
 			return 0;
 		}
@@ -285,6 +290,7 @@ class C {
 		mClass[mi] = (byte)ci; mName[mi] = (short)nm; mArgC[mi] = (byte)argc;
 		mStatic[mi] = isStat; mIsCtor[mi] = isCtor; mNative[mi] = isNat;
 		mRetT[mi] = (byte)retType; mVtSlot[mi] = (byte)0xFF; mVmid[mi] = (byte)0xFF; mExcC[mi] = 0;
+		mRetNarrow[mi] = (byte)NK_NONE;
 		mRetRefNm[mi] = (short)-1;
 		mVarargs[mi] = false; mFixedArgs[mi] = 0;
 		return mi;

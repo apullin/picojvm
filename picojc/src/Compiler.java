@@ -23,15 +23,15 @@ class C {
 	static int[] nLen = new int[MAX_NAMES];
 	static int nCount;
 
-	// Pre-interned well-known names
-	static int N_OBJECT, N_STRING, N_NATIVE, N_MAIN, N_INIT, N_CLINIT;
-	static int N_THROWABLE, N_EXCEPTION, N_RUNTIME_EX;
-	static int N_PUTCHAR, N_IN, N_OUT, N_PEEK, N_POKE, N_HALT, N_PRINT;
-	static int N_ARRAYCOPY, N_MEMCMP, N_WRITE_BYTES, N_STRING_FROM_BYTES;
-	static int N_FILE_OPEN, N_FILE_READ_BYTE, N_FILE_WRITE_BYTE;
-	static int N_FILE_READ, N_FILE_WRITE, N_FILE_CLOSE, N_FILE_DELETE;
-	static int N_LENGTH, N_CHARAT, N_EQUALS, N_TOSTRING, N_HASHCODE;
-	static int N_ARGS;
+	// Well-known name IDs. These match the fixed seed order in initNames().
+	static final int N_OBJECT = 0, N_STRING = 1, N_NATIVE = 2, N_MAIN = 3, N_INIT = 4, N_CLINIT = 5;
+	static final int N_THROWABLE = 6, N_EXCEPTION = 7, N_RUNTIME_EX = 8;
+	static final int N_PUTCHAR = 9, N_IN = 10, N_OUT = 11, N_PEEK = 12, N_POKE = 13, N_HALT = 14, N_PRINT = 15;
+	static final int N_ARRAYCOPY = 16, N_MEMCMP = 17, N_WRITE_BYTES = 18, N_STRING_FROM_BYTES = 19;
+	static final int N_FILE_OPEN = 20, N_FILE_READ_BYTE = 21, N_FILE_WRITE_BYTE = 22;
+	static final int N_FILE_READ = 23, N_FILE_WRITE = 24, N_FILE_CLOSE = 25, N_FILE_DELETE = 26;
+	static final int N_LENGTH = 27, N_CHARAT = 28, N_EQUALS = 29, N_TOSTRING = 30, N_HASHCODE = 31;
+	static final int N_ARGS = 32;
 
 	// --- Class table ---
 	static int cCount;
@@ -214,39 +214,39 @@ class C {
 	static void initNames() {
 		npLen = 0;
 		nCount = 0;
-		N_OBJECT     = iStr("Object");
-		N_STRING     = iStr("String");
-		N_NATIVE     = iStr("Native");
-		N_MAIN       = iStr("main");
-		N_INIT       = iStr("<init>");
-		N_CLINIT     = iStr("<clinit>");
-		N_THROWABLE  = iStr("Throwable");
-		N_EXCEPTION  = iStr("Exception");
-		N_RUNTIME_EX = iStr("RuntimeException");
-		N_PUTCHAR    = iStr("putchar");
-		N_IN         = iStr("in");
-		N_OUT        = iStr("out");
-		N_PEEK       = iStr("peek");
-		N_POKE       = iStr("poke");
-		N_HALT       = iStr("halt");
-		N_PRINT      = iStr("print");
-		N_ARRAYCOPY       = iStr("arraycopy");
-		N_MEMCMP          = iStr("memcmp");
-		N_WRITE_BYTES     = iStr("writeBytes");
-		N_STRING_FROM_BYTES = iStr("stringFromBytes");
-		N_FILE_OPEN       = iStr("fileOpen");
-		N_FILE_READ_BYTE  = iStr("fileReadByte");
-		N_FILE_WRITE_BYTE = iStr("fileWriteByte");
-		N_FILE_READ       = iStr("fileRead");
-		N_FILE_WRITE      = iStr("fileWrite");
-		N_FILE_CLOSE      = iStr("fileClose");
-		N_FILE_DELETE     = iStr("fileDelete");
-		N_LENGTH     = iStr("length");
-		N_CHARAT     = iStr("charAt");
-		N_EQUALS     = iStr("equals");
-		N_TOSTRING   = iStr("toString");
-		N_HASHCODE   = iStr("hashCode");
-		N_ARGS       = iStr("args");
+		iStr("Object");
+		iStr("String");
+		iStr("Native");
+		iStr("main");
+		iStr("<init>");
+		iStr("<clinit>");
+		iStr("Throwable");
+		iStr("Exception");
+		iStr("RuntimeException");
+		iStr("putchar");
+		iStr("in");
+		iStr("out");
+		iStr("peek");
+		iStr("poke");
+		iStr("halt");
+		iStr("print");
+		iStr("arraycopy");
+		iStr("memcmp");
+		iStr("writeBytes");
+		iStr("stringFromBytes");
+		iStr("fileOpen");
+		iStr("fileReadByte");
+		iStr("fileWriteByte");
+		iStr("fileRead");
+		iStr("fileWrite");
+		iStr("fileClose");
+		iStr("fileDelete");
+		iStr("length");
+		iStr("charAt");
+		iStr("equals");
+		iStr("toString");
+		iStr("hashCode");
+		iStr("args");
 	}
 
 	static byte[] iTmp = new byte[256];
@@ -326,33 +326,37 @@ class C {
 		return mi;
 	}
 
+	static int packNat(int id, int argc, int retType) {
+		return (id << 8) | (argc << 2) | retType;
+	}
+
 	// Packed native method info: (nativeId << 8) | (argc << 2) | retType
 	// Single source of truth for all native method metadata.
 	static int natInfo(int nm) {
-		if (nm == N_PUTCHAR)           return (0  << 8) | (1 << 2) | 0;
-		if (nm == N_IN)                return (1  << 8) | (1 << 2) | 1;
-		if (nm == N_OUT)               return (2  << 8) | (2 << 2) | 0;
-		if (nm == N_PEEK)              return (3  << 8) | (1 << 2) | 1;
-		if (nm == N_POKE)              return (4  << 8) | (2 << 2) | 0;
-		if (nm == N_HALT)              return (5  << 8) | (0 << 2) | 0;
-		if (nm == N_INIT)              return (6  << 8) | (1 << 2) | 0;
-		if (nm == N_LENGTH)            return (7  << 8) | (1 << 2) | 1;
-		if (nm == N_CHARAT)            return (8  << 8) | (2 << 2) | 1;
-		if (nm == N_EQUALS)            return (9  << 8) | (2 << 2) | 1;
-		if (nm == N_TOSTRING)          return (10 << 8) | (1 << 2) | 2;
-		if (nm == N_PRINT)             return (11 << 8) | (1 << 2) | 0;
-		if (nm == N_HASHCODE)          return (12 << 8) | (1 << 2) | 1;
-		if (nm == N_ARRAYCOPY)         return (13 << 8) | (5 << 2) | 0;
-		if (nm == N_MEMCMP)            return (14 << 8) | (5 << 2) | 1;
-		if (nm == N_WRITE_BYTES)       return (15 << 8) | (3 << 2) | 0;
-		if (nm == N_STRING_FROM_BYTES) return (16 << 8) | (3 << 2) | 2;
-		if (nm == N_FILE_OPEN)         return (17 << 8) | (3 << 2) | 1;
-		if (nm == N_FILE_READ_BYTE)    return (18 << 8) | (0 << 2) | 1;
-		if (nm == N_FILE_WRITE_BYTE)   return (19 << 8) | (1 << 2) | 0;
-		if (nm == N_FILE_READ)         return (20 << 8) | (3 << 2) | 1;
-		if (nm == N_FILE_WRITE)        return (21 << 8) | (3 << 2) | 0;
-		if (nm == N_FILE_CLOSE)        return (22 << 8) | (1 << 2) | 0;
-		if (nm == N_FILE_DELETE)        return (23 << 8) | (2 << 2) | 1;
+		if (nm == N_PUTCHAR)           return packNat(0, 1, 0);
+		if (nm == N_IN)                return packNat(1, 1, 1);
+		if (nm == N_OUT)               return packNat(2, 2, 0);
+		if (nm == N_PEEK)              return packNat(3, 1, 1);
+		if (nm == N_POKE)              return packNat(4, 2, 0);
+		if (nm == N_HALT)              return packNat(5, 0, 0);
+		if (nm == N_INIT)              return packNat(6, 1, 0);
+		if (nm == N_LENGTH)            return packNat(7, 1, 1);
+		if (nm == N_CHARAT)            return packNat(8, 2, 1);
+		if (nm == N_EQUALS)            return packNat(9, 2, 1);
+		if (nm == N_TOSTRING)          return packNat(10, 1, 2);
+		if (nm == N_PRINT)             return packNat(11, 1, 0);
+		if (nm == N_HASHCODE)          return packNat(12, 1, 1);
+		if (nm == N_ARRAYCOPY)         return packNat(13, 5, 0);
+		if (nm == N_MEMCMP)            return packNat(14, 5, 1);
+		if (nm == N_WRITE_BYTES)       return packNat(15, 3, 0);
+		if (nm == N_STRING_FROM_BYTES) return packNat(16, 3, 2);
+		if (nm == N_FILE_OPEN)         return packNat(17, 3, 1);
+		if (nm == N_FILE_READ_BYTE)    return packNat(18, 0, 1);
+		if (nm == N_FILE_WRITE_BYTE)   return packNat(19, 1, 0);
+		if (nm == N_FILE_READ)         return packNat(20, 3, 1);
+		if (nm == N_FILE_WRITE)        return packNat(21, 3, 0);
+		if (nm == N_FILE_CLOSE)        return packNat(22, 1, 0);
+		if (nm == N_FILE_DELETE)       return packNat(23, 2, 1);
 		return -1;
 	}
 

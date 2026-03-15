@@ -65,6 +65,18 @@ class E {
 		C.mMaxStk[mi] = (byte)(cinitLen > 0 && cinitMaxStk > 0 ? cinitMaxStk : 1);
 	}
 
+	// Both normal methods and staged clinit chunks share the same branch patch pass.
+	static void patchBranches() {
+		for (int i = 0; i < C.patC; i++) {
+			int loc = C.patLoc[i];
+			int lbl = C.patLbl[i];
+			int target = C.lblAddr[lbl];
+			int offset = target - (loc - 1);
+			C.mcode[loc] = (byte)((offset >> 8) & 0xFF);
+			C.mcode[loc + 1] = (byte)(offset & 0xFF);
+		}
+	}
+
 	static void emit() {
 		C.cdLen = 0;
 		C.cpSz = 0;
@@ -113,13 +125,9 @@ class E {
 		}
 
 		// Finalize clinit from accumulated buffer (field inits + static blocks)
-		if (cinitLen > 0 && C.cClinit[ci] != 0xFF) {
+		if (C.cClinit[ci] != 0xFF) {
 			int mi = C.cClinit[ci];
 			if (!C.mNative[mi]) emitClinitMethod(mi);
-		} else if (cinitLen == 0 && C.cClinit[ci] != 0xFF) {
-			// All field inits were inlined — emit minimal RETURN-only clinit
-			int mi = C.cClinit[ci];
-			emitClinitMethod(mi);
 		}
 
 		if (Tk.type == Tk.RBRACE) Lexer.nextToken();
@@ -203,14 +211,7 @@ class E {
 
 	// Merge the temporary chunk back into the class-level <clinit> staging area.
 	static void endClinitChunk(boolean trackLocals) {
-		for (int i = 0; i < C.patC; i++) {
-			int loc = C.patLoc[i];
-			int lbl = C.patLbl[i];
-			int target = C.lblAddr[lbl];
-			int offset = target - (loc - 1);
-			C.mcode[loc] = (byte)((offset >> 8) & 0xFF);
-			C.mcode[loc + 1] = (byte)(offset & 0xFF);
-		}
+		patchBranches();
 		for (int i = 0; i < C.mcLen; i++) {
 			cinitBuf[cinitLen + i] = C.mcode[i];
 		}
@@ -353,15 +354,7 @@ class E {
 			}
 		}
 
-		// Resolve backpatches
-		for (int i = 0; i < C.patC; i++) {
-			int loc = C.patLoc[i];
-			int lbl = C.patLbl[i];
-			int target = C.lblAddr[lbl];
-			int offset = target - (loc - 1); // relative to branch opcode
-			C.mcode[loc] = (byte) ((offset >> 8) & 0xFF);
-			C.mcode[loc + 1] = (byte) (offset & 0xFF);
-		}
+		patchBranches();
 
 		commitMC(mi);
 		C.mMaxLoc[mi] = (byte)(C.locNext > 0 ? C.locNext : 1);

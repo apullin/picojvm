@@ -100,10 +100,11 @@ public class Stmt {
 
 	static void pLocal() {
 		int varType = E.pTypeLoc(); // 0=int, 1=ref
+		int refNm = E.tyRefNm;
 		do {
 			int nm = C.intern(Tk.strBuf, Tk.strLen);
 			int slot = C.locCount;
-			E.aLoc(nm, varType);
+			E.aLoc(nm, varType, refNm);
 			Lexer.nextToken();
 
 			if (Tk.type == Tk.ASSIGN) {
@@ -422,12 +423,13 @@ public class Stmt {
 				}
 				val = Tk.intValue;
 				if (neg) val = -val;
-				Lexer.nextToken();
-				Lexer.expect(Tk.COLON);
+					Lexer.nextToken();
+					Lexer.expect(Tk.COLON);
 
-				C.caseLbls[caseCount] = (short)E.label();
-				E.mark(C.caseLbls[caseCount]);
-				C.caseVals[caseCount] = val;
+					C.chk(caseCount, 64, 266);
+					C.caseLbls[caseCount] = (short)E.label();
+					E.mark(C.caseLbls[caseCount]);
+					C.caseVals[caseCount] = val;
 				caseCount++;
 			} else if (Tk.type == Tk.DEFAULT) {
 				Lexer.nextToken();
@@ -506,7 +508,7 @@ public class Stmt {
 		int swSlot = C.locCount;
 		byte[] sb = Tk.strBuf;
 		sb[0] = (byte)'$'; sb[1] = (byte)'s'; sb[2] = (byte)'w';
-		E.aLoc(C.intern(sb, 3), 1);
+		E.aLoc(C.intern(sb, 3), 1, C.N_STRING);
 		E.eSt(swSlot, 1); E.pop();
 
 		int lblEnd = E.label();
@@ -526,12 +528,13 @@ public class Stmt {
 				byte[] buf = new byte[Tk.strLen];
 				Native.arraycopy(Tk.strBuf, 0, buf, 0, Tk.strLen);
 				C.caseVals[caseCount] = E.aSCP(buf, Tk.strLen);
-				Lexer.nextToken(); // skip string
-				Lexer.expect(Tk.COLON);
+					Lexer.nextToken(); // skip string
+					Lexer.expect(Tk.COLON);
 
-				C.caseLbls[caseCount] = (short)E.label();
-				E.mark(C.caseLbls[caseCount]);
-				caseCount++;
+					C.chk(caseCount, 64, 266);
+					C.caseLbls[caseCount] = (short)E.label();
+					E.mark(C.caseLbls[caseCount]);
+					caseCount++;
 			} else if (Tk.type == Tk.DEFAULT) {
 				Lexer.nextToken();
 				Lexer.expect(Tk.COLON);

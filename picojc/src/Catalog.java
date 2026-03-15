@@ -61,13 +61,13 @@ public class Catalog {
 		C.cBodyS[ci] = Lexer.pos;
 
 		// Enum constants: NAME, NAME, NAME [;]
-		if (isEnum) {
-			int ordinal = 0;
-			while (Tk.type == Tk.IDENT) {
-				int cnm = C.intern(Tk.strBuf, Tk.strLen);
-				int fi = initField(ci, cnm, true, true, 0);
-				C.fHasConst[fi] = true;
-				C.fConstVal[fi] = ordinal++;
+			if (isEnum) {
+				int ordinal = 0;
+				while (Tk.type == Tk.IDENT) {
+					int cnm = C.intern(Tk.strBuf, Tk.strLen);
+					int fi = initField(ci, cnm, true, true, 0, 0, -1);
+					C.fHasConst[fi] = true;
+					C.fConstVal[fi] = ordinal++;
 				Lexer.nextToken();
 				if (Tk.type == Tk.COMMA) Lexer.nextToken();
 				else break;
@@ -139,13 +139,14 @@ public class Catalog {
 		}
 
 		if (isCtor(ci)) {
-			catMethod(ci, C.cName[ci], mStat, true, mNat, mAbst, 0);
+			catMethod(ci, C.cName[ci], mStat, true, mNat, mAbst, 0, -1);
 			return;
 		}
 
 		// Parse return type
 		int retType = 0;
 		int arrayKind = 0;
+		int refNm = -1;
 		int retTypeToken = Tk.type;
 
 		if (Tk.type == Tk.VOID) { retType = 0; Lexer.nextToken(); }
@@ -174,12 +175,23 @@ public class Catalog {
 				}
 			}
 		}
-		else if (Tk.type == Tk.STRING_KW || Tk.type == Tk.IDENT) {
+		else if (Tk.type == Tk.STRING_KW) {
 			retType = 2;
+			refNm = C.N_STRING;
 			Lexer.nextToken();
 			while (Tk.type == Tk.LBRACKET) {
 				Lexer.nextToken();
 				Lexer.expect(Tk.RBRACKET);
+				refNm = -1;
+			}
+		}
+		else if (Tk.type == Tk.IDENT) {
+			retType = 2;
+			refNm = C.iN();
+			while (Tk.type == Tk.LBRACKET) {
+				Lexer.nextToken();
+				Lexer.expect(Tk.RBRACKET);
+				refNm = -1;
 			}
 		}
 		else {
@@ -198,17 +210,20 @@ public class Catalog {
 
 		int nm = C.iN();
 		if (Tk.type == Tk.LPAREN) {
-			catMethod(ci, nm, mStat, false, mNat, mAbst, retType);
+			catMethod(ci, nm, mStat, false, mNat, mAbst, retType, refNm);
 		} else {
-			catField(ci, nm, mStat, mFinal, retType, arrayKind);
+			catField(ci, nm, mStat, mFinal, retType, arrayKind, refNm);
 		}
 	}
 
-	static int initField(int ci, int nm, boolean isStat, boolean isFinal, int arrKind) {
+	static int initField(int ci, int nm, boolean isStat, boolean isFinal,
+					 int fieldType, int arrKind, int refNm) {
 		C.chk(C.fCount, C.MAX_FIELDS, 254);
 		int fi = C.fCount++;
 		C.fClass[fi] = (byte)ci; C.fName[fi] = (short)nm; C.fStatic[fi] = isStat;
+		C.fType[fi] = (byte)fieldType;
 		C.fArrKind[fi] = (byte)arrKind; C.fSlot[fi] = (short)-1;
+		C.fRefNm[fi] = (short)refNm;
 		C.fInitPos[fi] = -1; C.fInitLn[fi] = (short)0;
 		C.fFinal[fi] = isFinal; C.fHasConst[fi] = false;
 		if (!isStat) C.cOwnF[ci]++;
@@ -224,8 +239,8 @@ public class Catalog {
 	}
 
 	static void catField(int ci, int nm, boolean isStat, boolean isFinal,
-						   int retType, int arrKind) {
-		int fi = initField(ci, nm, isStat, isFinal, arrKind);
+						   int retType, int arrKind, int refNm) {
+		int fi = initField(ci, nm, isStat, isFinal, retType == 2 ? 1 : 0, arrKind, refNm);
 
 		if (Tk.type == Tk.ASSIGN && isStat) {
 			C.fInitPos[fi] = Lexer.pos;
@@ -235,11 +250,11 @@ public class Catalog {
 		}
 
 		while (Tk.type != Tk.SEMI && Tk.type != Tk.EOF) {
-			if (Tk.type == Tk.COMMA) {
-				Lexer.nextToken();
-				int nm2 = C.iN();
-				int fi2 = initField(ci, nm2, isStat, isFinal, arrKind);
-				// Record initializer for comma-separated fields: static int A=0, B=1;
+				if (Tk.type == Tk.COMMA) {
+					Lexer.nextToken();
+					int nm2 = C.iN();
+					int fi2 = initField(ci, nm2, isStat, isFinal, retType == 2 ? 1 : 0, arrKind, refNm);
+					// Record initializer for comma-separated fields: static int A=0, B=1;
 				if (Tk.type == Tk.ASSIGN && isStat) {
 					C.fInitPos[fi2] = Lexer.pos;
 					C.fInitLn[fi2] = (short)Lexer.line;
@@ -277,8 +292,9 @@ public class Catalog {
 	}
 
 	static void catMethod(int ci, int nm, boolean isStat, boolean isCtor,
-							   boolean isNat, boolean isAbstract, int retType) {
+							   boolean isNat, boolean isAbstract, int retType, int retRefNm) {
 		int mi = C.initMethod(ci, isCtor ? C.N_INIT : nm, 0, isStat, isCtor, isNat, retType);
+		C.mRetRefNm[mi] = (short)retRefNm;
 
 		// Parse parameters
 		Lexer.expect(Tk.LPAREN);

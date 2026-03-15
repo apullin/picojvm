@@ -55,11 +55,13 @@ class C {
 	static int fCount;
 	static byte[] fClass  = new byte[MAX_FIELDS];
 	static short[] fName   = new short[MAX_FIELDS]; // name index
+	static byte[] fType = new byte[MAX_FIELDS]; // 0=int-like, 1=ref-like
 	static boolean[] fStatic = new boolean[MAX_FIELDS];
 	static short[] fSlot   = new short[MAX_FIELDS]; // assigned in resolve
 	static int[] fInitPos  = new int[MAX_FIELDS]; // source pos of initializer (must be int: >32KB sources)
 	static short[] fInitLn = new short[MAX_FIELDS]; // line of initializer
 	static byte[] fArrKind = new byte[MAX_FIELDS]; // 0=non-array/int[], 4=byte[], 5=char[], 8=short[]
+	static short[] fRefNm = new short[MAX_FIELDS]; // declared ref type name, -1 if unknown/non-ref
 	static boolean[] fFinal = new boolean[MAX_FIELDS];
 	static boolean[] fHasConst = new boolean[MAX_FIELDS]; // compile-time constant?
 	static int[] fConstVal = new int[MAX_FIELDS]; // constant value (if fHasConst)
@@ -86,6 +88,7 @@ class C {
 	static int[] mBodyS = new int[MAX_METHODS]; // source pos (must be int: >32KB sources)
 	static int[] mBodyE   = new int[MAX_METHODS]; // source pos (must be int: >32KB sources)
 	static byte[] mRetT   = new byte[MAX_METHODS]; // 0=void,1=int,2=ref
+	static short[] mRetRefNm = new short[MAX_METHODS]; // declared ref return type, -1 if unknown/non-ref
 	static int mainMi;
 
 	// --- CP resolution table (16-bit entries, stored as lo/hi byte arrays) ---
@@ -127,6 +130,7 @@ class C {
 	static short[] locName = new short[MAX_LOCALS]; // name index
 	static byte[] locSlot = new byte[MAX_LOCALS];
 	static byte[] locType = new byte[MAX_LOCALS]; // 0=int,1=ref,3=int[],4=byte[],5=char[],8=short[]
+	static short[] locRefNm = new short[MAX_LOCALS]; // declared ref type name, -1 if unknown/non-ref
 	static int locCount;
 	static int locNext;
 	static int maxLoc;
@@ -281,6 +285,7 @@ class C {
 		mClass[mi] = (byte)ci; mName[mi] = (short)nm; mArgC[mi] = (byte)argc;
 		mStatic[mi] = isStat; mIsCtor[mi] = isCtor; mNative[mi] = isNat;
 		mRetT[mi] = (byte)retType; mVtSlot[mi] = (byte)0xFF; mVmid[mi] = (byte)0xFF; mExcC[mi] = 0;
+		mRetRefNm[mi] = (short)-1;
 		mVarargs[mi] = false; mFixedArgs[mi] = 0;
 		return mi;
 	}

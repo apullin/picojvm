@@ -131,7 +131,7 @@ class E {
 	static void eMem(int ci) {
 		if (Catalog.parseMods()) { eStatBlock(); return; }
 		if (Catalog.isCtor(ci)) {
-			int mi = fCtor(ci);
+			int mi = fCtor(ci, scanArgc(false));
 			if (mi >= 0) eMBody(mi);
 			else skipMDecl();
 			return;
@@ -139,7 +139,7 @@ class E {
 		Catalog.skipTy();
 		int nm = C.iN();
 		if (Tk.type == Tk.LPAREN) {
-			int mi = fMeth(ci, nm);
+			int mi = fMeth(ci, nm, Catalog.mStat, scanArgc(Catalog.mStat));
 			if (mi >= 0 && !C.mNative[mi] && C.mBodyS[mi] >= 0) {
 				eMBody(mi);
 			} else {
@@ -289,18 +289,49 @@ class E {
 		}
 	}
 
-	static int fMeth(int ci, int nm) {
+	static int scanArgc(boolean isStat) {
+		int savedTok = Tk.type;
+		int savedLine = Tk.line;
+		Lexer.save();
+		Lexer.expect(Tk.LPAREN);
+		int argc = isStat ? 0 : 1;
+		boolean isVarargs = false;
+		int fixedCount = 0;
+		while (Tk.type != Tk.RPAREN && Tk.type != Tk.EOF) {
+			Catalog.skipTy();
+			if (Tk.type == Tk.ELLIPSIS) {
+				isVarargs = true;
+				fixedCount = argc - (isStat ? 0 : 1);
+				Lexer.nextToken();
+			}
+			Lexer.nextToken();
+			argc++;
+			if (Tk.type == Tk.COMMA) Lexer.nextToken();
+		}
+		Lexer.expect(Tk.RPAREN);
+		Lexer.restore();
+		Tk.type = savedTok;
+		Tk.line = savedLine;
+		if (isVarargs) argc = argc - 1 + C.MAX_VA_SLOTS + 1;
+		return argc;
+	}
+
+	static int fMeth(int ci, int nm, boolean isStat, int argc) {
 		for (int mi = 0; mi < C.mCount; mi++) {
-			if (C.mClass[mi] == ci && C.mName[mi] == nm && !C.mNative[mi]) {
+			if (C.mClass[mi] == ci && C.mName[mi] == nm &&
+				C.mStatic[mi] == isStat && !C.mNative[mi] &&
+				(C.mArgC[mi] == argc ||
+				 (nm == C.N_MAIN && isStat && argc == 1 && C.mArgC[mi] == 0))) {
 				return mi;
 			}
 		}
 		return -1;
 	}
 
-	static int fCtor(int ci) {
+	static int fCtor(int ci, int argc) {
 		for (int mi = 0; mi < C.mCount; mi++) {
-			if (C.mClass[mi] == ci && C.mIsCtor[mi] && !C.mNative[mi]) {
+			if (C.mClass[mi] == ci && C.mIsCtor[mi] &&
+				C.mArgC[mi] == argc && !C.mNative[mi]) {
 				return mi;
 			}
 		}
@@ -326,7 +357,7 @@ class E {
 		// Set up parameters as locals
 		if (C.mIsCtor[mi]) {
 			// Constructor: skip params in source, set up 'this'
-			aLoc(C.N_INIT, 0); // 'this'
+			aLoc(C.N_INIT, 1, C.cName[C.curCi]); // 'this'
 			// Parse constructor parameters
 			pParams();
 
@@ -346,7 +377,7 @@ class E {
 		} else {
 			// Regular method
 			if (!C.curMStatic) {
-				aLoc(C.iStr("this"), 1); // 'this' is slot 0
+				aLoc(C.iStr("this"), 1, C.cName[C.curCi]); // 'this' is slot 0
 			}
 
 			pParams();
@@ -425,6 +456,7 @@ class E {
 		// Returns: 0=int, 1=ref, 3=int[], 4=byte[], 5=char[], 8=short[]
 		int baseType = 0;
 		int elemKind = 0; // 0=int-like, 1=byte, 2=char, 3=short
+		tyRefNm = -1;
 		if (Tk.type == Tk.BYTE || Tk.type == Tk.BOOLEAN) {
 			elemKind = 1; Lexer.nextToken();
 		} else if (Tk.type == Tk.CHAR) {
@@ -433,9 +465,13 @@ class E {
 			elemKind = 3; Lexer.nextToken();
 		} else if (Tk.type == Tk.INT) {
 			elemKind = 0; Lexer.nextToken();
+		} else if (Tk.type == Tk.STRING_KW) {
+			baseType = 1;
+			tyRefNm = C.N_STRING;
+			Lexer.nextToken();
 		} else {
 			baseType = 1; // reference
-			Lexer.nextToken();
+			tyRefNm = C.iN();
 		}
 		// Array dimensions
 		int dimCount = 0;
@@ -445,6 +481,7 @@ class E {
 			dimCount++;
 		}
 		if (dimCount > 0) {
+			tyRefNm = -1;
 			if (baseType == 1 || dimCount > 1) return 1; // Object[]/multi-dim = reference
 			if (elemKind == 1) return 4; // byte[]
 			if (elemKind == 2) return 5; // char[]
@@ -454,7 +491,7 @@ class E {
 		return baseType; // 0=int, 1=ref
 	}
 
-
+	static int tyRefNm = -1; // declared ref type for the last parsed local/param type
 	static int vaPN = -1;  // varargs param name index (-1 = not varargs)
 	static int vaET;       // varargs element type token (Tk.INT, Tk.BYTE, etc.)
 
@@ -464,6 +501,7 @@ class E {
 		while (Tk.type != Tk.RPAREN && Tk.type != Tk.EOF) {
 			int savedTyTok = Tk.type;
 			int pType = pTypeLoc();
+			int pRefNm = tyRefNm;
 			if (Tk.type == Tk.ELLIPSIS) {
 				// Varargs parameter — must be last
 				Lexer.nextToken(); // skip '...'
@@ -482,7 +520,7 @@ class E {
 				break;
 			}
 			int pNm = C.iN();
-			aLoc(pNm, pType);
+			aLoc(pNm, pType, pRefNm);
 			if (Tk.type == Tk.COMMA) Lexer.nextToken();
 		}
 		Lexer.expect(Tk.RPAREN);
@@ -603,10 +641,15 @@ class E {
 	}
 
 	static void aLoc(int nm, int type) {
+		aLoc(nm, type, -1);
+	}
+
+	static void aLoc(int nm, int type, int refNm) {
 		C.chk(C.locCount, C.MAX_LOCALS, 257);
 		C.locName[C.locCount] = (short)nm;
 		C.locSlot[C.locCount] = (byte)C.locCount;
 		C.locType[C.locCount] = (byte)type;
+		C.locRefNm[C.locCount] = (short)refNm;
 		C.locCount++;
 		if (C.locCount > C.locNext) C.locNext = C.locCount;
 	}

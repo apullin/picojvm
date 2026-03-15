@@ -99,7 +99,8 @@ public class Resolver {
 				int slot = -1;
 				for (int j = 0; j < C.cVtSize[ci]; j++) {
 					int existingMi = C.vtable[C.vtBase[ci] + j];
-					if (C.mName[existingMi] == C.mName[mi]) {
+					if (C.mName[existingMi] == C.mName[mi] &&
+						C.mArgC[existingMi] == C.mArgC[mi]) {
 						slot = j;
 						break;
 					}
@@ -134,13 +135,14 @@ public class Resolver {
 				for (int imi = 0; imi < C.mCount; imi++) {
 					if (C.mClass[imi] != ifId) continue;
 					// Find matching method in implementing class
-					for (int cmi = 0; cmi < C.mCount; cmi++) {
-						if (C.mClass[cmi] != ci) continue;
-						if (C.mName[cmi] == C.mName[imi]) {
-							C.mVmid[cmi] = C.mVmid[imi];
+						for (int cmi = 0; cmi < C.mCount; cmi++) {
+							if (C.mClass[cmi] != ci) continue;
+							if (C.mName[cmi] == C.mName[imi] &&
+								C.mArgC[cmi] == C.mArgC[imi]) {
+								C.mVmid[cmi] = C.mVmid[imi];
+							}
 						}
 					}
-				}
 			}
 		}
 
@@ -228,19 +230,61 @@ public class Resolver {
 	}
 
 	static int fStatField(int ci, int nm) {
-		int best = -1;
-		for (int fi = 0; fi < C.fCount; fi++) {
-			if (C.fName[fi] == nm && C.fStatic[fi]) {
-				if (C.fClass[fi] == ci) return fi;
-				if (best < 0) best = fi;
+		while (ci >= 0) {
+			for (int fi = 0; fi < C.fCount; fi++) {
+				if (C.fClass[fi] == ci && C.fName[fi] == nm && C.fStatic[fi]) {
+					return fi;
+				}
 			}
+			ci = C.cParent[ci];
 		}
-		return best;
+		return -1;
 	}
 
-	static int fInstField(int nm) {
-		for (int fi = 0; fi < C.fCount; fi++) {
-			if (C.fName[fi] == nm && !C.fStatic[fi]) return fi;
+	static int fInstField(int ci, int nm) {
+		while (ci >= 0) {
+			for (int fi = 0; fi < C.fCount; fi++) {
+				if (C.fClass[fi] == ci && C.fName[fi] == nm && !C.fStatic[fi]) {
+					return fi;
+				}
+			}
+			ci = C.cParent[ci];
+		}
+		return -1;
+	}
+
+	static int fMethod(int ci, int nm, boolean isStatic) {
+		while (ci >= 0) {
+			for (int mi = 0; mi < C.mCount; mi++) {
+				if (C.mClass[mi] == ci && C.mName[mi] == nm &&
+					C.mStatic[mi] == isStatic && !C.mIsCtor[mi]) {
+					return mi;
+				}
+			}
+			ci = C.cParent[ci];
+		}
+		return -1;
+	}
+
+	static int fMethodExact(int ci, int nm, boolean isStatic, int argc) {
+		while (ci >= 0) {
+			int varargsMi = -1;
+			for (int mi = 0; mi < C.mCount; mi++) {
+				if (C.mClass[mi] != ci || C.mName[mi] != nm ||
+					C.mStatic[mi] != isStatic || C.mIsCtor[mi]) {
+					continue;
+				}
+				if (!C.mVarargs[mi]) {
+					if (C.mArgC[mi] == argc) return mi;
+					continue;
+				}
+				int minArgc = (isStatic ? 0 : 1) + C.mFixedArgs[mi];
+				if (argc >= minArgc && argc <= minArgc + C.MAX_VA_SLOTS && varargsMi < 0) {
+					varargsMi = mi;
+				}
+			}
+			if (varargsMi >= 0) return varargsMi;
+			ci = C.cParent[ci];
 		}
 		return -1;
 	}

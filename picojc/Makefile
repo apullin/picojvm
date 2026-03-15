@@ -11,6 +11,7 @@ SRCDIR  = src
 BUILDDIR = build
 TESTDIR = tests
 EXPDIR  = expected
+NEGDIR  = tests-negative
 
 # All compiler source files
 SRCS = $(SRCDIR)/Compiler.java $(SRCDIR)/Token.java $(SRCDIR)/Lexer.java $(SRCDIR)/Native.java \
@@ -30,7 +31,11 @@ TESTS = T01_Empty T02_Literal T03_Arithmetic T04_IfElse T05_WhileLoop \
         T36_CharArray T37_Recursion T38_LinkedList T39_NativeOps T41_FileIO \
         T42_ShortArray T43_FinalInline T44_Enum T45_ForEach T46_Varargs \
         T47_MultiDimArray T48_CompoundAssign T49_MultiInterface T50_SwitchEdge \
-        T51_ObjectCast T52_CommaLocal T53_Precedence T54_InheritField
+        T51_ObjectCast T52_CommaLocal T53_Precedence T54_InheritField \
+        T55_ExactDispatch T56_OverloadDispatch T57_InheritedOverload
+
+NEGTESTS = N01_InvalidStaticCall N02_OverloadSameClass \
+           N03_OverloadInherited N04_SwitchTooManyCases
 
 # Tests requiring lib/ (platform package)
 LIB_SRCS = ../lib/Console.java ../lib/Arrays.java ../lib/IO.java
@@ -112,6 +117,25 @@ test-%: $(BUILDDIR)/%.out $(EXPDIR)/%.txt
 		false; \
 	fi
 
+# Compile a negative test and capture the compiler error text
+$(BUILDDIR)/neg_%.err: $(NEGDIR)/%.java $(BUILDDIR)/picojc.pjvm $(PICOJVM)
+	$(PICOJVM) $(BUILDDIR)/picojc.pjvm \
+		--preload 0xC000:$< \
+		--save-raw 0xC000:/dev/null \
+		> $@ 2> $(BUILDDIR)/neg_$*_compile.log || true
+	@cat $(BUILDDIR)/neg_$*_compile.log | grep -E '^(picoJVM|HALT|PAGE)' || true
+
+# Test a negative program: compile should fail with the expected error code regex
+test-negative-%: $(BUILDDIR)/neg_%.err $(NEGDIR)/%.re
+	@if grep -Eq -f $(NEGDIR)/$*.re $(BUILDDIR)/neg_$*.err; then \
+		echo "PASS: $* (negative)"; \
+	else \
+		echo "FAIL: $* (negative)"; \
+		echo "  Expected regex:"; cat $(NEGDIR)/$*.re; \
+		echo "  Got:"; cat $(BUILDDIR)/neg_$*.err | head -5; \
+		false; \
+	fi
+
 # Run all tests
 test: $(PICOJVM) $(BUILDDIR)/picojc.pjvm
 	@mkdir -p $(BUILDDIR)
@@ -136,6 +160,21 @@ test: $(PICOJVM) $(BUILDDIR)/picojc.pjvm
 	echo ""; \
 	total=$$((pass + fail)); \
 	echo "Results: $$pass passed, $$fail failed out of $$total tests"; \
+	test $$fail -eq 0
+
+test-negative: $(PICOJVM) $(BUILDDIR)/picojc.pjvm
+	@mkdir -p $(BUILDDIR)
+	@pass=0; fail=0; \
+	for t in $(NEGTESTS); do \
+		echo "--- $$t ---"; \
+		if $(MAKE) --no-print-directory test-negative-$$t 2>&1; then \
+			pass=$$((pass + 1)); \
+		else \
+			fail=$$((fail + 1)); \
+		fi; \
+	done; \
+	echo ""; \
+	echo "Negative tests: $$pass passed, $$fail failed out of $$(echo $(NEGTESTS) | wc -w | tr -d ' ')"; \
 	test $$fail -eq 0
 
 # --- Disk-backed compiler ---
@@ -354,14 +393,14 @@ test-selfhost: test-selfhost-fixpoint test-binmatch test-gen1
 	@echo "=== Self-hosting regression: ALL PASSED ==="
 
 # Everything: unit tests + selfhost + disk modes
-test-all: test test-selfhost-fixpoint test-disk test-disk-multi test-disk-selfhost
+test-all: test test-negative test-selfhost test-disk test-disk-multi test-disk-selfhost
 	@echo ""
 	@echo "=== ALL TESTS PASSED ==="
 
 clean:
 	rm -rf $(BUILDDIR)
 
-.PHONY: all test test-all build check-javac clean test-disk test-disk-multi test-disk-selfhost
+.PHONY: all test test-negative test-all build check-javac clean test-disk test-disk-multi test-disk-selfhost
 .PHONY: test-selfhost test-selfhost-fixpoint test-binmatch test-gen1
 .PRECIOUS: $(BUILDDIR)/%.pjvm $(BUILDDIR)/%.out
 .PRECIOUS: $(BUILDDIR)/gen1_%.pjvm $(BUILDDIR)/gen1_%.out

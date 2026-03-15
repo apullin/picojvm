@@ -217,39 +217,16 @@ class C {
 	static void initNames() {
 		npLen = 0;
 		nCount = 0;
-		iStr("Object");
-		iStr("String");
-		iStr("Native");
-		iStr("main");
-		iStr("<init>");
-		iStr("<clinit>");
-		iStr("Throwable");
-		iStr("Exception");
-		iStr("RuntimeException");
-		iStr("putchar");
-		iStr("in");
-		iStr("out");
-		iStr("peek");
-		iStr("poke");
-		iStr("halt");
-		iStr("print");
-		iStr("arraycopy");
-		iStr("memcmp");
-		iStr("writeBytes");
-		iStr("stringFromBytes");
-		iStr("fileOpen");
-		iStr("fileReadByte");
-		iStr("fileWriteByte");
-		iStr("fileRead");
-		iStr("fileWrite");
-		iStr("fileClose");
-		iStr("fileDelete");
-		iStr("length");
-		iStr("charAt");
-		iStr("equals");
-		iStr("toString");
-		iStr("hashCode");
-		iStr("args");
+		String[] seeds = {
+			"Object", "String", "Native", "main", "<init>", "<clinit>",
+			"Throwable", "Exception", "RuntimeException",
+			"putchar", "in", "out", "peek", "poke", "halt", "print",
+			"arraycopy", "memcmp", "writeBytes", "stringFromBytes",
+			"fileOpen", "fileReadByte", "fileWriteByte", "fileRead",
+			"fileWrite", "fileClose", "fileDelete",
+			"length", "charAt", "equals", "toString", "hashCode", "args"
+		};
+		for (int i = 0; i < seeds.length; i++) iStr(seeds[i]);
 	}
 
 	static byte[] iTmp = new byte[256];

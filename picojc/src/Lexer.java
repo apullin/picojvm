@@ -8,7 +8,7 @@ public class Lexer {
 
 	// Disk streaming mode
 	static boolean diskMode;
-	static byte[] dBuf;     // sector buffer (256 bytes = 2 sectors)
+	static byte[] dBuf;     // streaming buffer; can grow while lookahead pins old bytes
 	static int dBase;       // file offset of dBuf[0]
 	static int dLen;        // valid bytes in buffer
 	static boolean dEof;    // true when file is exhausted
@@ -117,7 +117,15 @@ public class Lexer {
 	// Fill buffer from disk (128B sector read)
 	static void dFill() {
 		if (dEof) return;
-		int space = 256 - dLen;
+		int space = dBuf.length - dLen;
+		if (space < 128 && dSaved) {
+			int newLen = dBuf.length;
+			while (newLen - dLen < 128) newLen = newLen << 1;
+			byte[] bigger = new byte[newLen];
+			Native.arraycopy(dBuf, 0, bigger, 0, dLen);
+			dBuf = bigger;
+			space = dBuf.length - dLen;
+		}
 		if (space < 128) return;
 		int n = Native.fileRead(dBuf, dLen, 128);
 		if (n <= 0) { dEof = true; return; }
@@ -256,58 +264,28 @@ public class Lexer {
 	static int kwCount;
 
 	static void initKeywords() {
-		kwCount = 0;
-		kwNames = new String[52];
-		kwTokens = new int[52];
-		addKw("class",      Tk.CLASS);
-		addKw("extends",    Tk.EXTENDS);
-		addKw("implements", Tk.IMPLEMENTS);
-		addKw("interface",  Tk.INTERFACE);
-		addKw("static",     Tk.STATIC);
-		addKw("public",     Tk.PUBLIC);
-		addKw("private",    Tk.PRIVATE);
-		addKw("protected",  Tk.PROTECTED);
-		addKw("void",       Tk.VOID);
-		addKw("int",        Tk.INT);
-		addKw("byte",       Tk.BYTE);
-		addKw("char",       Tk.CHAR);
-		addKw("short",      Tk.SHORT);
-		addKw("boolean",    Tk.BOOLEAN);
-		addKw("if",         Tk.IF);
-		addKw("else",       Tk.ELSE);
-		addKw("while",      Tk.WHILE);
-		addKw("do",         Tk.DO);
-		addKw("for",        Tk.FOR);
-		addKw("switch",     Tk.SWITCH);
-		addKw("case",       Tk.CASE);
-		addKw("default",    Tk.DEFAULT);
-		addKw("break",      Tk.BREAK);
-		addKw("continue",   Tk.CONTINUE);
-		addKw("return",     Tk.RETURN);
-		addKw("new",        Tk.NEW);
-		addKw("null",       Tk.NULL);
-		addKw("this",       Tk.THIS);
-		addKw("throw",      Tk.THROW);
-		addKw("try",        Tk.TRY);
-		addKw("catch",      Tk.CATCH);
-		addKw("finally",    Tk.FINALLY);
-		addKw("instanceof", Tk.INSTANCEOF);
-		addKw("true",       Tk.TRUE);
-		addKw("false",      Tk.FALSE);
-		addKw("native",     Tk.NATIVE);
-		addKw("super",      Tk.SUPER);
-		addKw("final",      Tk.FINAL);
-		addKw("abstract",   Tk.ABSTRACT);
-		addKw("String",     Tk.STRING_KW);
-		addKw("package",    Tk.PACKAGE);
-		addKw("import",     Tk.IMPORT);
-		addKw("enum",       Tk.ENUM);
-	}
-
-	static void addKw(String name, int tok) {
-		kwNames[kwCount] = name;
-		kwTokens[kwCount] = tok;
-		kwCount++;
+		// Keyword tables are fixed compiler data; keep them as compact local literals.
+		kwNames = new String[] {
+			"class", "extends", "implements", "interface",
+			"static", "public", "private", "protected",
+			"void", "int", "byte", "char", "short", "boolean",
+			"if", "else", "while", "do", "for",
+			"switch", "case", "default", "break", "continue", "return",
+			"new", "null", "this", "throw", "try", "catch", "finally",
+			"instanceof", "true", "false", "native", "super",
+			"final", "abstract", "String", "package", "import", "enum"
+		};
+		kwTokens = new int[] {
+			Tk.CLASS, Tk.EXTENDS, Tk.IMPLEMENTS, Tk.INTERFACE,
+			Tk.STATIC, Tk.PUBLIC, Tk.PRIVATE, Tk.PROTECTED,
+			Tk.VOID, Tk.INT, Tk.BYTE, Tk.CHAR, Tk.SHORT, Tk.BOOLEAN,
+			Tk.IF, Tk.ELSE, Tk.WHILE, Tk.DO, Tk.FOR,
+			Tk.SWITCH, Tk.CASE, Tk.DEFAULT, Tk.BREAK, Tk.CONTINUE, Tk.RETURN,
+			Tk.NEW, Tk.NULL, Tk.THIS, Tk.THROW, Tk.TRY, Tk.CATCH, Tk.FINALLY,
+			Tk.INSTANCEOF, Tk.TRUE, Tk.FALSE, Tk.NATIVE, Tk.SUPER,
+			Tk.FINAL, Tk.ABSTRACT, Tk.STRING_KW, Tk.PACKAGE, Tk.IMPORT, Tk.ENUM
+		};
+		kwCount = kwNames.length;
 	}
 
 	static int lookupKeyword() {

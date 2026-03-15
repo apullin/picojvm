@@ -1,8 +1,72 @@
 public class Catalog {
+	static final int MAX_IMPORTS = 32;
+	static int curPkgNm = -1;
+	static int[] impSimple = new int[MAX_IMPORTS];
+	static int[] impFull = new int[MAX_IMPORTS];
+	static int impCount;
+
 	static void catalog() {
 		C.uClsStart = C.cCount;
+		curPkgNm = -1;
+		impCount = 0;
 		while (Tk.type != Tk.EOF) {
+			scanTopDecls();
+			if (Tk.type == Tk.EOF) break;
 			catClass();
+		}
+	}
+
+	static boolean isBuiltinType(int nm) {
+		return nm == C.N_OBJECT || nm == C.N_STRING || nm == C.N_NATIVE ||
+			   nm == C.N_THROWABLE || nm == C.N_EXCEPTION || nm == C.N_RUNTIME_EX;
+	}
+
+	static int resolveTypeNm(int nm) {
+		if (isBuiltinType(nm)) return nm;
+		for (int i = impCount - 1; i >= 0; i--) {
+			if (impSimple[i] == nm) return impFull[i];
+		}
+		if (curPkgNm >= 0) return C.dotNm(curPkgNm, nm);
+		return nm;
+	}
+
+	static int parseTypeNm() {
+		int nm = C.iN();
+		boolean qualified = false;
+		while (Tk.type == Tk.DOT) {
+			Lexer.nextToken();
+			nm = C.dotNm(nm, C.iN());
+			qualified = true;
+		}
+		return qualified ? nm : resolveTypeNm(nm);
+	}
+
+	static int parseRawQName() {
+		int nm = C.iN();
+		while (Tk.type == Tk.DOT) {
+			Lexer.nextToken();
+			nm = C.dotNm(nm, C.iN());
+		}
+		return nm;
+	}
+
+	static void scanTopDecls() {
+		while (Tk.type == Tk.PACKAGE || Tk.type == Tk.IMPORT) {
+			if (Tk.type == Tk.PACKAGE) {
+				Lexer.nextToken();
+				curPkgNm = parseRawQName();
+				impCount = 0;
+				Lexer.expect(Tk.SEMI);
+			} else {
+				Lexer.nextToken();
+				int fullNm = parseRawQName();
+				if (impCount < MAX_IMPORTS) {
+					impSimple[impCount] = C.tailNm(fullNm);
+					impFull[impCount] = fullNm;
+					impCount++;
+				}
+				Lexer.expect(Tk.SEMI);
+			}
 		}
 	}
 
@@ -29,16 +93,18 @@ public class Catalog {
 		}
 
 		// Class/interface name
-		int nm = C.iN();
+		int simpleNm = C.iN();
+		int nm = curPkgNm >= 0 ? C.dotNm(curPkgNm, simpleNm) : simpleNm;
 
 		int ci = C.initClass(nm);
+		C.cSimple[ci] = (short)simpleNm;
 		C.cIsIface[ci] = isIface;
 		C.cIsEnum[ci] = isEnum;
 
 		// extends?
 		if (Tk.type == Tk.EXTENDS) {
 			Lexer.nextToken();
-			int parentNm = C.iN();
+			int parentNm = parseTypeNm();
 			// Resolve parent later; store name for now
 			C.cParent[ci] = (short)parentNm; // store as name index, resolve in Pass 2
 		}
@@ -47,11 +113,10 @@ public class Catalog {
 		if (Tk.type == Tk.IMPLEMENTS) {
 			Lexer.nextToken();
 			while (Tk.type == Tk.IDENT || Tk.type == Tk.STRING_KW) {
-				int ifNm = C.intern(Tk.strBuf, Tk.strLen);
+				int ifNm = parseTypeNm();
 				C.chk(C.ifListLen, 64, 255);
 				C.ifList[C.ifListLen++] = (byte)ifNm; // store as name, resolve later
 				C.cIfaceC[ci]++;
-				Lexer.nextToken();
 				if (Tk.type == Tk.COMMA) Lexer.nextToken();
 				else break;
 			}
@@ -106,7 +171,7 @@ public class Catalog {
 	static boolean isCtor(int ci) {
 		if (Tk.type != Tk.IDENT) return false;
 		int nm = C.intern(Tk.strBuf, Tk.strLen);
-		if (nm != C.cName[ci]) return false;
+		if (nm != C.cSimple[ci]) return false;
 		Lexer.save();
 		Lexer.nextToken();
 		if (Tk.type == Tk.LPAREN) {
@@ -172,7 +237,7 @@ public class Catalog {
 			Lexer.nextToken();
 		} else if (typeTok == Tk.IDENT) {
 			tyBase = 2;
-			tyRefNm = C.iN();
+			tyRefNm = parseTypeNm();
 		} else {
 			return;
 		}

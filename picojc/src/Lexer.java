@@ -257,8 +257,8 @@ public class Lexer {
 
 	static void initKeywords() {
 		kwCount = 0;
-		kwNames = new String[48];
-		kwTokens = new int[48];
+		kwNames = new String[52];
+		kwTokens = new int[52];
 		addKw("class",      Tk.CLASS);
 		addKw("extends",    Tk.EXTENDS);
 		addKw("implements", Tk.IMPLEMENTS);
@@ -299,6 +299,8 @@ public class Lexer {
 		addKw("final",      Tk.FINAL);
 		addKw("abstract",   Tk.ABSTRACT);
 		addKw("String",     Tk.STRING_KW);
+		addKw("package",    Tk.PACKAGE);
+		addKw("import",     Tk.IMPORT);
 		addKw("enum",       Tk.ENUM);
 	}
 

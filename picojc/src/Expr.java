@@ -281,7 +281,7 @@ public class Expr {
 					type = 1;
 					clearRefInfo();
 				} else if (tok == Tk.INSTANCEOF) {
-					int classNm = C.iN();
+					int classNm = Catalog.parseTypeNm();
 					E.pop();
 					int ci = Resolver.fClsByNm(classNm);
 					int cpIdx = E.aCP(ci >= 0 ? ci : 0);
@@ -392,7 +392,7 @@ public class Expr {
 			if (Stmt.isTyTok(Tk.type) || Tk.type == Tk.IDENT) {
 				int castType = Tk.type;
 				int castNm = -1;
-				if (Tk.type == Tk.IDENT) castNm = C.intern(Tk.strBuf, Tk.strLen);
+				if (Tk.type == Tk.IDENT) castNm = Catalog.resolveTypeNm(C.intern(Tk.strBuf, Tk.strLen));
 				Lexer.nextToken();
 				if (Tk.type == Tk.RPAREN) {
 					// It's a cast
@@ -584,18 +584,19 @@ public class Expr {
 		}
 		if (Tk.type == Tk.IDENT || Tk.type == Tk.STRING_KW) {
 			int nm = C.iN();
+			int classNm = Catalog.resolveTypeNm(nm);
 
 			// Check for static method call or field access: Name.member
 				if (Tk.type == Tk.DOT) {
 					// Could be ClassName.method() or ClassName.field
-					int ci = Resolver.fClsByNm(nm);
-					if (ci >= 0 || nm == C.N_NATIVE || nm == C.N_STRING) {
+					int ci = Resolver.fClsByNm(classNm);
+					if (ci >= 0 || classNm == C.N_NATIVE || classNm == C.N_STRING) {
 						Lexer.nextToken();
 						int memberNm = C.iN();
 
 						if (Tk.type == Tk.LPAREN) {
 							// Static method call
-							return eCall(nm, memberNm, E.INVOKESTATIC, 204);
+							return eCall(classNm, memberNm, E.INVOKESTATIC, 204);
 						} else {
 							// Static field access
 							int fi = Resolver.fStatField(ci, memberNm);
@@ -727,7 +728,7 @@ public class Expr {
 		}
 
 		// Object or reference array: new ClassName(...), new ClassName[size], new ClassName[]{...}
-		int classNm = C.iN();
+		int classNm = Catalog.parseTypeNm();
 
 		if (Tk.type == Tk.LBRACKET) {
 			// Reference array: new ClassName[size] or new ClassName[]{...}

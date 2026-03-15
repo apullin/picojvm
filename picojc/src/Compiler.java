@@ -3,7 +3,7 @@ class C {
 	// Limits — sized to fit in picoJVM 64KB heap
 	static final int MAX_CLASSES  = 32;
 	// Leave headroom for self-hosting feature work until method storage is dynamic.
-	static final int MAX_METHODS  = 224;
+	static final int MAX_METHODS  = 240;
 	static final int MAX_FIELDS   = 416;
 	static final int MAX_NAMES    = 896;
 	static final int MAX_CP       = 2560;
@@ -36,6 +36,7 @@ class C {
 	// --- Class table ---
 	static int cCount;
 	static short[] cName   = new short[MAX_CLASSES]; // name index
+	static short[] cSimple = new short[MAX_CLASSES]; // simple source name
 	static short[] cParent = new short[MAX_CLASSES]; // class id (-1 = Object)
 	static byte[] cFieldC = new byte[MAX_CLASSES]; // instance field count (incl inherited)
 	static byte[] cOwnF  = new byte[MAX_CLASSES]; // own instance fields
@@ -278,6 +279,48 @@ class C {
 
 	static int iN() { int n = intern(Tk.strBuf, Tk.strLen); Lexer.nextToken(); return n; }
 
+	static int dotNm(int leftNm, int rightNm) {
+		int leftLen = nLen[leftNm];
+		int rightLen = nLen[rightNm];
+		int totalLen = leftLen + 1 + rightLen;
+		if (totalLen > 255) {
+			Lexer.error(251);
+			return rightNm;
+		}
+		Native.arraycopy(nPool, nOff[leftNm], iTmp, 0, leftLen);
+		iTmp[leftLen] = (byte)'.';
+		Native.arraycopy(nPool, nOff[rightNm], iTmp, leftLen + 1, rightLen);
+		return intern(iTmp, totalLen);
+	}
+
+	static int tailNm(int nm) {
+		int off = nOff[nm];
+		int len = nLen[nm];
+		int start = 0;
+		for (int i = 0; i < len; i++) {
+			if (nPool[off + i] == '.') start = i + 1;
+		}
+		if (start == 0) return nm;
+		return intern(nPool, off + start, len - start);
+	}
+
+	static int intern(byte[] buf, int off, int len) {
+		for (int i = 0; i < nCount; i++) {
+			if (nLen[i] == len && Native.memcmp(nPool, nOff[i], buf, off, len) == 0)
+				return i;
+		}
+		if (nCount >= MAX_NAMES || npLen + len > 7168) {
+			Lexer.error(251);
+			return 0;
+		}
+		int idx = nCount++;
+		nOff[idx] = npLen;
+		nLen[idx] = len;
+		Native.arraycopy(buf, off, nPool, npLen, len);
+		npLen += len;
+		return idx;
+	}
+
 	// ==================== HELPERS ====================
 
 	// Limit check: error if count >= max
@@ -303,6 +346,7 @@ class C {
 		chk(cCount, MAX_CLASSES, 253);
 		int ci = cCount++;
 		cName[ci] = (short)nm; cParent[ci] = -1; cIsIface[ci] = false;
+		cSimple[ci] = (short)nm;
 		cClinit[ci] = 0xFF; cIfaceS[ci] = (byte)ifListLen; cIfaceC[ci] = 0; cOwnF[ci] = 0;
 		return ci;
 	}

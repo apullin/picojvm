@@ -63,7 +63,7 @@ public class Stmt {
 			Lexer.nextToken();
 			if (Tk.type == Tk.IDENT ||
 				(Tk.type == Tk.LBRACKET &&
-				 Resolver.fClsByNm(nm) >= 0)) {
+				 Resolver.fClsByNm(Catalog.resolveTypeNm(nm)) >= 0)) {
 				// It's a type name followed by a variable name — declaration
 				Lexer.restore();
 				Tk.type = savedType;
@@ -538,7 +538,7 @@ public class Stmt {
 			Lexer.expect(Tk.LPAREN);
 
 			// Exception type
-			int excNm = C.iN();
+			int excNm = Catalog.parseTypeNm();
 
 			// Exception variable name
 			int varNm = C.iN();

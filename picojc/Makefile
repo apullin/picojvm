@@ -12,6 +12,7 @@ BUILDDIR = build
 TESTDIR = tests
 EXPDIR  = expected
 NEGDIR  = tests-negative
+PKGDIR  = tests-pkg
 
 # All compiler source files
 SRCS = $(SRCDIR)/Compiler.java $(SRCDIR)/Token.java $(SRCDIR)/Lexer.java $(SRCDIR)/Native.java \
@@ -33,7 +34,8 @@ TESTS = T01_Empty T02_Literal T03_Arithmetic T04_IfElse T05_WhileLoop \
         T47_MultiDimArray T48_CompoundAssign T49_MultiInterface T50_SwitchEdge \
         T51_ObjectCast T52_CommaLocal T53_Precedence T54_InheritField \
         T55_ExactDispatch T56_OverloadDispatch T57_InheritedOverload \
-        T58_Super T59_NarrowWrap T60_NarrowAssign T62_ArrayInit
+        T58_Super T59_NarrowWrap T60_NarrowAssign T62_ArrayInit \
+        T63_PackageLocal
 
 NEGTESTS = N01_InvalidStaticCall N02_OverloadSameClass \
            N03_OverloadInherited N04_SwitchTooManyCases \
@@ -282,6 +284,27 @@ test-disk-multi: $(PICOJVM) $(BUILDDIR)/picojc-disk.pjvm
 		false; \
 	fi
 
+# Multi-file package/import test: same-package lookup plus explicit import.
+test-disk-package: $(PICOJVM) $(BUILDDIR)/picojc-disk.pjvm
+	@mkdir -p $(BUILDDIR)/disk_pkg_test
+	@cp $(PKGDIR)/Helper.java $(BUILDDIR)/disk_pkg_test/
+	@cp $(PKGDIR)/Local.java $(BUILDDIR)/disk_pkg_test/
+	@cp $(PKGDIR)/T64_PackageImport.java $(BUILDDIR)/disk_pkg_test/
+	@printf 'Helper.java\nLocal.java\nT64_PackageImport.java\n' > $(BUILDDIR)/disk_pkg_test/sources.lst
+	@echo "--- T64_PackageImport (disk package) ---"
+	@cd $(BUILDDIR)/disk_pkg_test && $(DISK_PICOJVM) $(DISK_COMPILER) > T64.pjvm \
+		2> T64_compile.log
+	@$(PICOJVM) $(BUILDDIR)/disk_pkg_test/T64.pjvm > $(BUILDDIR)/disk_pkg_test/T64.out \
+		2> $(BUILDDIR)/disk_pkg_test/T64_run.log || true
+	@if diff -q $(BUILDDIR)/disk_pkg_test/T64.out $(EXPDIR)/T64_PackageImport.txt > /dev/null 2>&1; then \
+		echo "PASS: T64_PackageImport (disk package)"; \
+	else \
+		echo "FAIL: T64_PackageImport (disk package)"; \
+		echo "  Expected:"; cat $(EXPDIR)/T64_PackageImport.txt | head -3; \
+		echo "  Got:"; cat $(BUILDDIR)/disk_pkg_test/T64.out | head -3; \
+		false; \
+	fi
+
 # Disk selfhost: compile compiler sources via sources.lst, verify byte-identical to memory mode
 test-disk-selfhost: $(PICOJVM) $(BUILDDIR)/picojc-disk.pjvm $(BUILDDIR)/gen1.pjvm
 	@mkdir -p $(BUILDDIR)/disk_selfhost
@@ -411,14 +434,14 @@ test-selfhost: test-selfhost-fixpoint test-binmatch test-gen1
 	@echo "=== Self-hosting regression: ALL PASSED ==="
 
 # Everything: unit tests + selfhost + disk modes
-test-all: test test-negative test-selfhost test-disk test-disk-multi test-disk-selfhost
+test-all: test test-negative test-selfhost test-disk test-disk-multi test-disk-package test-disk-selfhost
 	@echo ""
 	@echo "=== ALL TESTS PASSED ==="
 
 clean:
 	rm -rf $(BUILDDIR)
 
-.PHONY: all test test-negative test-all build check-javac clean test-disk test-disk-multi test-disk-selfhost
+.PHONY: all test test-negative test-all build check-javac clean test-disk test-disk-multi test-disk-package test-disk-selfhost
 .PHONY: test-selfhost test-selfhost-fixpoint test-binmatch test-gen1
 .PRECIOUS: $(BUILDDIR)/%.pjvm $(BUILDDIR)/%.out
 .PRECIOUS: $(BUILDDIR)/gen1_%.pjvm $(BUILDDIR)/gen1_%.out

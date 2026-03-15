@@ -290,6 +290,28 @@ public class Resolver {
 		return -1;
 	}
 
+	// Exact declaration lookup for emit-time body matching; calls use fMethodExact/fCallTarget.
+	static int fDeclaredMethod(int ci, int nm, boolean isStatic, int argc) {
+		for (int mi = 0; mi < C.mCount; mi++) {
+			if (C.mClass[mi] == ci && C.mName[mi] == nm &&
+				C.mStatic[mi] == isStatic && !C.mIsCtor[mi] &&
+				!C.mNative[mi] && C.mArgC[mi] == argc) {
+				return mi;
+			}
+		}
+		return -1;
+	}
+
+	static int fCtor(int ci, int argc) {
+		for (int mi = 0; mi < C.mCount; mi++) {
+			if (C.mClass[mi] == ci && C.mIsCtor[mi] &&
+				C.mArgC[mi] == argc && !C.mNative[mi]) {
+				return mi;
+			}
+		}
+		return -1;
+	}
+
 	// Resolve a direct call against natives first, then user classes.
 	static int fCallTarget(int ownerNm, int methodNm, boolean isStatic, int argc) {
 		int mi = C.ensNat(ownerNm, methodNm);

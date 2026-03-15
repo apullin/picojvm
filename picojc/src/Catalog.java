@@ -133,6 +133,9 @@ public class Catalog {
 	static int tyRefNm = -1;
 	static int tyNarrow = C.NK_NONE;
 	static int tyArrKind;
+	static int sigArgc;
+	static boolean sigVarargs;
+	static int sigFixedArgs;
 
 	static int primArrKind(int typeTok) {
 		if (typeTok == Tk.BYTE || typeTok == Tk.BOOLEAN) return 4;
@@ -339,33 +342,12 @@ public class Catalog {
 		C.mRetNarrow[mi] = (byte)retNarrow;
 		C.mRetRefNm[mi] = (short)retRefNm;
 
-		// Parse parameters
-		Lexer.expect(Tk.LPAREN);
-		int argc = isStat ? 0 : 1; // instance methods have 'this' as arg 0
-		boolean isVarargs = false;
-		int fixedCount = 0;
-		while (Tk.type != Tk.RPAREN && Tk.type != Tk.EOF) {
-			// Skip type
-			skipTy();
-			// Check for varargs: Type... name
-			if (Tk.type == Tk.ELLIPSIS) {
-				isVarargs = true;
-				fixedCount = argc - (isStat ? 0 : 1);
-				Lexer.nextToken(); // skip '...'
-			}
-			// Skip name
-			Lexer.nextToken();
-			argc++;
-			if (Tk.type == Tk.COMMA) Lexer.nextToken();
-		}
-		Lexer.expect(Tk.RPAREN);
-		if (isVarargs) {
+		scanParamShape(isStat);
+		C.mArgC[mi] = (byte)sigArgc;
+		if (sigVarargs) {
 			C.mVarargs[mi] = true;
-			C.mFixedArgs[mi] = (byte)fixedCount;
-			// Replace varargs param with MAX_VA_SLOTS + 1(count)
-			argc = argc - 1 + C.MAX_VA_SLOTS + 1;
+			C.mFixedArgs[mi] = (byte)sigFixedArgs;
 		}
-		C.mArgC[mi] = (byte)argc;
 
 		if (isNat || isAbstract || C.cIsIface[ci]) {
 			// Native/abstract/interface method: no body
@@ -385,6 +367,41 @@ public class Catalog {
 	static void skipTy() {
 		// Skip a type declaration or method return type using the shared scanner.
 		scanTy(true);
+	}
+
+	// Shared formal-parameter scan: used by cataloging and emit lookahead.
+	static void scanParamShape(boolean isStat) {
+		Lexer.expect(Tk.LPAREN);
+		sigArgc = isStat ? 0 : 1;
+		sigVarargs = false;
+		sigFixedArgs = 0;
+		while (Tk.type != Tk.RPAREN && Tk.type != Tk.EOF) {
+			skipTy();
+			if (Tk.type == Tk.ELLIPSIS) {
+				sigVarargs = true;
+				sigFixedArgs = sigArgc - (isStat ? 0 : 1);
+				Lexer.nextToken();
+			}
+			Lexer.nextToken();
+			sigArgc++;
+			if (Tk.type == Tk.COMMA) Lexer.nextToken();
+		}
+		Lexer.expect(Tk.RPAREN);
+		if (sigVarargs) {
+			sigArgc = sigArgc - 1 + C.MAX_VA_SLOTS + 1;
+		}
+	}
+
+	static int peekParamArgc(boolean isStat) {
+		int savedTok = Tk.type;
+		int savedLine = Tk.line;
+		Lexer.save();
+		scanParamShape(isStat);
+		int argc = sigArgc;
+		Lexer.restore();
+		Tk.type = savedTok;
+		Tk.line = savedLine;
+		return argc;
 	}
 
 	static void skipBlk() {

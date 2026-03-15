@@ -672,11 +672,13 @@ public class Expr {
 		int argc = pArgs(1); // 'this' counts
 
 		// Find constructor: prefer argc match, fall back to any ctor
-		int ctorMi = -1;
-		for (int mi = 0; mi < C.mCount; mi++) {
-			if (C.mClass[mi] == ci && C.mIsCtor[mi]) {
-				if (ctorMi < 0 || C.mArgC[mi] == argc) ctorMi = mi;
-				if (C.mArgC[mi] == argc) break;
+		int ctorMi = Resolver.fCtor(ci, argc);
+		if (ctorMi < 0) {
+			for (int mi = 0; mi < C.mCount; mi++) {
+				if (C.mClass[mi] == ci && C.mIsCtor[mi]) {
+					ctorMi = mi;
+					break;
+				}
 			}
 		}
 		if (ctorMi < 0) ctorMi = C.ensNat(C.N_OBJECT, C.N_INIT);

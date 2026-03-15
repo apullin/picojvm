@@ -137,7 +137,7 @@ class E {
 	static void eMem(int ci) {
 		if (Catalog.parseMods()) { eStatBlock(); return; }
 		if (Catalog.isCtor(ci)) {
-			int mi = fCtor(ci, scanArgc(false));
+			int mi = Resolver.fCtor(ci, Catalog.peekParamArgc(false));
 			if (mi >= 0) eMBody(mi);
 			else skipMDecl();
 			return;
@@ -145,7 +145,11 @@ class E {
 		Catalog.skipTy();
 		int nm = C.iN();
 		if (Tk.type == Tk.LPAREN) {
-			int mi = fMeth(ci, nm, Catalog.mStat, scanArgc(Catalog.mStat));
+			int argc = Catalog.peekParamArgc(Catalog.mStat);
+			int mi = Resolver.fDeclaredMethod(ci, nm, Catalog.mStat, argc);
+			if (mi < 0 && nm == C.N_MAIN && Catalog.mStat && argc == 1) {
+				mi = Resolver.fDeclaredMethod(ci, nm, true, 0);
+			}
 			if (mi >= 0 && !C.mNative[mi] && C.mBodyS[mi] >= 0) {
 				eMBody(mi);
 			} else {
@@ -272,55 +276,6 @@ class E {
 		}
 	}
 
-	static int scanArgc(boolean isStat) {
-		int savedTok = Tk.type;
-		int savedLine = Tk.line;
-		Lexer.save();
-		Lexer.expect(Tk.LPAREN);
-		int argc = isStat ? 0 : 1;
-		boolean isVarargs = false;
-		int fixedCount = 0;
-		while (Tk.type != Tk.RPAREN && Tk.type != Tk.EOF) {
-			Catalog.skipTy();
-			if (Tk.type == Tk.ELLIPSIS) {
-				isVarargs = true;
-				fixedCount = argc - (isStat ? 0 : 1);
-				Lexer.nextToken();
-			}
-			Lexer.nextToken();
-			argc++;
-			if (Tk.type == Tk.COMMA) Lexer.nextToken();
-		}
-		Lexer.expect(Tk.RPAREN);
-		Lexer.restore();
-		Tk.type = savedTok;
-		Tk.line = savedLine;
-		if (isVarargs) argc = argc - 1 + C.MAX_VA_SLOTS + 1;
-		return argc;
-	}
-
-	static int fMeth(int ci, int nm, boolean isStat, int argc) {
-		for (int mi = 0; mi < C.mCount; mi++) {
-			if (C.mClass[mi] == ci && C.mName[mi] == nm &&
-				C.mStatic[mi] == isStat && !C.mNative[mi] &&
-				(C.mArgC[mi] == argc ||
-				 (nm == C.N_MAIN && isStat && argc == 1 && C.mArgC[mi] == 0))) {
-				return mi;
-			}
-		}
-		return -1;
-	}
-
-	static int fCtor(int ci, int argc) {
-		for (int mi = 0; mi < C.mCount; mi++) {
-			if (C.mClass[mi] == ci && C.mIsCtor[mi] &&
-				C.mArgC[mi] == argc && !C.mNative[mi]) {
-				return mi;
-			}
-		}
-		return -1;
-	}
-
 	// Shared method context init
 	static void initMC(int mi) {
 		C.curMi = mi; C.mcLen = 0; C.patC = 0; C.lblCount = 0;
@@ -352,7 +307,7 @@ class E {
 				Lexer.expect(Tk.LPAREN);
 				int argc = Expr.pArgs(1);
 				int parentCi = C.cParent[C.curCi];
-				int targetMi = parentCi >= 0 ? fCtor(parentCi, argc) : (argc == 1 ? C.ensNat(C.N_OBJECT, C.N_INIT) : -1);
+				int targetMi = parentCi >= 0 ? Resolver.fCtor(parentCi, argc) : (argc == 1 ? C.ensNat(C.N_OBJECT, C.N_INIT) : -1);
 				argc = targetMi >= 0 ? Expr.packVarargs(targetMi, argc) : -1;
 				if (targetMi < 0 || argc < 0) { Lexer.error(205); return; }
 				eOp(INVOKESPECIAL, aCP(targetMi));
@@ -361,7 +316,7 @@ class E {
 			} else {
 				ethis();
 				int targetMi = -1;
-				if (C.cParent[C.curCi] >= 0) targetMi = fCtor(C.cParent[C.curCi], 1);
+				if (C.cParent[C.curCi] >= 0) targetMi = Resolver.fCtor(C.cParent[C.curCi], 1);
 				if (targetMi < 0) targetMi = C.ensNat(C.N_OBJECT, C.N_INIT);
 				if (targetMi < 0) { Lexer.error(205); return; }
 				eOp(INVOKESPECIAL, aCP(targetMi));

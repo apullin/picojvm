@@ -353,10 +353,15 @@ test-selfhost: test-selfhost-fixpoint test-binmatch test-gen1
 	@echo ""
 	@echo "=== Self-hosting regression: ALL PASSED ==="
 
+# Everything: unit tests + selfhost + disk modes
+test-all: test test-selfhost-fixpoint test-disk test-disk-multi test-disk-selfhost
+	@echo ""
+	@echo "=== ALL TESTS PASSED ==="
+
 clean:
 	rm -rf $(BUILDDIR)
 
-.PHONY: all test build check-javac clean test-disk test-disk-multi test-disk-selfhost
+.PHONY: all test test-all build check-javac clean test-disk test-disk-multi test-disk-selfhost
 .PHONY: test-selfhost test-selfhost-fixpoint test-binmatch test-gen1
 .PRECIOUS: $(BUILDDIR)/%.pjvm $(BUILDDIR)/%.out
 .PRECIOUS: $(BUILDDIR)/gen1_%.pjvm $(BUILDDIR)/gen1_%.out

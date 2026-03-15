@@ -48,6 +48,7 @@ public class Catalog {
 			Lexer.nextToken();
 			while (Tk.type == Tk.IDENT || Tk.type == Tk.STRING_KW) {
 				int ifNm = C.intern(Tk.strBuf, Tk.strLen);
+				C.chk(C.ifListLen, 64, 255);
 				C.ifList[C.ifListLen++] = (byte)ifNm; // store as name, resolve later
 				C.cIfaceC[ci]++;
 				Lexer.nextToken();
@@ -213,6 +214,7 @@ public class Catalog {
 	}
 
 	static int initField(int ci, int nm, boolean isStat, boolean isFinal, int arrKind) {
+		C.chk(C.fCount, C.MAX_FIELDS, 254);
 		int fi = C.fCount++;
 		C.fClass[fi] = (byte)ci; C.fName[fi] = (short)nm; C.fStatic[fi] = isStat;
 		C.fArrKind[fi] = (byte)arrKind; C.fSlot[fi] = (short)-1;

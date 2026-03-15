@@ -3,7 +3,7 @@ class C {
 	// Limits — sized to fit in picoJVM 64KB heap
 	static final int MAX_CLASSES  = 32;
 	static final int MAX_METHODS  = 192;
-	static final int MAX_FIELDS   = 320;
+	static final int MAX_FIELDS   = 384;
 	static final int MAX_NAMES    = 768;
 	static final int MAX_CP       = 2560;
 	static final int MAX_CODE     = 19456;
@@ -269,8 +269,14 @@ class C {
 
 	// ==================== HELPERS ====================
 
+	// Limit check: error if count >= max
+	static void chk(int count, int max, int code) {
+		if (count >= max) Lexer.error(code);
+	}
+
 	static int initMethod(int ci, int nm, int argc, boolean isStat,
 						  boolean isCtor, boolean isNat, int retType) {
+		chk(mCount, MAX_METHODS, 252);
 		int mi = mCount++;
 		mClass[mi] = (byte)ci; mName[mi] = (short)nm; mArgC[mi] = (byte)argc;
 		mStatic[mi] = isStat; mIsCtor[mi] = isCtor; mNative[mi] = isNat;
@@ -280,6 +286,7 @@ class C {
 	}
 
 	static int initClass(int nm) {
+		chk(cCount, MAX_CLASSES, 253);
 		int ci = cCount++;
 		cName[ci] = (short)nm; cParent[ci] = -1; cIsIface[ci] = false;
 		cClinit[ci] = 0xFF; cIfaceS[ci] = (byte)ifListLen; cIfaceC[ci] = 0; cOwnF[ci] = 0;

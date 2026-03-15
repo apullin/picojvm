@@ -1,7 +1,27 @@
 // Emit -> E (size)
 class E {
-	// Branch opcodes
-	static final int IFEQ = 0x99, IFNE = 0x9A, GOTO = 0xA7;
+	// JVM opcodes
+	static final int ACONST_NULL=0x01, ICONST_0=0x03, ICONST_1=0x04;
+	static final int BIPUSH=0x10, SIPUSH=0x11, LDC=0x12, LDC_W=0x13;
+	static final int ALOAD=0x19, ALOAD_0=0x2A, ILOAD_0=0x1A;
+	static final int ASTORE=0x3A, ISTORE_0=0x3B, ASTORE_0=0x4B;
+	static final int DUP=0x59, DUP_X2=0x5B, DUP2=0x5C, POP=0x57;
+	static final int IADD=0x60, ISUB=0x64, IMUL=0x68, IDIV=0x6C;
+	static final int IREM=0x70, INEG=0x74, ISHL=0x78, ISHR=0x7A;
+	static final int IUSHR=0x7C, IAND=0x7E, IOR=0x80, IXOR=0x82;
+	static final int IINC=0x84;
+	static final int I2B=0x91, I2C=0x92, I2S=0x93;
+	static final int IFEQ=0x99, IFNE=0x9A, GOTO=0xA7;
+	static final int LOOKUPSWITCH=0xAB;
+	static final int IRETURN=0xAC, ARETURN=0xB0, RETURN=0xB1;
+	static final int GETSTATIC=0xB2, PUTSTATIC=0xB3;
+	static final int GETFIELD=0xB4, PUTFIELD=0xB5;
+	static final int INVOKEVIRTUAL=0xB6, INVOKESPECIAL=0xB7;
+	static final int INVOKESTATIC=0xB8, INVOKEINTERFACE=0xB9;
+	static final int NEW=0xBB, NEWARRAY=0xBC, ANEWARRAY=0xBD;
+	static final int ARRAYLENGTH=0xBE, ATHROW=0xBF;
+	static final int CHECKCAST=0xC0, INSTANCEOF=0xC1;
+	static final int MULTIANEWARRAY=0xC5;
 
 	// Per-class clinit accumulation buffer (field inits + static blocks)
 	static byte[] cinitBuf = new byte[1024];
@@ -75,7 +95,7 @@ class E {
 					C.cpEnt[C.cpMBase + i] = cinitCpL[i];
 					C.cpEntH[C.cpMBase + i] = cinitCpH[i];
 				}
-				eb(0xB1); // RETURN
+				eb(RETURN);
 				commitMC(mi);
 				C.mMaxLoc[mi] = (byte)(cinitMaxLoc > 0 ? cinitMaxLoc : 1);
 				C.mMaxStk[mi] = (byte)(cinitMaxStk > 0 ? cinitMaxStk : 1);
@@ -87,7 +107,7 @@ class E {
 			C.curMStatic = true;
 			C.locCount = 0; C.stkDepth = 0;
 			C.cpMCount = 0;
-			eb(0xB1); // RETURN
+			eb(RETURN);
 			commitMC(mi);
 			C.mMaxLoc[mi] = (byte)1;
 			C.mMaxStk[mi] = (byte)1;
@@ -221,7 +241,7 @@ class E {
 		int fi = Resolver.fStatField(ci, nm);
 		if (fi >= 0) {
 			int cpIdx = aCP(C.fSlot[fi]);
-			eOp(0xB3, cpIdx); pop(); // PUTSTATIC
+			eOp(PUTSTATIC, cpIdx); pop();
 		}
 
 		// Resolve backpatches (ternary expressions etc.)
@@ -353,7 +373,7 @@ class E {
 			ethis();
 			int objInitMi = C.ensNat(C.N_OBJECT, C.N_INIT);
 			int cpIdx = aCP(objInitMi);
-			eOp(0xB7, cpIdx); // INVOKESPECIAL
+			eOp(INVOKESPECIAL, cpIdx);
 			pop(); // 'this' consumed
 
 			// Parse body
@@ -361,8 +381,7 @@ class E {
 			Stmt.pBlock();
 			Lexer.expect(Tk.RBRACE);
 
-			// Emit RETURN
-			eb(0xB1);
+			eb(RETURN);
 		} else {
 			// Regular method
 			if (!C.curMStatic) {
@@ -377,9 +396,9 @@ class E {
 			Lexer.expect(Tk.RBRACE);
 
 			// If method doesn't end with return, add implicit return
-			if (C.mcLen == 0 || (C.mcode[C.mcLen - 1] & 0xFF) != 0xB1 &&
-				(C.mcode[C.mcLen - 1] & 0xFF) != 0xAC && (C.mcode[C.mcLen - 1] & 0xFF) != 0xB0) {
-				eb(0xB1); // RETURN
+			if (C.mcLen == 0 || (C.mcode[C.mcLen - 1] & 0xFF) != RETURN &&
+				(C.mcode[C.mcLen - 1] & 0xFF) != IRETURN && (C.mcode[C.mcLen - 1] & 0xFF) != ARETURN) {
+				eb(RETURN);
 			}
 		}
 
@@ -427,11 +446,11 @@ class E {
 				initMC(mi);
 
 				// ALOAD_0, INVOKESPECIAL Object.<init>, RETURN
-				eb(0x2A); // ALOAD_0
+				eb(ALOAD_0);
 				int objInitMi = C.ensNat(C.N_OBJECT, C.N_INIT);
 				int cpIdx = aCP(objInitMi);
-				eOp(0xB7, cpIdx); // INVOKESPECIAL
-				eb(0xB1); // RETURN
+				eOp(INVOKESPECIAL, cpIdx);
+				eb(RETURN);
 
 				commitMC(mi);
 				C.mMaxLoc[mi] = (byte)1;
@@ -524,7 +543,7 @@ class E {
 
 		// Create array: ILOAD count, NEWARRAY
 		eLd(countSlot, 0); push();
-		eb(0xBC); eb(typeCode); // NEWARRAY (pops count, pushes array ref)
+		eb(NEWARRAY); eb(typeCode);
 
 		// Store array in new local bound to the varargs parameter name
 		int arrSlot = C.locCount;
@@ -549,20 +568,21 @@ class E {
 	}
 
 	// Bytecode emission shortcuts
-	static void ic0() { eb(0x03); push(); } // ICONST_0
-	static void ic1() { eb(0x04); push(); } // ICONST_1
-	static void edup() { eb(0x59); push(); } // DUP
+	static void ic0() { eb(ICONST_0); push(); }
+	static void ic1() { eb(ICONST_1); push(); }
+	static void edup() { eb(DUP); push(); }
 	static void cmpBool(int op) {
 		int lbl = label(); int lblEnd = label();
 		eBr(op, lbl); ic0(); eBr(GOTO, lblEnd);
 		mark(lbl); ic1(); mark(lblEnd);
 	}
 	static void eOp(int op, int cp) { eb(op); eSBE(cp); }
-	static void epop() { eb(0x57); pop(); } // POP
+	static void epop() { eb(POP); pop(); }
 	static void ethis() { eLd(0, 1); push(); } // ALOAD_0 this
 	static void eALd(int t) { eb(t==4 ? 0x33 : t==5 ? 0x34 : t==8 ? 0x35 : 0x2E); } // BALOAD/CALOAD/SALOAD/IALOAD
 	static void eASt(int t) { eb(t==4 ? 0x54 : t==5 ? 0x55 : t==8 ? 0x56 : 0x4F); } // BASTORE/CASTORE/SASTORE/IASTORE
 	static void pushLp(int brk, int cont) {
+		C.chk(C.lpDepth, 32, 263);
 		C.lpBrkLbl[C.lpDepth] = (short)brk;
 		C.lpContLbl[C.lpDepth] = (short)cont;
 		C.lpDepth++;
@@ -570,6 +590,7 @@ class E {
 	static void popLp() { C.lpDepth--; }
 
 	static void eb(int b) {
+		C.chk(C.mcLen, 2048, 256);
 		C.mcode[C.mcLen++] = (byte)(b & 0xFF);
 	}
 
@@ -593,6 +614,7 @@ class E {
 	}
 
 	static int label() {
+		C.chk(C.lblCount, 320, 261);
 		return C.lblCount++;
 	}
 
@@ -604,6 +626,7 @@ class E {
 		int branchPC = C.mcLen;
 		eb(opcode);
 		int loc = eBrPH();
+		C.chk(C.patC, 320, 262);
 		C.patLoc[C.patC] = (short)loc;
 		C.patLbl[C.patC] = (short)label;
 		C.patC++;
@@ -619,6 +642,7 @@ class E {
 	}
 
 	static void aLoc(int nm, int type) {
+		C.chk(C.locCount, C.MAX_LOCALS, 257);
 		C.locName[C.locCount] = (short)nm;
 		C.locSlot[C.locCount] = (byte)C.locCount;
 		C.locType[C.locCount] = (byte)type;
@@ -642,6 +666,7 @@ class E {
 				return i;
 			}
 		}
+		C.chk(C.cpMBase + C.cpMCount, C.MAX_CP, 258);
 		int idx = C.cpMCount++;
 		C.cpEnt[C.cpMBase + idx] = lo;
 		C.cpEntH[C.cpMBase + idx] = hi;
@@ -657,6 +682,7 @@ class E {
 			}
 		}
 		if (strIdx < 0) {
+			C.chk(C.strCC, C.MAX_STR_CONST, 259);
 			strIdx = C.strCC++;
 			C.strC[strIdx] = new byte[len];
 			Native.arraycopy(buf, 0, C.strC[strIdx], 0, len);
@@ -672,6 +698,7 @@ class E {
 			if (C.intC[i] == val) { idx = i; break; }
 		}
 		if (idx < 0) {
+			C.chk(C.intCC, C.MAX_INT_CONST, 260);
 			idx = C.intCC++;
 			C.intC[idx] = val;
 		}
@@ -679,58 +706,56 @@ class E {
 	}
 
 
+	// LDC or LDC_W depending on CP index
+	static void eLdc(int cpIdx) {
+		if (cpIdx < 256) { eb(LDC); eb(cpIdx); }
+		else { eb(LDC_W); eSBE(cpIdx); }
+	}
+
 	static void eIC(int val) {
 		if (val >= -1 && val <= 5) {
-			eb(0x03 + val); // ICONST_M1=0x02 .. ICONST_5=0x08
+			eb(ICONST_0 + val); // ICONST_M1..ICONST_5
 		} else if (val >= -128 && val <= 127) {
-			eb(0x10); // BIPUSH
-			eb(val & 0xFF);
+			eb(BIPUSH); eb(val & 0xFF);
 		} else if (val >= -32768 && val <= 32767) {
-			eb(0x11); // SIPUSH
-			eSBE(val);
+			eb(SIPUSH); eSBE(val);
 		} else {
-			// LDC with integer constant
-			int cpIdx = aICP(val);
-			eb(0x12); // LDC
-			eb(cpIdx);
+			eLdc(aICP(val));
 		}
 	}
 
 	static void eLd(int slot, int type) {
 		if (type != 0) {
-			// Reference (type 1=ref, 3=int[], 4=byte[], 5=char[])
-			if (slot <= 3) eb(0x2A + slot); // ALOAD_0..3
-			else { eb(0x19); eb(slot); } // ALOAD
+			if (slot <= 3) eb(ALOAD_0 + slot);
+			else { eb(ALOAD); eb(slot); }
 		} else {
-			// Int
-			if (slot <= 3) eb(0x1A + slot); // ILOAD_0..3
+			if (slot <= 3) eb(ILOAD_0 + slot);
 			else { eb(0x15); eb(slot); } // ILOAD
 		}
 	}
 
 	static void eSt(int slot, int type) {
 		if (type != 0) {
-			// Reference (type 1=ref, 3=int[], 4=byte[], 5=char[])
-			if (slot <= 3) eb(0x4B + slot); // ASTORE_0..3
-			else { eb(0x3A); eb(slot); } // ASTORE
+			if (slot <= 3) eb(ASTORE_0 + slot);
+			else { eb(ASTORE); eb(slot); }
 		} else {
-			if (slot <= 3) eb(0x3B + slot); // ISTORE_0..3
+			if (slot <= 3) eb(ISTORE_0 + slot);
 			else { eb(0x36); eb(slot); } // ISTORE
 		}
 	}
 
 	static void eCO(int tok) {
-		if (tok == Tk.PLUS_EQ) eb(0x60); // IADD
-		else if (tok == Tk.MINUS_EQ) eb(0x64); // ISUB
-		else if (tok == Tk.STAR_EQ) eb(0x68); // IMUL
-		else if (tok == Tk.SLASH_EQ) eb(0x6C); // IDIV
-		else if (tok == Tk.PERCENT_EQ) eb(0x70); // IREM
-		else if (tok == Tk.AMP_EQ) eb(0x7E); // IAND
-		else if (tok == Tk.PIPE_EQ) eb(0x80); // IOR
-		else if (tok == Tk.CARET_EQ) eb(0x82); // IXOR
-		else if (tok == Tk.SHL_EQ) eb(0x78); // ISHL
-		else if (tok == Tk.SHR_EQ) eb(0x7A); // ISHR
-		else if (tok == Tk.USHR_EQ) eb(0x7C); // IUSHR
+		if (tok == Tk.PLUS_EQ) eb(IADD);
+		else if (tok == Tk.MINUS_EQ) eb(ISUB);
+		else if (tok == Tk.STAR_EQ) eb(IMUL);
+		else if (tok == Tk.SLASH_EQ) eb(IDIV);
+		else if (tok == Tk.PERCENT_EQ) eb(IREM);
+		else if (tok == Tk.AMP_EQ) eb(IAND);
+		else if (tok == Tk.PIPE_EQ) eb(IOR);
+		else if (tok == Tk.CARET_EQ) eb(IXOR);
+		else if (tok == Tk.SHL_EQ) eb(ISHL);
+		else if (tok == Tk.SHR_EQ) eb(ISHR);
+		else if (tok == Tk.USHR_EQ) eb(IUSHR);
 	}
 
 	// Patch 4-byte big-endian value at mcode[loc]

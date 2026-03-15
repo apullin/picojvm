@@ -310,7 +310,7 @@ public class Stmt {
 		E.eSt(arrSlot, 1); E.pop();
 		// $n = $a.length
 		E.eLd(arrSlot, 1); E.push();
-		E.eb(0xBE); // ARRAYLENGTH (replaces ref with int, no stack change)
+		E.eb(E.ARRAYLENGTH); // replaces ref with int, no stack change
 		E.eSt(lenSlot, 0); E.pop();
 		// $i = 0
 		E.ic0();
@@ -342,7 +342,7 @@ public class Stmt {
 
 		// Update: $i++
 		E.mark(lblUpdate);
-		E.eb(0x84); E.eb(iSlot); E.eb(1); // IINC iSlot, 1
+		E.eb(E.IINC); E.eb(iSlot); E.eb(1);
 		E.eBr(E.GOTO, lblCond);
 
 		E.mark(lblEnd);
@@ -352,13 +352,13 @@ public class Stmt {
 		Lexer.nextToken(); // skip 'return'
 		if (Tk.type == Tk.SEMI) {
 			Lexer.nextToken();
-			E.eb(0xB1); // RETURN
+			E.eb(E.RETURN);
 		} else {
 			int retType = C.mRetT[C.curMi];
 			Expr.pExpr();
 			E.pop();
-			if (retType == 2) E.eb(0xB0); // ARETURN
-			else E.eb(0xAC); // IRETURN
+			if (retType == 2) E.eb(E.ARETURN);
+			else E.eb(E.IRETURN);
 			Lexer.expect(Tk.SEMI);
 		}
 	}
@@ -367,7 +367,7 @@ public class Stmt {
 		Lexer.nextToken(); // skip 'throw'
 		Expr.pExpr();
 		E.pop();
-		E.eb(0xBF); // ATHROW
+		E.eb(E.ATHROW);
 		Lexer.expect(Tk.SEMI);
 	}
 
@@ -389,7 +389,7 @@ public class Stmt {
 
 		// Emit LOOKUPSWITCH
 		int switchPC = C.mcLen;
-		E.eb(0xAB); // LOOKUPSWITCH
+		E.eb(E.LOOKUPSWITCH);
 
 		// Padding to 4-byte alignment
 		while ((switchPC + 1 + (C.mcLen - switchPC - 1)) % 4 != 0) {
@@ -544,11 +544,15 @@ public class Stmt {
 
 		E.popLp();
 
-		// Build dispatch chain: for each case, ALOAD $sw + LDC str + INVOKEVIRTUAL equals + IFNE
+		// Build dispatch chain: for each case, ALOAD $sw + LDC/LDC_W str + INVOKEVIRTUAL equals + IFNE
 		int eqCpIdx = E.aCP(eqMi);
 		int aloadSz = swSlot <= 3 ? 1 : 2;
-		int perCase = aloadSz + 2 + 3 + 3; // ALOAD + LDC(2) + INVOKEVIRTUAL(3) + IFNE(3)
-		int dispatchSz = caseCount * perCase + 3; // + GOTO default/end
+		// Compute dispatch size — LDC_W uses 3 bytes instead of 2
+		int dispatchSz = 3; // final GOTO
+		for (int i = 0; i < caseCount; i++) {
+			int ldcSz = C.caseVals[i] < 256 ? 2 : 3;
+			dispatchSz += aloadSz + ldcSz + 3 + 3; // ALOAD + LDC/LDC_W + INVOKEVIRTUAL + IFNE
+		}
 
 		// Shift body bytecodes right
 		int bodyLen = C.mcLen - switchInsert;
@@ -574,32 +578,34 @@ public class Stmt {
 		// Write dispatch chain at switchInsert
 		int pos = switchInsert;
 		for (int i = 0; i < caseCount; i++) {
-			// ALOAD $sw
 			if (swSlot <= 3) {
-				C.mcode[pos++] = (byte)(0x2A + swSlot);
+				C.mcode[pos++] = (byte)(E.ALOAD_0 + swSlot);
 			} else {
-				C.mcode[pos++] = (byte)0x19;
+				C.mcode[pos++] = (byte)E.ALOAD;
 				C.mcode[pos++] = (byte)swSlot;
 			}
-			// LDC string CP index
-			C.mcode[pos++] = (byte)0x12;
-			C.mcode[pos++] = (byte)C.caseVals[i];
-			// INVOKEVIRTUAL String.equals
-			C.mcode[pos++] = (byte)0xB6;
+			int cv = C.caseVals[i];
+			if (cv < 256) {
+				C.mcode[pos++] = (byte)E.LDC;
+				C.mcode[pos++] = (byte)cv;
+			} else {
+				C.mcode[pos++] = (byte)E.LDC_W;
+				C.mcode[pos++] = (byte)((cv >> 8) & 0xFF);
+				C.mcode[pos++] = (byte)(cv & 0xFF);
+			}
+			C.mcode[pos++] = (byte)E.INVOKEVIRTUAL;
 			C.mcode[pos++] = (byte)((eqCpIdx >> 8) & 0xFF);
 			C.mcode[pos++] = (byte)(eqCpIdx & 0xFF);
-			// IFNE → case body
 			int target = C.lblAddr[C.caseLbls[i]];
 			int ifnePC = pos;
-			C.mcode[pos++] = (byte)0x9A; // IFNE
+			C.mcode[pos++] = (byte)E.IFNE;
 			int offset = target - ifnePC;
 			C.mcode[pos++] = (byte)((offset >> 8) & 0xFF);
 			C.mcode[pos++] = (byte)(offset & 0xFF);
 		}
-		// GOTO default/end
 		int defTarget = defaultLabel >= 0 ? C.lblAddr[defaultLabel] : C.lblAddr[lblEnd];
 		int gotoPC = pos;
-		C.mcode[pos++] = (byte)0xA7; // GOTO
+		C.mcode[pos++] = (byte)E.GOTO;
 		int gotoOff = defTarget - gotoPC;
 		C.mcode[pos++] = (byte)((gotoOff >> 8) & 0xFF);
 		C.mcode[pos++] = (byte)(gotoOff & 0xFF);
@@ -647,6 +653,7 @@ public class Stmt {
 			// Record exception table entry
 			int catchClassId = Resolver.fClsByNm(excNm);
 			if (catchClassId < 0) catchClassId = 0xFF;
+			C.chk(C.excC, C.MAX_EXC, 264);
 			C.excSPc[C.excC] = (short)startPC;
 			C.excEPc[C.excC] = (short)endPC;
 			C.excHPc[C.excC] = (short)handlerPC;
@@ -674,6 +681,7 @@ public class Stmt {
 			E.eSt(excSlot, 1); // ASTORE exception (from JVM stack)
 			E.eBr(E.GOTO, lblFinally);
 
+			C.chk(C.excC, C.MAX_EXC, 264);
 			C.excSPc[C.excC] = (short)startPC;
 			C.excEPc[C.excC] = (short)endPC;
 			C.excHPc[C.excC] = (short)handlerPC;
@@ -683,7 +691,7 @@ public class Stmt {
 
 			// Normal path: null means no exception
 			E.mark(lblEnd);
-			E.eb(0x01); // ACONST_NULL
+			E.eb(E.ACONST_NULL);
 			E.push();
 			E.eSt(excSlot, 1); // ASTORE null
 			E.pop();
@@ -702,7 +710,7 @@ public class Stmt {
 			E.pop();
 			E.eLd(excSlot, 1); // ALOAD again
 			E.push();
-			E.eb(0xBF); // ATHROW
+			E.eb(E.ATHROW);
 			E.pop();
 			E.mark(lblDone);
 			E.pop();

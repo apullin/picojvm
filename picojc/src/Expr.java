@@ -89,7 +89,7 @@ public class Expr {
 				E.pop();
 				int ci = Resolver.fClsByNm(classNm);
 				int cpIdx = E.aCP(ci >= 0 ? ci : 0);
-				E.eOp(0xC1, cpIdx); E.push();
+				E.eOp(E.INSTANCEOF, cpIdx); E.push();
 				type = 1;
 			} else if (prec == 7) {
 				// Comparison: <, >, <=, >=
@@ -116,16 +116,16 @@ public class Expr {
 				return pPrim();
 			}
 			pUnary();
-			E.eb(0x74); // INEG
+			E.eb(E.INEG);
 			return 1;
 		}
 		if (Tk.type == Tk.TILDE) {
 			Lexer.nextToken();
 			pUnary();
 			// ~x = x ^ (-1)
-			E.eb(0x02); // ICONST_M1
+			E.eb(E.ICONST_0 - 1); // ICONST_M1
 			E.push();
-			E.eb(0x82); // IXOR
+			E.eb(E.IXOR);
 			E.pop();
 			return 1;
 		}
@@ -147,7 +147,7 @@ public class Expr {
 				E.eLd(slot, 0);
 				E.push();
 				E.ic1();
-				E.eb(op == Tk.INC ? 0x60 : 0x64); // IADD/ISUB
+				E.eb(op == Tk.INC ? E.IADD : E.ISUB);
 				E.pop();
 				E.edup();
 				E.eSt(slot, 0);
@@ -172,14 +172,13 @@ public class Expr {
 					Lexer.nextToken();
 					pUnary();
 					// Emit cast instruction
-					if (castType == Tk.BYTE) E.eb(0x91); // I2B
-					else if (castType == Tk.CHAR) E.eb(0x92); // I2C
-					else if (castType == Tk.SHORT) E.eb(0x93); // I2S
+					if (castType == Tk.BYTE) E.eb(E.I2B);
+					else if (castType == Tk.CHAR) E.eb(E.I2C);
+					else if (castType == Tk.SHORT) E.eb(E.I2S);
 					else if (castType == Tk.IDENT && castNm >= 0) {
-						// Object cast = CHECKCAST
 						int ci = Resolver.fClsByNm(castNm);
 						int cpIdx = E.aCP(ci >= 0 ? ci : 0);
-						E.eOp(0xC0, cpIdx); // CHECKCAST
+						E.eOp(E.CHECKCAST, cpIdx);
 					}
 					return castType == Tk.IDENT ? 2 : 1;
 				}
@@ -202,7 +201,7 @@ public class Expr {
 
 				if (memberNm == C.N_LENGTH && Tk.type != Tk.LPAREN) {
 					// array.length
-					E.eb(0xBE); // ARRAYLENGTH
+					E.eb(E.ARRAYLENGTH);
 					type = 1;
 				} else if (Tk.type == Tk.LPAREN) {
 					// Method call on object
@@ -231,12 +230,12 @@ public class Expr {
 					int op = Tk.type;
 					Lexer.nextToken();
 					E.push(); // re-count idx
-					E.eb(0x5C); E.push(); E.push(); // DUP2
+					E.eb(E.DUP2); E.push(); E.push();
 					E.eALd(type);
-					E.pop(); // consumes dup'd pair, pushes value: net -1
-					E.eb(0x5B); E.push(); // DUP_X2
+					E.pop();
+					E.eb(E.DUP_X2); E.push();
 					E.ic1();
-					E.eb(op == Tk.INC ? 0x60 : 0x64); E.pop();
+					E.eb(op == Tk.INC ? E.IADD : E.ISUB); E.pop();
 					E.eASt(type);
 					E.pop(); E.pop(); E.pop();
 					type = 1;
@@ -279,8 +278,7 @@ public class Expr {
 			Native.arraycopy(Tk.strBuf, 0, buf, 0, Tk.strLen);
 			int cpIdx = E.aSCP(buf, Tk.strLen);
 			Lexer.nextToken();
-			E.eb(0x12); // LDC
-			E.eb(cpIdx);
+			E.eLdc(cpIdx);
 			E.push();
 			return 2; // reference
 		}
@@ -288,7 +286,7 @@ public class Expr {
 		if (Tk.type == Tk.FALSE) { Lexer.nextToken(); E.ic0(); return 1; }
 		if (Tk.type == Tk.NULL) {
 			Lexer.nextToken();
-			E.eb(0x01); // ACONST_NULL
+			E.eb(E.ACONST_NULL);
 			E.push();
 			return 2;
 		}
@@ -411,20 +409,20 @@ public class Expr {
 					// new type[N][] — array of references, size N
 					Lexer.nextToken();
 					int cpIdx = E.aCP(0);
-					E.eOp(0xBD, cpIdx); // ANEWARRAY
+					E.eOp(E.ANEWARRAY, cpIdx);
 					return 2; // reference array
 				}
 				pExpr();
 				Lexer.expect(Tk.RBRACKET);
 				int cpIdx = E.aCP(0);
-				E.eOp(0xC5, cpIdx); // MULTIANEWARRAY
+				E.eOp(E.MULTIANEWARRAY, cpIdx);
 				E.eb(2); // 2 dimensions
 				E.pop(); // second dimension
 				// First dim still on stack, result replaces it
 				return 2;
 			}
 
-			E.eb(0xBC); // NEWARRAY
+			E.eb(E.NEWARRAY);
 			E.eb(typeCode);
 			// Stack: count consumed, array ref pushed = net 0
 			// Return specific array type for proper BALOAD/BASTORE emission
@@ -451,13 +449,13 @@ public class Expr {
 				Lexer.nextToken();
 				pExpr();
 				Lexer.expect(Tk.RBRACKET);
-				E.eOp(0xC5, cpIdx); // MULTIANEWARRAY
+				E.eOp(E.MULTIANEWARRAY, cpIdx);
 				E.eb(2);
 				E.pop();
 				return 2;
 			}
 
-			E.eOp(0xBD, cpIdx); // ANEWARRAY
+			E.eOp(E.ANEWARRAY, cpIdx);
 			return 2;
 		}
 
@@ -465,7 +463,7 @@ public class Expr {
 		int ci = Resolver.fClsByNm(classNm);
 		if (ci < 0) ci = Resolver.synthExcCls(classNm);
 		int cpIdx = E.aCP(ci);
-		E.eOp(0xBB, cpIdx); // NEW
+		E.eOp(E.NEW, cpIdx);
 		E.push();
 		E.edup();
 
@@ -483,7 +481,7 @@ public class Expr {
 		if (ctorMi < 0) ctorMi = C.ensNat(C.N_OBJECT, C.N_INIT);
 
 		int ctorCpIdx = E.aCP(ctorMi);
-		E.eOp(0xB7, ctorCpIdx); // INVOKESPECIAL
+		E.eOp(E.INVOKESPECIAL, ctorCpIdx);
 		// Pop args + dup from stack, keep original ref
 		for (int i = 0; i < argc; i++) E.pop();
 
@@ -517,7 +515,7 @@ public class Expr {
 			argc = pArgs(0);
 		}
 		if (mi < 0) { Lexer.error(204); return 0; }
-		E.eOp(0xB8, E.aCP(mi)); // INVOKESTATIC
+		E.eOp(E.INVOKESTATIC, E.aCP(mi));
 		return eCallRet(mi, argc);
 	}
 
@@ -541,9 +539,9 @@ public class Expr {
 		int mci = C.mClass[mi];
 		// Interface dispatch only for non-native user methods
 		if (!C.mNative[mi] && mci < C.cCount && C.cIsIface[mci]) {
-			E.eOp(0xB9, cpIdx); E.eb(argc); E.eb(0); // INVOKEINTERFACE
+			E.eOp(E.INVOKEINTERFACE, cpIdx); E.eb(argc); E.eb(0);
 		} else {
-			E.eOp(0xB6, cpIdx); // INVOKEVIRTUAL
+			E.eOp(E.INVOKEVIRTUAL, cpIdx);
 		}
 		return eCallRet(mi, argc);
 	}
@@ -588,10 +586,10 @@ public class Expr {
 			pExpr();
 			if (k == 0) { E.edup(); E.eSt(i, t); E.pop(); return t == 1 ? 2 : 1; }
 			if (k == 2) {
-				if (rv) { E.edup(); E.eOp(0xB3, i); E.pop(); return 1; }
-				E.eOp(0xB3, i); E.pop(); return 0;
+				if (rv) { E.edup(); E.eOp(E.PUTSTATIC, i); E.pop(); return 1; }
+				E.eOp(E.PUTSTATIC, i); E.pop(); return 0;
 			}
-			E.eOp(0xB5, i); E.pop(); E.pop(); return 0; // PUTFIELD
+			E.eOp(E.PUTFIELD, i); E.pop(); E.pop(); return 0; // PUTFIELD
 		}
 		if (Tk.type >= Tk.PLUS_EQ && Tk.type <= Tk.USHR_EQ) {
 			int op = Tk.type; Lexer.nextToken();
@@ -600,34 +598,34 @@ public class Expr {
 				E.edup(); E.eSt(i, t); E.pop(); return 1;
 			}
 			if (k == 1) {
-				E.ethis(); E.ethis(); E.eOp(0xB4, i);
+				E.ethis(); E.ethis(); E.eOp(E.GETFIELD, i);
 				pExpr(); E.eCO(op); E.pop();
-				E.eOp(0xB5, i); E.pop(); E.pop(); return 0;
+				E.eOp(E.PUTFIELD, i); E.pop(); E.pop(); return 0;
 			}
 			if (k == 2) {
-				E.eOp(0xB2, i); E.push(); pExpr(); E.eCO(op); E.pop();
-				E.edup(); E.eOp(0xB3, i); E.pop(); return 1;
+				E.eOp(E.GETSTATIC, i); E.push(); pExpr(); E.eCO(op); E.pop();
+				E.edup(); E.eOp(E.PUTSTATIC, i); E.pop(); return 1;
 			}
 			// k == 3: obj already on stack
-			E.edup(); E.eOp(0xB4, i); pExpr(); E.eCO(op); E.pop();
-			E.eOp(0xB5, i); E.pop(); E.pop(); return 0;
+			E.edup(); E.eOp(E.GETFIELD, i); pExpr(); E.eCO(op); E.pop();
+			E.eOp(E.PUTFIELD, i); E.pop(); E.pop(); return 0;
 		}
 		if (Tk.type == Tk.INC || Tk.type == Tk.DEC) {
 			int op = Tk.type; Lexer.nextToken();
 			if (k == 0) {
 				E.eLd(i, 0); E.push();
-				E.eb(0x84); E.eb(i); E.eb(op == Tk.INC ? 1 : 0xFF); return 1;
+				E.eb(E.IINC); E.eb(i); E.eb(op == Tk.INC ? 1 : 0xFF); return 1;
 			}
 			if (k == 1) {
-				E.ethis(); E.eOp(0xB4, i);
-				E.ethis(); E.ethis(); E.eOp(0xB4, i);
-				E.ic1(); E.eb(op == Tk.INC ? 0x60 : 0x64); E.pop();
-				E.eOp(0xB5, i); E.pop(); E.pop(); return 1;
+				E.ethis(); E.eOp(E.GETFIELD, i);
+				E.ethis(); E.ethis(); E.eOp(E.GETFIELD, i);
+				E.ic1(); E.eb(op == Tk.INC ? E.IADD : E.ISUB); E.pop();
+				E.eOp(E.PUTFIELD, i); E.pop(); E.pop(); return 1;
 			}
 			// k == 2: GETSTATIC + DUP + 1 + op + PUTSTATIC
-			E.eOp(0xB2, i); E.push(); E.edup();
-			E.ic1(); E.eb(op == Tk.INC ? 0x60 : 0x64); E.pop();
-			E.eOp(0xB3, i); E.pop(); return 1;
+			E.eOp(E.GETSTATIC, i); E.push(); E.edup();
+			E.ic1(); E.eb(op == Tk.INC ? E.IADD : E.ISUB); E.pop();
+			E.eOp(E.PUTSTATIC, i); E.pop(); return 1;
 			// k == 3: not supported, falls through to load
 		}
 		// Load
@@ -635,9 +633,9 @@ public class Expr {
 			E.eLd(i, t); E.push();
 			if (t >= 3) return t; return t == 1 ? 2 : 1;
 		}
-		if (k == 1) { E.ethis(); E.eOp(0xB4, i); }
-		else if (k == 2) { E.eOp(0xB2, i); E.push(); }
-		else { E.eOp(0xB4, i); }
+		if (k == 1) { E.ethis(); E.eOp(E.GETFIELD, i); }
+		else if (k == 2) { E.eOp(E.GETSTATIC, i); E.push(); }
+		else { E.eOp(E.GETFIELD, i); }
 		if (arr != 0) return arr; return 1;
 	}
 

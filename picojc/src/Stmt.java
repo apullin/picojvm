@@ -381,31 +381,14 @@ public class Stmt {
 		Lexer.expect(Tk.SEMI);
 	}
 
-	// Shared switch relocation: make room for dispatch code in front of emitted bodies.
-	static void insertDispatch(int insertAt, int delta, int lblEnd) {
-		if (delta > 0) {
-			int bodyLen = C.mcLen - insertAt;
-			for (int i = bodyLen - 1; i >= 0; i--) {
-				C.mcode[insertAt + delta + i] = C.mcode[insertAt + i];
-			}
-			C.mcLen += delta;
-			for (int lbl = 0; lbl < C.lblCount; lbl++) {
-				if (C.lblAddr[lbl] >= insertAt) {
-					C.lblAddr[lbl] = (short)(C.lblAddr[lbl] + delta);
-				}
-			}
-			for (int i = 0; i < C.patC; i++) {
-				if (C.patLoc[i] >= insertAt) {
-					C.patLoc[i] = (short)(C.patLoc[i] + delta);
-				}
-			}
-		}
-		E.mark(lblEnd);
-	}
-
-	// Missing default falls through to the shared end label.
-	static int switchTarget(int label, int lblEnd) {
-		return C.lblAddr[label >= 0 ? label : lblEnd];
+	// Hidden local used to hold the switch discriminator while the body is parsed.
+	static int aSwitchLocal(int type, int refNm) {
+		int swSlot = C.locCount;
+		byte[] sb = Tk.strBuf;
+		sb[0] = (byte)'$'; sb[1] = (byte)'s'; sb[2] = (byte)'w';
+		if (type == 0) E.aLoc(C.intern(sb, 3), 0);
+		else E.aLoc(C.intern(sb, 3), 1, refNm);
+		return swSlot;
 	}
 
 	static void pSwitch() {
@@ -420,34 +403,20 @@ public class Stmt {
 			return;
 		}
 
+		int swSlot = aSwitchLocal(0, -1);
+		E.eSt(swSlot, 0);
 		E.pop();
 
+		int lblDispatch = E.label();
 		int lblEnd = E.label();
-
-		// Emit LOOKUPSWITCH
-		int switchPC = C.mcLen;
-		E.eb(E.LOOKUPSWITCH);
-
-		// Padding to 4-byte alignment
-		while ((switchPC + 1 + (C.mcLen - switchPC - 1)) % 4 != 0) {
-			E.eb(0);
-		}
-
-		int defaultLoc = C.mcLen;
-		E.eIBE(0); // default offset placeholder
-		int npairsLoc = C.mcLen;
-		E.eIBE(0); // npairs placeholder
-
-		// Case table will be inserted at this position after parsing
-		int tableInsert = C.mcLen;
-
 		int caseCount = 0;
 		int defaultLabel = -1;
 
+		// Parse the body first, then branch into the selected case block.
+		E.eBr(E.GOTO, lblDispatch);
 		Lexer.expect(Tk.LBRACE);
 		E.pushLp(lblEnd, lblEnd); // continue in switch = break
 
-		// Single forward pass: collect case values AND emit body bytecodes
 		while (Tk.type != Tk.RBRACE && Tk.type != Tk.EOF) {
 			if (Tk.type == Tk.CASE) {
 				Lexer.nextToken();
@@ -478,56 +447,34 @@ public class Stmt {
 		}
 
 		E.popLp();
-
-		// Sort case values (insertion sort, keeping caseLbls in sync)
-		for (int i = 1; i < caseCount; i++) {
-			int kv = C.caseVals[i];
-			int kl = C.caseLbls[i];
-			int j = i - 1;
-			while (j >= 0 && C.caseVals[j] > kv) {
-				C.caseVals[j + 1] = C.caseVals[j];
-				C.caseLbls[j + 1] = C.caseLbls[j];
-				j--;
-			}
-			C.caseVals[j + 1] = kv;
-			C.caseLbls[j + 1] = (short)kl;
-		}
-
-		// Patch npairs
-		E.pBE(npairsLoc, caseCount);
-
-		// Insert case table ahead of the already-emitted body.
-		int tableSize = caseCount * 8;
-		insertDispatch(tableInsert, tableSize, lblEnd);
-
-		// Write sorted case table entries
+		E.eBr(E.GOTO, lblEnd);
+		E.mark(lblDispatch);
 		for (int i = 0; i < caseCount; i++) {
-			int off = tableInsert + i * 8;
-			E.pBE(off, C.caseVals[i]);
-			E.pBE(off + 4, C.lblAddr[C.caseLbls[i]] - switchPC);
+			E.eLd(swSlot, 0); E.push();
+			E.eIC(C.caseVals[i]); E.push();
+			E.eBr(0x9F, C.caseLbls[i]); // IF_ICMPEQ
+			E.pop(); E.pop();
 		}
-
-		// Patch default offset
-		E.pBE(defaultLoc, switchTarget(defaultLabel, lblEnd) - switchPC);
+		E.eBr(E.GOTO, defaultLabel >= 0 ? defaultLabel : lblEnd);
+		E.mark(lblEnd);
 
 		Lexer.expect(Tk.RBRACE);
 	}
 
 	static void pStringSwitch() {
 		// String value on JVM stack — store in hidden local
-		int swSlot = C.locCount;
-		byte[] sb = Tk.strBuf;
-		sb[0] = (byte)'$'; sb[1] = (byte)'s'; sb[2] = (byte)'w';
-		E.aLoc(C.intern(sb, 3), 1, C.N_STRING);
+		int swSlot = aSwitchLocal(1, C.N_STRING);
 		E.eSt(swSlot, 1); E.pop();
 
+		int lblDispatch = E.label();
 		int lblEnd = E.label();
 		int eqMi = C.ensNat(C.N_STRING, C.N_EQUALS);
-		int switchInsert = C.mcLen;
+		int eqCpIdx = E.aCP(eqMi);
 
 		int caseCount = 0;
 		int defaultLabel = -1;
 
+		E.eBr(E.GOTO, lblDispatch);
 		Lexer.expect(Tk.LBRACE);
 		E.pushLp(lblEnd, lblEnd);
 
@@ -556,56 +503,17 @@ public class Stmt {
 		}
 
 		E.popLp();
-
-		// Build dispatch chain: for each case, ALOAD $sw + LDC/LDC_W str + INVOKEVIRTUAL equals + IFNE
-		int eqCpIdx = E.aCP(eqMi);
-		int aloadSz = swSlot <= 3 ? 1 : 2;
-		// Compute dispatch size — LDC_W uses 3 bytes instead of 2
-		int dispatchSz = 3; // final GOTO
+		E.eBr(E.GOTO, lblEnd);
+		E.mark(lblDispatch);
 		for (int i = 0; i < caseCount; i++) {
-			int ldcSz = C.caseVals[i] < 256 ? 2 : 3;
-			dispatchSz += aloadSz + ldcSz + 3 + 3; // ALOAD + LDC/LDC_W + INVOKEVIRTUAL + IFNE
+			E.eLd(swSlot, 1); E.push();
+			E.eLdc(C.caseVals[i]); E.push();
+			E.eOp(E.INVOKEVIRTUAL, eqCpIdx); E.pop(); E.pop(); E.push();
+			E.eBr(E.IFNE, C.caseLbls[i]);
+			E.pop();
 		}
-
-		insertDispatch(switchInsert, dispatchSz, lblEnd);
-
-		// Write dispatch chain at switchInsert
-		int pos = switchInsert;
-		for (int i = 0; i < caseCount; i++) {
-			if (swSlot <= 3) {
-				C.mcode[pos++] = (byte)(E.ALOAD_0 + swSlot);
-			} else {
-				C.mcode[pos++] = (byte)E.ALOAD;
-				C.mcode[pos++] = (byte)swSlot;
-			}
-			int cv = C.caseVals[i];
-			if (cv < 256) {
-				C.mcode[pos++] = (byte)E.LDC;
-				C.mcode[pos++] = (byte)cv;
-			} else {
-				C.mcode[pos++] = (byte)E.LDC_W;
-				C.mcode[pos++] = (byte)((cv >> 8) & 0xFF);
-				C.mcode[pos++] = (byte)(cv & 0xFF);
-			}
-			C.mcode[pos++] = (byte)E.INVOKEVIRTUAL;
-			C.mcode[pos++] = (byte)((eqCpIdx >> 8) & 0xFF);
-			C.mcode[pos++] = (byte)(eqCpIdx & 0xFF);
-			int target = C.lblAddr[C.caseLbls[i]];
-			int ifnePC = pos;
-			C.mcode[pos++] = (byte)E.IFNE;
-			int offset = target - ifnePC;
-			C.mcode[pos++] = (byte)((offset >> 8) & 0xFF);
-			C.mcode[pos++] = (byte)(offset & 0xFF);
-		}
-		int defTarget = switchTarget(defaultLabel, lblEnd);
-		int gotoPC = pos;
-		C.mcode[pos++] = (byte)E.GOTO;
-		int gotoOff = defTarget - gotoPC;
-		C.mcode[pos++] = (byte)((gotoOff >> 8) & 0xFF);
-		C.mcode[pos++] = (byte)(gotoOff & 0xFF);
-
-		// Dispatch chain uses 2 stack slots (ALOAD + LDC before INVOKEVIRTUAL)
-		if (C.maxStk < 2) C.maxStk = 2;
+		E.eBr(E.GOTO, defaultLabel >= 0 ? defaultLabel : lblEnd);
+		E.mark(lblEnd);
 
 		Lexer.expect(Tk.RBRACE);
 	}

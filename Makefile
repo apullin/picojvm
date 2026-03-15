@@ -3,9 +3,12 @@ CFLAGS  = -Wall -Wextra -O2
 JAVAC   = javac
 PYTHON  = python3
 PICOJVM = ./picojvm
+EXPDIR  = expected
 
 # Single-class tests
-TESTS_SINGLE = tests/Fib tests/HelloWorld tests/BubbleSort tests/Counter tests/StringTest tests/StaticInitTest tests/MultiArrayTest tests/StringSwitchTest
+TESTS_SINGLE = Fib HelloWorld BubbleSort Counter StringTest StaticInitTest MultiArrayTest StringSwitchTest
+TESTS_MULTI  = Shapes Features InterfaceTest ExceptionTest
+ALL_TESTS    = $(TESTS_SINGLE) $(TESTS_MULTI)
 
 # --- 8085 target toolchain ---
 ROOT     = $(shell cd ../.. && pwd)
@@ -76,48 +79,52 @@ tests/MyException.class tests/ExceptionTest.class: tests/ExceptionTest.java test
 run-%: $(PICOJVM) tests/%.pjvm
 	$(PICOJVM) tests/$*.pjvm
 
-# Run all tests on host
-test: $(PICOJVM) $(addsuffix .pjvm,$(TESTS_SINGLE)) tests/Shapes.pjvm tests/Features.pjvm tests/InterfaceTest.pjvm tests/ExceptionTest.pjvm
-	@for t in $(TESTS_SINGLE); do \
-		echo "=== $$(basename $$t) ==="; \
-		$(PICOJVM) $$t.pjvm; \
-		echo ""; \
+$(BUILDDIR)/%.out: $(PICOJVM) tests/%.pjvm | $(BUILDDIR)
+	$(PICOJVM) tests/$*.pjvm > $@
+
+$(BUILDDIR)/%.paged.out: $(PICOJVM_PAGED) tests/%.pjvm | $(BUILDDIR)
+	$(PICOJVM_PAGED) tests/$*.pjvm > $@
+
+$(BUILDDIR)/%.hex: $(BUILDDIR)/%.out | $(BUILDDIR)
+	@od -An -t x1 -v $< | tr '\n' ' ' | tr -s ' ' | sed 's/^ //;s/ $$//' > $@
+
+$(BUILDDIR)/%.paged.hex: $(BUILDDIR)/%.paged.out | $(BUILDDIR)
+	@od -An -t x1 -v $< | tr '\n' ' ' | tr -s ' ' | sed 's/^ //;s/ $$//' > $@
+
+test-%: $(BUILDDIR)/%.hex $(EXPDIR)/%.hex
+	@if [ "$$(cat $(BUILDDIR)/$*.hex)" = "$$(cat $(EXPDIR)/$*.hex)" ]; then \
+		echo "PASS: $*"; \
+	else \
+		echo "FAIL: $*"; \
+		echo "  Expected: $$(cat $(EXPDIR)/$*.hex)"; \
+		echo "  Actual:   $$(cat $(BUILDDIR)/$*.hex)"; \
+		exit 1; \
+	fi
+
+test-paged-%: $(BUILDDIR)/%.paged.hex $(EXPDIR)/%.hex
+	@if [ "$$(cat $(BUILDDIR)/$*.paged.hex)" = "$$(cat $(EXPDIR)/$*.hex)" ]; then \
+		echo "PASS: $* [paged]"; \
+	else \
+		echo "FAIL: $* [paged]"; \
+		echo "  Expected: $$(cat $(EXPDIR)/$*.hex)"; \
+		echo "  Actual:   $$(cat $(BUILDDIR)/$*.paged.hex)"; \
+		exit 1; \
+	fi
+
+# Run all tests on host with golden-output comparison
+test: $(PICOJVM) $(addprefix tests/,$(addsuffix .pjvm,$(TESTS_SINGLE))) tests/Shapes.pjvm tests/Features.pjvm tests/InterfaceTest.pjvm tests/ExceptionTest.pjvm
+	@for t in $(ALL_TESTS); do \
+		$(MAKE) --no-print-directory test-$$t; \
 	done
-	@echo "=== Shapes ==="
-	$(PICOJVM) tests/Shapes.pjvm
-	@echo ""
-	@echo "=== Features ==="
-	$(PICOJVM) tests/Features.pjvm
-	@echo ""
-	@echo "=== InterfaceTest ==="
-	$(PICOJVM) tests/InterfaceTest.pjvm
-	@echo ""
-	@echo "=== ExceptionTest ==="
-	$(PICOJVM) tests/ExceptionTest.pjvm
-	@echo ""
 
 # Paged-mode run and test
 run-paged-%: $(PICOJVM_PAGED) tests/%.pjvm
 	$(PICOJVM_PAGED) tests/$*.pjvm
 
-test-paged: $(PICOJVM_PAGED) $(addsuffix .pjvm,$(TESTS_SINGLE)) tests/Shapes.pjvm tests/Features.pjvm tests/InterfaceTest.pjvm tests/ExceptionTest.pjvm
-	@for t in $(TESTS_SINGLE); do \
-		echo "=== $$(basename $$t) [paged] ==="; \
-		$(PICOJVM_PAGED) $$t.pjvm; \
-		echo ""; \
+test-paged: $(PICOJVM_PAGED) $(addprefix tests/,$(addsuffix .pjvm,$(TESTS_SINGLE))) tests/Shapes.pjvm tests/Features.pjvm tests/InterfaceTest.pjvm tests/ExceptionTest.pjvm
+	@for t in $(ALL_TESTS); do \
+		$(MAKE) --no-print-directory test-paged-$$t; \
 	done
-	@echo "=== Shapes [paged] ==="
-	$(PICOJVM_PAGED) tests/Shapes.pjvm
-	@echo ""
-	@echo "=== Features [paged] ==="
-	$(PICOJVM_PAGED) tests/Features.pjvm
-	@echo ""
-	@echo "=== InterfaceTest [paged] ==="
-	$(PICOJVM_PAGED) tests/InterfaceTest.pjvm
-	@echo ""
-	@echo "=== ExceptionTest [paged] ==="
-	$(PICOJVM_PAGED) tests/ExceptionTest.pjvm
-	@echo ""
 
 # --- 8085 simulator target ---
 

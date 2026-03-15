@@ -70,12 +70,11 @@ class E {
 		C.cpSz = 0;
 		C.excC = 0;
 		autoCtorsEmitted = false;
-		Catalog.curPkgNm = -1;
-		Catalog.impCount = 0;
+		Catalog.resetUnitScope();
 
 		// Skip to class bodies and emit methods
 		while (Tk.type != Tk.EOF) {
-			Catalog.scanTopDecls();
+			Catalog.scanUnitScope();
 			if (Tk.type == Tk.EOF) break;
 			eClsMethods();
 		}

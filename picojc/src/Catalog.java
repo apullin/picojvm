@@ -1,16 +1,21 @@
 public class Catalog {
 	static final int MAX_IMPORTS = 32;
+	// Compilation-unit scope: one current package plus explicit single-type imports.
 	static int curPkgNm = -1;
 	static int[] impSimple = new int[MAX_IMPORTS];
 	static int[] impFull = new int[MAX_IMPORTS];
 	static int impCount;
 
-	static void catalog() {
-		C.uClsStart = C.cCount;
+	static void resetUnitScope() {
 		curPkgNm = -1;
 		impCount = 0;
+	}
+
+	static void catalog() {
+		C.uClsStart = C.cCount;
+		resetUnitScope();
 		while (Tk.type != Tk.EOF) {
-			scanTopDecls();
+			scanUnitScope();
 			if (Tk.type == Tk.EOF) break;
 			catClass();
 		}
@@ -30,7 +35,7 @@ public class Catalog {
 		return nm;
 	}
 
-	static int parseTypeNm() {
+	static int parseQName(boolean resolveSimple) {
 		int nm = C.iN();
 		boolean qualified = false;
 		while (Tk.type == Tk.DOT) {
@@ -38,28 +43,24 @@ public class Catalog {
 			nm = C.dotNm(nm, C.iN());
 			qualified = true;
 		}
-		return qualified ? nm : resolveTypeNm(nm);
-	}
-
-	static int parseRawQName() {
-		int nm = C.iN();
-		while (Tk.type == Tk.DOT) {
-			Lexer.nextToken();
-			nm = C.dotNm(nm, C.iN());
-		}
+		if (!qualified && resolveSimple) return resolveTypeNm(nm);
 		return nm;
 	}
 
-	static void scanTopDecls() {
+	static int parseTypeNm() {
+		return parseQName(true);
+	}
+
+	static void scanUnitScope() {
 		while (Tk.type == Tk.PACKAGE || Tk.type == Tk.IMPORT) {
 			if (Tk.type == Tk.PACKAGE) {
 				Lexer.nextToken();
-				curPkgNm = parseRawQName();
+				curPkgNm = parseQName(false);
 				impCount = 0;
 				Lexer.expect(Tk.SEMI);
 			} else {
 				Lexer.nextToken();
-				int fullNm = parseRawQName();
+				int fullNm = parseQName(false);
 				if (impCount < MAX_IMPORTS) {
 					impSimple[impCount] = C.tailNm(fullNm);
 					impFull[impCount] = fullNm;

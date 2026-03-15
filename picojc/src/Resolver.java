@@ -152,19 +152,9 @@ public class Resolver {
 			}
 		}
 
-		// Find main method. Prefer the real String[] form, then fall back to main().
-		C.mainMi = -1;
-		int zeroArgMain = -1;
-		for (int mi = 0; mi < C.mCount; mi++) {
-			if (C.mName[mi] == C.N_MAIN && C.mStatic[mi] && !C.mNative[mi]) {
-				if (C.mMainStrArgs[mi]) {
-					C.mainMi = mi;
-					break;
-				}
-				if (C.mArgC[mi] == 0 && zeroArgMain < 0) zeroArgMain = mi;
-			}
-		}
-		if (C.mainMi < 0) C.mainMi = zeroArgMain;
+		// Entrypoint selection uses the same declaration-shape matching as other exact lookups.
+		C.mainMi = fMain(true);
+		if (C.mainMi < 0) C.mainMi = fMain(false);
 		if (C.mainMi < 0) {
 			Lexer.error(200); // No main method found
 		}
@@ -256,6 +246,17 @@ public class Resolver {
 		return fMethodExact(ci, nm, isStatic, -1);
 	}
 
+	// Declaration-shape matching: used for exact body lookup, ctors, and entrypoints.
+	static boolean declShapeFits(int mi, int ci, int nm, boolean isStatic, int argc,
+								 boolean allowNative, boolean allowCtor) {
+		return (ci < 0 || C.mClass[mi] == ci) &&
+			   C.mName[mi] == nm &&
+			   C.mStatic[mi] == isStatic &&
+			   C.mArgC[mi] == argc &&
+			   (allowNative || !C.mNative[mi]) &&
+			   (allowCtor || !C.mIsCtor[mi]);
+	}
+
 	// Shared call matching: keep staticness, arity, and varargs rules in one place.
 	static boolean sameSig(int mi, int mj) {
 		return C.mName[mi] == C.mName[mj] && C.mArgC[mi] == C.mArgC[mj];
@@ -294,9 +295,7 @@ public class Resolver {
 	// Exact declaration lookup for emit-time body matching; calls use fMethodExact/fCallTarget.
 	static int fDeclaredMethod(int ci, int nm, boolean isStatic, int argc) {
 		for (int mi = 0; mi < C.mCount; mi++) {
-			if (C.mClass[mi] == ci && C.mName[mi] == nm &&
-				C.mStatic[mi] == isStatic && !C.mIsCtor[mi] &&
-				!C.mNative[mi] && C.mArgC[mi] == argc) {
+			if (declShapeFits(mi, ci, nm, isStatic, argc, false, false)) {
 				return mi;
 			}
 		}
@@ -305,8 +304,18 @@ public class Resolver {
 
 	static int fCtor(int ci, int argc) {
 		for (int mi = 0; mi < C.mCount; mi++) {
-			if (C.mClass[mi] == ci && C.mIsCtor[mi] &&
-				C.mArgC[mi] == argc && !C.mNative[mi]) {
+			if (declShapeFits(mi, ci, C.N_INIT, false, argc, false, true)) {
+				return mi;
+			}
+		}
+		return -1;
+	}
+
+	static int fMain(boolean wantStringArgs) {
+		int argc = wantStringArgs ? 1 : 0;
+		for (int mi = 0; mi < C.mCount; mi++) {
+			if (declShapeFits(mi, -1, C.N_MAIN, true, argc, false, false) &&
+				C.mMainStrArgs[mi] == wantStringArgs) {
 				return mi;
 			}
 		}

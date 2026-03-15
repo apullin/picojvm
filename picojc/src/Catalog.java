@@ -145,6 +145,7 @@ public class Catalog {
 
 		// Parse return type
 		int retType = 0;
+		int fieldType = 0;
 		int arrayKind = 0;
 		int refNm = -1;
 		int retTypeToken = Tk.type;
@@ -177,22 +178,30 @@ public class Catalog {
 		}
 		else if (Tk.type == Tk.STRING_KW) {
 			retType = 2;
+			fieldType = 1;
 			refNm = C.N_STRING;
 			Lexer.nextToken();
+			int dimCount = 0;
 			while (Tk.type == Tk.LBRACKET) {
 				Lexer.nextToken();
 				Lexer.expect(Tk.RBRACKET);
-				refNm = -1;
+				dimCount++;
 			}
+			if (dimCount == 1) fieldType = 2;
+			else if (dimCount > 1) refNm = -1;
 		}
 		else if (Tk.type == Tk.IDENT) {
 			retType = 2;
+			fieldType = 1;
 			refNm = C.iN();
+			int dimCount = 0;
 			while (Tk.type == Tk.LBRACKET) {
 				Lexer.nextToken();
 				Lexer.expect(Tk.RBRACKET);
-				refNm = -1;
+				dimCount++;
 			}
+			if (dimCount == 1) fieldType = 2;
+			else if (dimCount > 1) refNm = -1;
 		}
 		else {
 			Native.putchar('T'); Lexer.printNum(Tk.type);
@@ -210,9 +219,9 @@ public class Catalog {
 
 		int nm = C.iN();
 		if (Tk.type == Tk.LPAREN) {
-			catMethod(ci, nm, mStat, false, mNat, mAbst, retType, refNm);
+			catMethod(ci, nm, mStat, false, mNat, mAbst, retType, fieldType == 2 ? -1 : refNm);
 		} else {
-			catField(ci, nm, mStat, mFinal, retType, arrayKind, refNm);
+			catField(ci, nm, mStat, mFinal, fieldType, arrayKind, refNm);
 		}
 	}
 
@@ -239,8 +248,8 @@ public class Catalog {
 	}
 
 	static void catField(int ci, int nm, boolean isStat, boolean isFinal,
-						   int retType, int arrKind, int refNm) {
-		int fi = initField(ci, nm, isStat, isFinal, retType == 2 ? 1 : 0, arrKind, refNm);
+						   int fieldType, int arrKind, int refNm) {
+		int fi = initField(ci, nm, isStat, isFinal, fieldType, arrKind, refNm);
 
 		if (Tk.type == Tk.ASSIGN && isStat) {
 			C.fInitPos[fi] = Lexer.pos;
@@ -253,7 +262,7 @@ public class Catalog {
 				if (Tk.type == Tk.COMMA) {
 					Lexer.nextToken();
 					int nm2 = C.iN();
-					int fi2 = initField(ci, nm2, isStat, isFinal, retType == 2 ? 1 : 0, arrKind, refNm);
+					int fi2 = initField(ci, nm2, isStat, isFinal, fieldType, arrKind, refNm);
 					// Record initializer for comma-separated fields: static int A=0, B=1;
 				if (Tk.type == Tk.ASSIGN && isStat) {
 					C.fInitPos[fi2] = Lexer.pos;

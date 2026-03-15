@@ -453,7 +453,7 @@ class E {
 	}
 
 	static int pTypeLoc() {
-		// Returns: 0=int, 1=ref, 3=int[], 4=byte[], 5=char[], 8=short[]
+		// Returns: 0=int, 1=ref, 2=object[], 3=int[], 4=byte[], 5=char[], 8=short[]
 		int baseType = 0;
 		int elemKind = 0; // 0=int-like, 1=byte, 2=char, 3=short
 		tyRefNm = -1;
@@ -481,8 +481,13 @@ class E {
 			dimCount++;
 		}
 		if (dimCount > 0) {
+			if (baseType == 1) {
+				if (dimCount == 1 && tyRefNm >= 0) return 2; // object[]
+				tyRefNm = -1;
+				return 1; // generic reference array
+			}
 			tyRefNm = -1;
-			if (baseType == 1 || dimCount > 1) return 1; // Object[]/multi-dim = reference
+			if (dimCount > 1) return 1;
 			if (elemKind == 1) return 4; // byte[]
 			if (elemKind == 2) return 5; // char[]
 			if (elemKind == 3) return 8; // short[]
@@ -578,8 +583,8 @@ class E {
 	static void eOp(int op, int cp) { eb(op); eSBE(cp); }
 	static void epop() { eb(POP); pop(); }
 	static void ethis() { eLd(0, 1); push(); } // ALOAD_0 this
-	static void eALd(int t) { eb(t==4 ? 0x33 : t==5 ? 0x34 : t==8 ? 0x35 : 0x2E); } // BALOAD/CALOAD/SALOAD/IALOAD
-	static void eASt(int t) { eb(t==4 ? 0x54 : t==5 ? 0x55 : t==8 ? 0x56 : 0x4F); } // BASTORE/CASTORE/SASTORE/IASTORE
+	static void eALd(int t) { eb(t==4 ? 0x33 : t==5 ? 0x34 : t==8 ? 0x35 : 0x2E); } // backend/runtime use generic IALOAD for ref arrays too
+	static void eASt(int t) { eb(t==4 ? 0x54 : t==5 ? 0x55 : t==8 ? 0x56 : 0x4F); } // backend/runtime use generic IASTORE for ref arrays too
 	static void pushLp(int brk, int cont) {
 		C.chk(C.lpDepth, 32, 263);
 		C.lpBrkLbl[C.lpDepth] = (short)brk;

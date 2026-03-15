@@ -55,7 +55,7 @@ class C {
 	static int fCount;
 	static byte[] fClass  = new byte[MAX_FIELDS];
 	static short[] fName   = new short[MAX_FIELDS]; // name index
-	static byte[] fType = new byte[MAX_FIELDS]; // 0=int-like, 1=ref-like
+	static byte[] fType = new byte[MAX_FIELDS]; // 0=int-like, 1=ref, 2=object[]
 	static boolean[] fStatic = new boolean[MAX_FIELDS];
 	static short[] fSlot   = new short[MAX_FIELDS]; // assigned in resolve
 	static int[] fInitPos  = new int[MAX_FIELDS]; // source pos of initializer (must be int: >32KB sources)
@@ -129,7 +129,7 @@ class C {
 	// --- Locals (per method, during emit) ---
 	static short[] locName = new short[MAX_LOCALS]; // name index
 	static byte[] locSlot = new byte[MAX_LOCALS];
-	static byte[] locType = new byte[MAX_LOCALS]; // 0=int,1=ref,3=int[],4=byte[],5=char[],8=short[]
+	static byte[] locType = new byte[MAX_LOCALS]; // 0=int,1=ref,2=object[],3=int[],4=byte[],5=char[],8=short[]
 	static short[] locRefNm = new short[MAX_LOCALS]; // declared ref type name, -1 if unknown/non-ref
 	static int locCount;
 	static int locNext;

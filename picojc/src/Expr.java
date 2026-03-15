@@ -9,6 +9,22 @@ public class Expr {
 	static int lvRefNm;  // declared ref type name, -1 if unknown/non-ref
 	static boolean lvRV; // assign DUPs and returns value
 	static int exprRefNm = -1; // declared ref type name for the last parsed ref expression
+	static int exprArrRefNm = -1; // element ref type when the last parsed expression is object[]
+
+	static void clearRefInfo() {
+		exprRefNm = -1;
+		exprArrRefNm = -1;
+	}
+
+	static void setObjRef(int refNm) {
+		exprRefNm = refNm;
+		exprArrRefNm = -1;
+	}
+
+	static void setObjArrayRef(int refNm) {
+		exprRefNm = -1;
+		exprArrRefNm = refNm;
+	}
 
 	static boolean callMatches(int mi, int argc, boolean isStatic) {
 		if (mi < 0 || C.mStatic[mi] != isStatic || C.mIsCtor[mi]) return false;
@@ -57,9 +73,20 @@ public class Expr {
 	}
 
 	static int fRetType(int t, int refNm) {
-		exprRefNm = refNm;
-		if (t >= 3) return t;
-		return t == 1 ? 2 : 1;
+		if (t == 2) {
+			setObjArrayRef(refNm);
+			return 2;
+		}
+		if (t >= 3) {
+			clearRefInfo();
+			return t;
+		}
+		if (t == 1) {
+			setObjRef(refNm);
+			return 2;
+		}
+		clearRefInfo();
+		return 1;
 	}
 
 	static int pExpr() {
@@ -76,16 +103,20 @@ public class Expr {
 			E.eBr(E.IFEQ, lblFalse); // IFEQ → false
 			int tType = pExpr();
 			int tRefNm = exprRefNm;
+			int tArrRefNm = exprArrRefNm;
 			E.eBr(E.GOTO, lblEnd); // GOTO end
 			E.pop();
 			Lexer.expect(Tk.COLON);
 			E.mark(lblFalse);
 			int fType = pExpr();
 			int fRefNm = exprRefNm;
+			int fArrRefNm = exprArrRefNm;
 			E.mark(lblEnd);
 			type = tType;
-			if (tType == 2 && fType == 2 && tRefNm == fRefNm) exprRefNm = tRefNm;
-			else exprRefNm = -1;
+			if (tType == 2 && fType == 2 && tRefNm == fRefNm && tArrRefNm == fArrRefNm) {
+				exprRefNm = tRefNm;
+				exprArrRefNm = tArrRefNm;
+			} else clearRefInfo();
 		}
 		return type;
 	}
@@ -142,7 +173,7 @@ public class Expr {
 				else
 						E.cmpBool(tok == Tk.EQ ? 0x9F : 0xA0);
 					type = 1;
-					exprRefNm = -1;
+					clearRefInfo();
 				} else if (tok == Tk.INSTANCEOF) {
 					int classNm = C.iN();
 					E.pop();
@@ -150,20 +181,20 @@ public class Expr {
 					int cpIdx = E.aCP(ci >= 0 ? ci : 0);
 					E.eOp(E.INSTANCEOF, cpIdx); E.push();
 					type = 1;
-					exprRefNm = -1;
+					clearRefInfo();
 				} else if (prec == 7) {
 					// Comparison: <, >, <=, >=
 					pBin(prec + 1);
 					E.pop(); E.pop();
 					E.cmpBool(opcode);
 					type = 1;
-					exprRefNm = -1;
+					clearRefInfo();
 				} else {
 					// Standard: |, ^, &, <<, >>, >>>, +, -, *, /, %
 					pBin(prec + 1);
 					E.pop();
 					E.eb(opcode);
-					exprRefNm = -1;
+					clearRefInfo();
 				}
 			}
 			return type;
@@ -179,7 +210,7 @@ public class Expr {
 			}
 				pUnary();
 				E.eb(E.INEG);
-				exprRefNm = -1;
+				clearRefInfo();
 				return 1;
 			}
 		if (Tk.type == Tk.TILDE) {
@@ -190,7 +221,7 @@ public class Expr {
 				E.push();
 				E.eb(E.IXOR);
 				E.pop();
-				exprRefNm = -1;
+				clearRefInfo();
 				return 1;
 			}
 		if (Tk.type == Tk.BANG) {
@@ -198,7 +229,7 @@ public class Expr {
 				pUnary();
 				E.pop();
 				E.cmpBool(E.IFEQ); // IFEQ: !x
-				exprRefNm = -1;
+				clearRefInfo();
 				return 1;
 			}
 		if (Tk.type == Tk.INC || Tk.type == Tk.DEC) {
@@ -217,7 +248,7 @@ public class Expr {
 					E.edup();
 					E.eSt(slot, 0);
 					E.pop();
-					exprRefNm = -1;
+					clearRefInfo();
 					return 1;
 				}
 			Lexer.error(201);
@@ -246,7 +277,8 @@ public class Expr {
 							int cpIdx = E.aCP(ci >= 0 ? ci : 0);
 							E.eOp(E.CHECKCAST, cpIdx);
 						}
-						exprRefNm = castType == Tk.IDENT ? castNm : -1;
+						if (castType == Tk.IDENT) setObjRef(castNm);
+						else clearRefInfo();
 						return castType == Tk.IDENT ? 2 : 1;
 					}
 				// Not a cast, restore and parse as parenthesized expression
@@ -271,7 +303,7 @@ public class Expr {
 					// array.length
 					E.eb(E.ARRAYLENGTH);
 					type = 1;
-					exprRefNm = -1;
+					clearRefInfo();
 				} else if (Tk.type == Tk.LPAREN) {
 					// Method call on object
 					type = eMethCall(recvRefNm, memberNm);
@@ -282,6 +314,7 @@ public class Expr {
 			}
 				else if (Tk.type == Tk.LBRACKET) {
 					// Array access
+					int arrElemRefNm = exprArrRefNm;
 					Lexer.nextToken();
 					pExpr();
 					Lexer.expect(Tk.RBRACKET);
@@ -294,7 +327,7 @@ public class Expr {
 						E.pop(); E.pop();
 						E.eASt(type);
 						type = 0;
-						exprRefNm = -1;
+						clearRefInfo();
 					} else if (Tk.type == Tk.INC || Tk.type == Tk.DEC) {
 						// Array element post-increment: arr[idx]++
 						int op = Tk.type;
@@ -309,21 +342,26 @@ public class Expr {
 						E.eASt(type);
 						E.pop(); E.pop(); E.pop();
 						type = 1;
-						exprRefNm = -1;
+						clearRefInfo();
 					} else {
 						E.eALd(type);
 						// Propagate inner type for multi-dim arrays
 						if (type == 6) type = 4;
 						else if (type == 7) type = 5;
-						else type = 1;
-						exprRefNm = -1;
+						else if (type == 2) {
+							type = 2;
+							setObjRef(arrElemRefNm);
+						} else {
+							type = 1;
+							clearRefInfo();
+						}
 					}
 				}
 				else if (Tk.type == Tk.INC || Tk.type == Tk.DEC) {
 					// Post-increment/decrement in general postfix position
 					Lexer.nextToken();
 					type = 1;
-					exprRefNm = -1;
+					clearRefInfo();
 				}
 				else if (Tk.type == Tk.ASSIGN ||
 						 (Tk.type >= Tk.PLUS_EQ && Tk.type <= Tk.USHR_EQ)) {
@@ -344,7 +382,7 @@ public class Expr {
 			Lexer.nextToken();
 			E.eIC(val);
 			E.push();
-			exprRefNm = -1;
+			clearRefInfo();
 			return 1;
 		}
 		if (Tk.type == Tk.STR_LIT) {
@@ -354,23 +392,23 @@ public class Expr {
 			Lexer.nextToken();
 			E.eLdc(cpIdx);
 			E.push();
-			exprRefNm = C.N_STRING;
+			setObjRef(C.N_STRING);
 			return 2; // reference
 		}
-		if (Tk.type == Tk.TRUE) { Lexer.nextToken(); E.ic1(); exprRefNm = -1; return 1; }
-		if (Tk.type == Tk.FALSE) { Lexer.nextToken(); E.ic0(); exprRefNm = -1; return 1; }
+		if (Tk.type == Tk.TRUE) { Lexer.nextToken(); E.ic1(); clearRefInfo(); return 1; }
+		if (Tk.type == Tk.FALSE) { Lexer.nextToken(); E.ic0(); clearRefInfo(); return 1; }
 		if (Tk.type == Tk.NULL) {
 			Lexer.nextToken();
 			E.eb(E.ACONST_NULL);
 			E.push();
-			exprRefNm = -1;
+			clearRefInfo();
 			return 2;
 		}
 		if (Tk.type == Tk.THIS) {
 			Lexer.nextToken();
 			E.eLd(0, 1); // ALOAD_0
 			E.push();
-			exprRefNm = C.cName[C.curCi];
+			setObjRef(C.cName[C.curCi]);
 			return 2;
 		}
 		if (Tk.type == Tk.NEW) {
@@ -395,7 +433,7 @@ public class Expr {
 							int fi = Resolver.fStatField(ci, memberNm);
 							if (fi < 0) { Lexer.error(207); return 0; }
 							if (C.fFinal[fi] && C.fHasConst[fi]) {
-								E.eIC(C.fConstVal[fi]); E.push(); exprRefNm = -1; return 1;
+								E.eIC(C.fConstVal[fi]); E.push(); clearRefInfo(); return 1;
 							}
 							// ClassName.field — no return value on assign
 							lvK = 2; lvI = E.aCP(C.fSlot[fi]); lvT = C.fType[fi];
@@ -428,10 +466,10 @@ public class Expr {
 				// Check for static field (prefer current class first)
 				{
 					int fi = Resolver.fStatField(C.curCi, nm);
-					if (fi >= 0) {
-						if (C.fFinal[fi] && C.fHasConst[fi]) {
-							E.eIC(C.fConstVal[fi]); E.push(); exprRefNm = -1; return 1;
-						}
+						if (fi >= 0) {
+							if (C.fFinal[fi] && C.fHasConst[fi]) {
+								E.eIC(C.fConstVal[fi]); E.push(); clearRefInfo(); return 1;
+							}
 						// Static field lvalue (in-class, returns value on assign)
 						lvK = 2; lvI = E.aCP(C.fSlot[fi]); lvT = C.fType[fi];
 						lvArr = C.fArrKind[fi]; lvRefNm = C.fRefNm[fi]; lvRV = true;
@@ -444,18 +482,18 @@ public class Expr {
 					// Check if it's an instance method (implicit this.method())
 					if (!C.curMStatic && Resolver.fMethod(C.curCi, nm, false) >= 0) {
 						E.ethis();
-						exprRefNm = C.cName[C.curCi];
+						setObjRef(C.cName[C.curCi]);
 						return eMethCall(C.cName[C.curCi], nm);
 					}
 					return eStatCall(C.cName[C.curCi], nm);
 				}
 
 				Lexer.error(202); // Undefined identifier
-				exprRefNm = -1;
+				clearRefInfo();
 				return 0;
 		}
 		Lexer.error(203); // Unexpected token
-		exprRefNm = -1;
+		clearRefInfo();
 		return 0;
 	}
 
@@ -488,7 +526,7 @@ public class Expr {
 					Lexer.nextToken();
 					int cpIdx = E.aCP(0);
 					E.eOp(E.ANEWARRAY, cpIdx);
-					exprRefNm = -1;
+					clearRefInfo();
 					return 2; // reference array
 				}
 				pExpr();
@@ -498,7 +536,7 @@ public class Expr {
 				E.eb(2); // 2 dimensions
 				E.pop(); // second dimension
 				// First dim still on stack, result replaces it
-				exprRefNm = -1;
+				clearRefInfo();
 				return 2;
 			}
 
@@ -506,7 +544,7 @@ public class Expr {
 			E.eb(typeCode);
 			// Stack: count consumed, array ref pushed = net 0
 			// Return specific array type for proper BALOAD/BASTORE emission
-			exprRefNm = -1;
+			clearRefInfo();
 			if (typeCode == 8 || typeCode == 4) return 4;  // byte[] or boolean[]
 			if (typeCode == 5) return 5;  // char[]
 			if (typeCode == 9) return 8;  // short[]
@@ -533,12 +571,12 @@ public class Expr {
 				E.eOp(E.MULTIANEWARRAY, cpIdx);
 				E.eb(2);
 				E.pop();
-				exprRefNm = -1;
+				clearRefInfo();
 				return 2;
 			}
 
 			E.eOp(E.ANEWARRAY, cpIdx);
-			exprRefNm = -1;
+			setObjArrayRef(classNm);
 			return 2;
 		}
 
@@ -568,7 +606,7 @@ public class Expr {
 		// Pop args + dup from stack, keep original ref
 		for (int i = 0; i < argc; i++) E.pop();
 
-		exprRefNm = classNm;
+		setObjRef(classNm);
 		return 2; // reference on stack
 	}
 
@@ -578,7 +616,8 @@ public class Expr {
 	static int eCallRet(int mi, int argc) {
 		for (int j = 0; j < argc; j++) E.pop();
 		int rt = C.mRetT[mi];
-		exprRefNm = rt == 2 ? C.mRetRefNm[mi] : -1;
+		if (rt == 2) setObjRef(C.mRetRefNm[mi]);
+		else clearRefInfo();
 		if (rt != 0) E.push();
 		return rt;
 	}

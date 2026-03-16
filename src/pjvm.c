@@ -292,7 +292,7 @@ static uint16_t pjvm_make_main_args(PJVMCtx *j) {
 void pjvm_parse(uint8_t *data) {
     /* v1/v2 support removed — only v3 (0x4C) accepted.  See git history. */
     if (data[1] != PJVM_VERSION_V3) {
-        pjvm_platform_trap(0xFD, data[1]);  /* 0xFD = bad version */
+        pjvm_platform_trap(PJVM_TRAP_BAD_VERSION, data[1]);
         return;
     }
 
@@ -579,7 +579,7 @@ static void pjvm_inv(uint8_t mi) {
             break;
         }
         default:
-            pjvm_platform_trap(0xFF, g_pjvm->pc);
+            pjvm_platform_trap(PJVM_TRAP_BAD_NATIVE, g_pjvm->pc);
             break;
         }
         return;
@@ -802,7 +802,7 @@ static void pjvm_exec(void) {
     uint32_t steps = 0;
     while (g_pjvm->pc != PJVM_PC_HALT) {
         if (pjvm_step_limit && ++steps > pjvm_step_limit) {
-            pjvm_platform_trap(0xFE, g_pjvm->pc);
+            pjvm_platform_trap(PJVM_TRAP_STEP_LIMIT, g_pjvm->pc);
             return;
         }
         uint32_t opc = g_pjvm->pc;

@@ -154,7 +154,7 @@ port, and IEEE 754 softfloat in hand-written assembly.
 - **Full internal context / reentrant / thread-safe** — Program metadata
   (`pjvm_prog`, `n_methods`, `main_mi`, section offsets, etc.) is
   currently global. Must move into `PJVMCtx` (or a `PJVMProg` struct
-  pointed to by `PJVMCtx`) so multiple FreeRTOS tasks can each run an
+  pointed to by `PJVMCtx`) so multiple threads (e.g. MP/M or FreeRTOS tasks) can each run an
   independent JVM instance concurrently. The execution state (stack,
   locals, frames, heap) is already per-context; only the program
   descriptor remains global.

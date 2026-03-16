@@ -8,7 +8,9 @@ EXPDIR  = expected
 # Single-class tests
 TESTS_SINGLE = Fib HelloWorld BubbleSort Counter StringTest StaticInitTest MultiArrayTest StringSwitchTest
 TESTS_MULTI  = Shapes Features InterfaceTest ExceptionTest
+TESTS_PAGER  = BigSwitch BigLUT
 ALL_TESTS    = $(TESTS_SINGLE) $(TESTS_MULTI)
+ALL_TESTS_PAGER = $(ALL_TESTS) $(TESTS_PAGER)
 
 # --- 8085 target toolchain ---
 ROOT     = $(shell cd ../.. && pwd)
@@ -75,6 +77,10 @@ tests/ExceptionTest.pjvm: tests/MyException.class tests/ExceptionTest.class
 tests/MyException.class tests/ExceptionTest.class: tests/ExceptionTest.java tests/Native.java
 	$(JAVAC) -d tests $^
 
+# Pager stress tests (generated)
+tests/BigSwitch.java tests/BigLUT.java: tests/gen_big_tests.py
+	$(PYTHON) tests/gen_big_tests.py .
+
 # Run a test on host
 run-%: $(PICOJVM) tests/%.pjvm
 	$(PICOJVM) tests/$*.pjvm
@@ -85,10 +91,16 @@ $(BUILDDIR)/%.out: $(PICOJVM) tests/%.pjvm | $(BUILDDIR)
 $(BUILDDIR)/%.paged.out: $(PICOJVM_PAGED) tests/%.pjvm | $(BUILDDIR)
 	$(PICOJVM_PAGED) tests/$*.pjvm > $@
 
+$(BUILDDIR)/%.paged-stress.out: $(PICOJVM_PAGED) tests/%.pjvm | $(BUILDDIR)
+	$(PICOJVM_PAGED) tests/$*.pjvm --pages=1 --page-size=128 > $@
+
 $(BUILDDIR)/%.hex: $(BUILDDIR)/%.out | $(BUILDDIR)
 	@od -An -t x1 -v $< | tr '\n' ' ' | tr -s ' ' | sed 's/^ //;s/ $$//' > $@
 
 $(BUILDDIR)/%.paged.hex: $(BUILDDIR)/%.paged.out | $(BUILDDIR)
+	@od -An -t x1 -v $< | tr '\n' ' ' | tr -s ' ' | sed 's/^ //;s/ $$//' > $@
+
+$(BUILDDIR)/%.paged-stress.hex: $(BUILDDIR)/%.paged-stress.out | $(BUILDDIR)
 	@od -An -t x1 -v $< | tr '\n' ' ' | tr -s ' ' | sed 's/^ //;s/ $$//' > $@
 
 test-%: $(BUILDDIR)/%.hex $(EXPDIR)/%.hex
@@ -111,6 +123,16 @@ test-paged-%: $(BUILDDIR)/%.paged.hex $(EXPDIR)/%.hex
 		exit 1; \
 	fi
 
+test-paged-stress-%: $(BUILDDIR)/%.paged-stress.hex $(EXPDIR)/%.hex
+	@if [ "$$(cat $(BUILDDIR)/$*.paged-stress.hex)" = "$$(cat $(EXPDIR)/$*.hex)" ]; then \
+		echo "PASS: $* [paged-stress 1×128B]"; \
+	else \
+		echo "FAIL: $* [paged-stress 1×128B]"; \
+		echo "  Expected: $$(cat $(EXPDIR)/$*.hex)"; \
+		echo "  Actual:   $$(cat $(BUILDDIR)/$*.paged-stress.hex)"; \
+		exit 1; \
+	fi
+
 # Run all tests on host with golden-output comparison
 test: $(PICOJVM) $(addprefix tests/,$(addsuffix .pjvm,$(TESTS_SINGLE))) tests/Shapes.pjvm tests/Features.pjvm tests/InterfaceTest.pjvm tests/ExceptionTest.pjvm
 	@for t in $(ALL_TESTS); do \
@@ -121,9 +143,15 @@ test: $(PICOJVM) $(addprefix tests/,$(addsuffix .pjvm,$(TESTS_SINGLE))) tests/Sh
 run-paged-%: $(PICOJVM_PAGED) tests/%.pjvm
 	$(PICOJVM_PAGED) tests/$*.pjvm
 
-test-paged: $(PICOJVM_PAGED) $(addprefix tests/,$(addsuffix .pjvm,$(TESTS_SINGLE))) tests/Shapes.pjvm tests/Features.pjvm tests/InterfaceTest.pjvm tests/ExceptionTest.pjvm
-	@for t in $(ALL_TESTS); do \
+test-paged: $(PICOJVM_PAGED) $(addprefix tests/,$(addsuffix .pjvm,$(ALL_TESTS_PAGER)))
+	@for t in $(ALL_TESTS_PAGER); do \
 		$(MAKE) --no-print-directory test-paged-$$t; \
+	done
+
+# Paged stress: 1 page × 128B — forces eviction on every page boundary
+test-paged-stress: $(PICOJVM_PAGED) $(addprefix tests/,$(addsuffix .pjvm,$(ALL_TESTS_PAGER)))
+	@for t in $(ALL_TESTS_PAGER); do \
+		$(MAKE) --no-print-directory test-paged-stress-$$t; \
 	done
 
 # --- 8085 simulator target ---
@@ -176,4 +204,4 @@ clean:
 	rm -f $(PICOJVM) $(PICOJVM_PAGED) tests/*.class tests/*.pjvm tests/*.pjvmmap
 	rm -rf $(BUILDDIR)
 
-.PHONY: all test test-paged clean sim
+.PHONY: all test test-paged test-paged-stress clean sim

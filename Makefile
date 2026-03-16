@@ -6,7 +6,7 @@ PICOJVM = ./picojvm
 EXPDIR  = expected
 
 # Single-class tests
-TESTS_SINGLE = Fib HelloWorld BubbleSort Counter StringTest StaticInitTest MultiArrayTest StringSwitchTest
+TESTS_SINGLE = Fib HelloWorld BubbleSort Counter StringTest StaticInitTest MultiArrayTest StringSwitchTest ConstTest
 TESTS_MULTI  = Shapes Features InterfaceTest ExceptionTest
 TESTS_PAGER  = BigSwitch BigLUT
 ALL_TESTS    = $(TESTS_SINGLE) $(TESTS_MULTI)
@@ -43,6 +43,10 @@ $(PICOJVM_PAGED): src/pjvm.c platform/host.c src/pjvm.h
 
 # Compile all test .java files
 tests/%.class: tests/%.java tests/Native.java
+	$(JAVAC) -d tests $^
+
+# ConstTest needs Const.java annotation
+tests/ConstTest.class: tests/ConstTest.java tests/Native.java tests/Const.java
 	$(JAVAC) -d tests $^
 
 # Pack single-class .pjvm

@@ -126,6 +126,26 @@ def count_args(descriptor):
     return count
 
 
+def _skip_annotation_value(r):
+    """Skip a single annotation element_value (JVM spec §4.7.16.1)."""
+    tag = r.u1()
+    if tag in (ord('B'), ord('C'), ord('D'), ord('F'), ord('I'),
+               ord('J'), ord('S'), ord('Z'), ord('s'), ord('c')):
+        r.u2()  # const_value_index or class_info_index
+    elif tag == ord('e'):
+        r.u2(); r.u2()  # enum type + const name
+    elif tag == ord('@'):
+        r.u2()  # type_index
+        npairs = r.u2()
+        for _ in range(npairs):
+            r.u2()  # element_name
+            _skip_annotation_value(r)
+    elif tag == ord('['):
+        nvals = r.u2()
+        for _ in range(nvals):
+            _skip_annotation_value(r)
+
+
 def parse_class(data):
     r = ClassReader(data)
 
@@ -211,11 +231,27 @@ def parse_class(data):
         f_name = r.u2()
         f_desc = r.u2()
         f_attr_count = r.u2()
+        is_const = False
         for _ in range(f_attr_count):
-            r.u2()
+            a_name_idx = r.u2()
             attr_len = r.u4()
-            r.read(attr_len)
-        fields.append((f_access, f_name, f_desc))
+            attr_data = r.read(attr_len)
+            a_name = cp[a_name_idx][1] if cp[a_name_idx] else ""
+            # Check RuntimeVisibleAnnotations and RuntimeInvisibleAnnotations
+            if a_name in ("RuntimeVisibleAnnotations",
+                          "RuntimeInvisibleAnnotations"):
+                ar = ClassReader(attr_data)
+                num_ann = ar.u2()
+                for _ in range(num_ann):
+                    type_desc = cp[ar.u2()][1]
+                    num_pairs = ar.u2()
+                    for _ in range(num_pairs):
+                        ar.u2()  # element_name
+                        _skip_annotation_value(ar)
+                    # Annotation type descriptor for @Const is "LConst;"
+                    if type_desc == "LConst;":
+                        is_const = True
+        fields.append((f_access, f_name, f_desc, is_const))
 
     methods_count = r.u2()
     methods = []
@@ -259,6 +295,190 @@ def resolve_method_name(cp, methodref_idx):
     return class_name, method_name, descriptor
 
 
+# ----- @Const array extraction from <clinit> bytecode -----
+
+# JVM newarray type tags
+_ATYPE = {4: 'Z', 5: 'C', 6: 'F', 7: 'D', 8: 'B', 9: 'S', 10: 'I', 11: 'J'}
+# elem_type encoding for const_data: 0=byte, 1=char, 2=short, 3=int
+_ELEM_TYPE = {'B': 0, 'C': 1, 'S': 2, 'I': 3, 'Z': 0}
+
+
+def _extract_const_arrays(cls, cp, static_field_base_slot, verbose=False):
+    """Scan <clinit> for @Const array init patterns and extract values.
+
+    Returns list of (field_name, elem_type_code, values[], clinit_byte_ranges)
+    where clinit_byte_ranges is a list of (start, end) byte offsets in the
+    <clinit> bytecode to NOP out.
+    """
+    if not cls.const_fields:
+        return []
+
+    # Find <clinit> method
+    clinit_code = None
+    clinit_cp_raw = None
+    for m_access, m_name_idx, m_desc_idx, code_data in cls.methods_raw:
+        m_name = cp[m_name_idx][1]
+        if m_name == "<clinit>" and code_data is not None:
+            cr = ClassReader(code_data)
+            cr.u2()  # max_stack
+            cr.u2()  # max_locals
+            code_length = cr.u4()
+            clinit_code = cr.read(code_length)
+            break
+
+    if clinit_code is None:
+        return []
+
+    # Resolve fieldref CP indices to field names
+    def resolve_fieldref(cp_idx):
+        entry = cp[cp_idx]
+        if entry and entry[0] == "Fieldref":
+            nat = cp[entry[2]]
+            return cp[nat[1]][1]  # field name
+        return None
+
+    # Simple bytecode simulation to extract newarray + store patterns
+    results = []
+    bc = clinit_code
+    n = len(bc)
+    i = 0
+    pending = {}  # arr_id -> array info dict
+    stack = []  # simple value stack for simulation
+    last_push_start = None  # byte offset of the most recent push instruction
+
+    while i < n:
+        op = bc[i]
+
+        if op == 0x00:  # nop
+            i += 1
+        elif op == 0x02:  # iconst_m1
+            last_push_start = i
+            stack.append(-1); i += 1
+        elif 0x03 <= op <= 0x08:  # iconst_0..iconst_5
+            last_push_start = i
+            stack.append(op - 0x03); i += 1
+        elif op == 0x10:  # bipush
+            last_push_start = i
+            stack.append(struct.unpack_from(">b", bc, i + 1)[0]); i += 2
+        elif op == 0x11:  # sipush
+            last_push_start = i
+            stack.append(struct.unpack_from(">h", bc, i + 1)[0]); i += 3
+        elif op == 0x12:  # ldc
+            last_push_start = i
+            cp_idx = bc[i + 1]
+            entry = cp[cp_idx]
+            if entry and entry[0] == "Integer":
+                stack.append(entry[1])
+            else:
+                stack.append(('opaque',))
+            i += 2
+        elif op == 0x13:  # ldc_w
+            last_push_start = i
+            cp_idx = (bc[i + 1] << 8) | bc[i + 2]
+            entry = cp[cp_idx]
+            if entry and entry[0] == "Integer":
+                stack.append(entry[1])
+            else:
+                stack.append(('opaque',))
+            i += 3
+        elif op == 0xBC:  # newarray
+            atype = bc[i + 1]
+            size = stack.pop() if stack else 0
+            type_char = _ATYPE.get(atype, '?')
+            arr_id = len(results) + len(pending)
+            # Start of init sequence = the size push preceding newarray
+            seq_start = last_push_start if last_push_start is not None else i
+            arr = {'type': type_char, 'size': size, 'values': [0] * size,
+                   'start': seq_start}
+            stack.append(('array', arr_id))
+            pending[arr_id] = arr
+            i += 2
+        elif op == 0x59:  # dup
+            if stack:
+                stack.append(stack[-1])
+            i += 1
+        elif op == 0x4F:  # iastore
+            val = stack.pop() if stack else 0
+            idx = stack.pop() if stack else 0
+            aref = stack.pop() if stack else None
+            if isinstance(aref, tuple) and aref[0] == 'array':
+                arr = pending.get(aref[1])
+                if arr and isinstance(idx, int) and isinstance(val, int):
+                    if 0 <= idx < arr['size']:
+                        arr['values'][idx] = val & 0xFFFFFFFF
+            i += 1
+        elif op == 0x54:  # bastore
+            val = stack.pop() if stack else 0
+            idx = stack.pop() if stack else 0
+            aref = stack.pop() if stack else None
+            if isinstance(aref, tuple) and aref[0] == 'array':
+                arr = pending.get(aref[1])
+                if arr and isinstance(idx, int) and isinstance(val, int):
+                    if 0 <= idx < arr['size']:
+                        arr['values'][idx] = val & 0xFF
+            i += 1
+        elif op == 0x55:  # castore
+            val = stack.pop() if stack else 0
+            idx = stack.pop() if stack else 0
+            aref = stack.pop() if stack else None
+            if isinstance(aref, tuple) and aref[0] == 'array':
+                arr = pending.get(aref[1])
+                if arr and isinstance(idx, int) and isinstance(val, int):
+                    if 0 <= idx < arr['size']:
+                        arr['values'][idx] = val & 0xFFFF
+            i += 1
+        elif op == 0x56:  # sastore
+            val = stack.pop() if stack else 0
+            idx = stack.pop() if stack else 0
+            aref = stack.pop() if stack else None
+            if isinstance(aref, tuple) and aref[0] == 'array':
+                arr = pending.get(aref[1])
+                if arr and isinstance(idx, int) and isinstance(val, int):
+                    if 0 <= idx < arr['size']:
+                        arr['values'][idx] = val & 0xFFFF
+            i += 1
+        elif op == 0xB3:  # putstatic
+            cp_idx = (bc[i + 1] << 8) | bc[i + 2]
+            field_name = resolve_fieldref(cp_idx)
+            val = stack.pop() if stack else None
+            if (field_name and field_name in cls.const_fields and
+                    isinstance(val, tuple) and val[0] == 'array'):
+                arr = pending.pop(val[1], None)
+                if arr:
+                    etype = _ELEM_TYPE.get(arr['type'])
+                    if etype is not None:
+                        end_off = i + 3  # past the putstatic
+                        results.append((field_name, etype, arr['values'],
+                                        (arr['start'], end_off)))
+                        if verbose:
+                            print(f"    @Const {field_name}: {arr['type']}[{arr['size']}] "
+                                  f"({end_off - arr['start']}B clinit code)")
+            i += 3
+        elif op == 0xB1:  # return
+            i += 1
+        else:
+            # Unknown opcode — advance and reset tracking
+            # Handle known-length opcodes to keep in sync
+            _OPLEN = {
+                0x15: 2, 0x19: 2, 0x36: 2, 0x3A: 2, 0x84: 3,  # xload/xstore/iinc
+                0xA7: 3,  # goto
+                0x99: 3, 0x9A: 3, 0x9B: 3, 0x9C: 3, 0x9D: 3, 0x9E: 3,  # ifxx
+                0x9F: 3, 0xA0: 3, 0xA1: 3, 0xA2: 3, 0xA3: 3, 0xA4: 3,  # if_icmpxx
+                0xB2: 3, 0xB4: 3, 0xB5: 3,  # getstatic/getfield/putfield
+                0xB6: 3, 0xB7: 3, 0xB8: 3,  # invoke
+                0xB9: 5,  # invokeinterface
+                0xBB: 3,  # new
+                0xBD: 3,  # anewarray
+                0xC0: 3, 0xC1: 3,  # checkcast, instanceof
+                0xC6: 3, 0xC7: 3,  # ifnull, ifnonnull
+            }
+            ilen = _OPLEN.get(op, 1)
+            stack.clear()  # conservative: unknown op clears tracking
+            i += ilen
+
+    return results
+
+
 # ----- Multi-class packing -----
 
 class ClassInfo:
@@ -272,6 +492,7 @@ class ClassInfo:
         self.class_id = -1
         self.parent_class_id = 0xFF
         self.static_fields = []      # field names
+        self.const_fields = set()    # names of @Const static final array fields
         self.own_instance_fields = [] # (name, global_slot_index) pairs
         self.all_instance_fields = [] # names, including inherited
         self.vtable = []             # list of global method indices
@@ -434,10 +655,12 @@ def pack_pjvm(class_data_list, verbose=False, v2=False, pin_hints=None):  # v2 i
         else:
             cls.all_instance_fields = []
 
-        for f_access, f_name_idx, f_desc_idx in cls.fields_raw:
+        for f_access, f_name_idx, f_desc_idx, f_is_const in cls.fields_raw:
             field_name = cls.cp[f_name_idx][1]
             if f_access & 0x0008:  # ACC_STATIC
                 cls.static_fields.append(field_name)
+                if f_is_const:
+                    cls.const_fields.add(field_name)
             else:
                 slot = len(cls.all_instance_fields)
                 cls.own_instance_fields.append((field_name, slot))
@@ -879,6 +1102,32 @@ def pack_pjvm(class_data_list, verbose=False, v2=False, pin_hints=None):  # v2 i
             ct_str = "catch-all" if ct == 0xFF else f"class#{ct}"
             print(f"    [{i}] start={s} end={e} handler={h} {ct_str}")
 
+    # --- Step 7c: Extract @Const arrays from <clinit> ---
+    const_arrays = []    # list of (field_name, elem_type, values, class_name)
+    const_nop_ranges = {}  # class_name -> list of (start, end) byte ranges
+    for name in class_order:
+        cls = classes[name]
+        if not cls.const_fields:
+            continue
+        extracted = _extract_const_arrays(cls, cls.cp, static_field_base.get(name, 0),
+                                          verbose=verbose)
+        for fname, etype, vals, (bstart, bend) in extracted:
+            const_arrays.append((fname, etype, vals, name))
+            const_nop_ranges.setdefault(name, []).append((bstart, bend))
+
+    # NOP out extracted const init sequences in <clinit> bytecode
+    if const_nop_ranges:
+        for name, ranges in const_nop_ranges.items():
+            cls = classes[name]
+            for mt in method_table:
+                if mt["class_id"] == cls.class_id and mt["name"] == "<clinit>":
+                    bc_arr = bytearray(mt["bytecode"])
+                    for (s, e) in ranges:
+                        for k in range(s, e):
+                            bc_arr[k] = 0x00  # NOP
+                    mt["bytecode"] = bytes(bc_arr)
+                    break
+
     # --- Step 8: Concatenate bytecodes ---
     bytecode_section = bytearray()
     for mt in method_table:
@@ -897,6 +1146,8 @@ def pack_pjvm(class_data_list, verbose=False, v2=False, pin_hints=None):  # v2 i
     region_flags = 0
     if pin_hints:
         region_flags |= 0x02  # bit 1: pin hints present
+    if const_arrays:
+        region_flags |= 0x04  # bit 2: const_data present
     out.append(0x85)           # [0] magic
     out.append(0x4C)           # [1] v3
     out.append(len(method_table))  # [2]
@@ -967,6 +1218,53 @@ def pack_pjvm(class_data_list, verbose=False, v2=False, pin_hints=None):  # v2 i
             out.append(1 if i in pin_set else 0)
         if verbose:
             print(f"  Pin hints: methods {sorted(pin_set)}")
+
+    # const_data section (after pin hints)
+    cd_init_entries = []  # (static_field_slot, lo, hi)
+    if const_arrays:
+        cd_start = len(out)
+        out.extend(struct.pack("<H", len(const_arrays)))
+
+        for fname, etype, vals, cname in const_arrays:
+            entry_offset = len(out)  # file offset of this entry's header
+            n_elem = len(vals)
+            out.extend(struct.pack("<H", n_elem))  # n_elements
+            out.append(etype)                       # elem_type
+            out.append(0)                           # reserved
+            # Element data
+            if etype == 0:  # byte
+                for v in vals:
+                    out.append(v & 0xFF)
+            elif etype in (1, 2):  # char/short (2 bytes each)
+                for v in vals:
+                    out.extend(struct.pack("<H", v & 0xFFFF))
+            elif etype == 3:  # int (4 bytes each)
+                for v in vals:
+                    out.extend(struct.pack("<I", v & 0xFFFFFFFF))
+
+            # Compute ROM reference for this entry
+            lo = entry_offset & 0xFFFF
+            hi = ((entry_offset >> 16) + 1) & 0xFFFF
+
+            # Find the global static field slot for this field
+            cls = classes[cname]
+            base = static_field_base[cname]
+            for si, sf in enumerate(cls.static_fields):
+                if sf == fname:
+                    cd_init_entries.append((base + si, lo, hi))
+                    break
+
+        # Static field init table: n_init followed by (slot, lo, hi) entries
+        out.extend(struct.pack("<H", len(cd_init_entries)))
+        for (slot, lo, hi) in cd_init_entries:
+            out.extend(struct.pack("<HHH", slot, lo, hi))
+
+        if verbose:
+            print(f"  const_data: {len(const_arrays)} arrays, "
+                  f"{len(out) - cd_start} bytes")
+            for i, (fname, etype, vals, cname) in enumerate(const_arrays):
+                tnames = ['byte', 'char', 'short', 'int']
+                print(f"    [{i}] {cname}.{fname}: {tnames[etype]}[{len(vals)}]")
 
     if verbose:
         print(f"\n.pjvm output (v3): {len(out)} bytes")

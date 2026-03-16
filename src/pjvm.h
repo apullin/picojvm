@@ -94,7 +94,7 @@ extern uint8_t *pjvm_prog;
 extern uint32_t pjvm_prog_size;
 extern uint8_t  n_methods, main_mi, n_classes;
 extern uint32_t bytecodes_size;
-extern uint32_t bc_off, cpr_off, ic_off, sc_off, et_off;
+extern uint32_t bc_off, cpr_off, ic_off, sc_off, et_off, cd_off;
 extern PJVMCtx *g_pjvm;
 
 #ifdef PJVM_ASM_HELPERS

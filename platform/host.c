@@ -21,7 +21,7 @@ static size_t prog_size;
 static uint16_t heap_alloc_count;
 static uint32_t heap_bytes_used;
 
-#include "../pjvm.h"
+#include "../src/pjvm.h"
 
 uint16_t heap_alloc(PJVMCtx *j, uint16_t size) {
     uint16_t a = j->heap_ptr;

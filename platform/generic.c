@@ -5,12 +5,12 @@
  * Uses a static heap array and a function pointer for character output.
  * To port picoJVM to a new target, either:
  *   (a) Copy this file and customize the platform callbacks, or
- *   (b) Implement the 9 callbacks declared in pjvm.h, link with core.c
+ *   (b) Implement the callbacks declared in pjvm.h, link with src/pjvm.c
  */
 
 #include <stdint.h>
 #include <string.h>
-#include "../pjvm.h"
+#include "../src/pjvm.h"
 
 #ifndef PJVM_HEAP_SIZE
 #define PJVM_HEAP_SIZE 32768u

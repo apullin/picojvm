@@ -10,7 +10,7 @@
 #define PJVM_DATA    ((uint8_t *)0x1000)
 #define HEAP_START  0x4000
 
-#include "../pjvm.h"
+#include "../src/pjvm.h"
 
 uint16_t heap_alloc(PJVMCtx *j, uint16_t size) {
     uint16_t a = j->heap_ptr;

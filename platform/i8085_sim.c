@@ -18,7 +18,7 @@ extern const uint8_t pjvm_program[];
 /* Heap starts after BSS (linker symbol) */
 extern uint8_t _end[];
 
-#include "../pjvm.h"
+#include "../src/pjvm.h"
 
 uint16_t heap_alloc(PJVMCtx *j, uint16_t size) {
     uint16_t a = j->heap_ptr;

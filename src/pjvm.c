@@ -1,5 +1,5 @@
 /*
- * core.c — picoJVM interpreter core.
+ * pjvm.c — picoJVM interpreter core.
  *
  * Portable bytecode interpreter. Platform-specific callbacks (heap, I/O)
  * are provided by the platform .c file linked alongside this.

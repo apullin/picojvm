@@ -33,11 +33,11 @@ SIM_CAPS = -DPJVM_METHOD_CAP=64 -DPJVM_CLASS_CAP=16 -DPJVM_VTABLE_CAP=128 \
 
 all: $(PICOJVM)
 
-$(PICOJVM): core.c platform/host.c pjvm.h
-	$(CC) $(CFLAGS) -DPJVM_MAX_FRAMES=128 -o $@ core.c platform/host.c
+$(PICOJVM): src/pjvm.c platform/host.c src/pjvm.h
+	$(CC) $(CFLAGS) -DPJVM_MAX_FRAMES=128 -o $@ src/pjvm.c platform/host.c
 
-$(PICOJVM_PAGED): core.c platform/host.c pjvm.h
-	$(CC) $(CFLAGS) -DPJVM_PAGED -o $@ core.c platform/host.c
+$(PICOJVM_PAGED): src/pjvm.c platform/host.c src/pjvm.h
+	$(CC) $(CFLAGS) -DPJVM_PAGED -o $@ src/pjvm.c platform/host.c
 
 # Compile all test .java files
 tests/%.class: tests/%.java tests/Native.java
@@ -144,10 +144,10 @@ $(BUILDDIR)/pjvm_data.c: | $(BUILDDIR)
 $(BUILDDIR)/crt0.o: $(CRT) | $(BUILDDIR)
 	$(CLANG) --target=i8085-unknown-elf -ffreestanding -fno-builtin -$(TARGET_OPT) -c $< -o $@
 
-$(BUILDDIR)/core.o: core.c pjvm.h | $(BUILDDIR)
+$(BUILDDIR)/pjvm.o: src/pjvm.c src/pjvm.h | $(BUILDDIR)
 	$(CLANG) --target=i8085-unknown-elf -ffreestanding -fno-builtin -$(TARGET_OPT) $(SIM_CAPS) -DPJVM_ASM_HELPERS -c $< -o $@
 
-$(BUILDDIR)/i8085_sim.o: platform/i8085_sim.c pjvm.h | $(BUILDDIR)
+$(BUILDDIR)/i8085_sim.o: platform/i8085_sim.c src/pjvm.h | $(BUILDDIR)
 	$(CLANG) --target=i8085-unknown-elf -ffreestanding -fno-builtin -$(TARGET_OPT) $(SIM_CAPS) -DPJVM_ASM_HELPERS -c $< -o $@
 
 $(BUILDDIR)/i8085_helpers.o: platform/i8085_helpers.S | $(BUILDDIR)
@@ -156,7 +156,7 @@ $(BUILDDIR)/i8085_helpers.o: platform/i8085_helpers.S | $(BUILDDIR)
 $(BUILDDIR)/pjvm_data.o: $(BUILDDIR)/pjvm_data.c | $(BUILDDIR)
 	$(CLANG) --target=i8085-unknown-elf -ffreestanding -fno-builtin -$(TARGET_OPT) -c $< -o $@
 
-$(BUILDDIR)/picojvm.elf: $(BUILDDIR)/crt0.o $(BUILDDIR)/core.o $(BUILDDIR)/i8085_sim.o $(BUILDDIR)/i8085_helpers.o $(BUILDDIR)/pjvm_data.o $(LIBGCC) $(LIBC)
+$(BUILDDIR)/picojvm.elf: $(BUILDDIR)/crt0.o $(BUILDDIR)/pjvm.o $(BUILDDIR)/i8085_sim.o $(BUILDDIR)/i8085_helpers.o $(BUILDDIR)/pjvm_data.o $(LIBGCC) $(LIBC)
 	$(LLD) -m i8085elf --gc-sections -T $(LDSCRIPT) -o $@ $^ $(LIBGCC)
 
 $(BUILDDIR)/picojvm.bin: $(BUILDDIR)/picojvm.elf

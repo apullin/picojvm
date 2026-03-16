@@ -23,7 +23,7 @@ import os
 PJVM_MAGIC        = 0x85
 PJVM_VERSION_V3   = 0x4C
 PJVM_HDR_SIZE_V3  = 16
-PJVM_MT_ENTRY_V2  = 14      # method table entry size (v2+)
+PJVM_MT_ENTRY  = 14      # method table entry size (v2+)
 PJVM_ET_ENTRY     = 7       # exception table entry size
 
 # region_flags (header byte 9)
@@ -1173,7 +1173,7 @@ def pack_pjvm(class_data_list, verbose=False, v2=False, pin_hints=None):  # v2 i
 
     # v3 Header (16 bytes): 16-bit CP entries, 16-bit n_static_fields
     hdr_size = PJVM_HDR_SIZE_V3
-    mt_entry_size = PJVM_MT_ENTRY_V2
+    mt_entry_size = PJVM_MT_ENTRY
     region_flags = 0
     if pin_hints:
         region_flags |= PJVM_RF_PIN_HINTS

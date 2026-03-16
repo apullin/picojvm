@@ -96,10 +96,7 @@ uint8_t *bc;
 /* --- internal globals (file-scope) ------------------------------------ */
 static uint16_t n_static_fields;
 static uint8_t  n_int_constants, n_string_constants;
-static uint8_t  cp16;          /* 0 = v1/v2 (8-bit CP), 1 = v3 (16-bit CP) */
-static uint8_t  region_flags;  /* v3 byte 9: bit0=pin_hints, bit2=const_data */
-static uint16_t cp_str_flag;   /* 0x80 (v1/v2) or 0x8000 (v3) */
-static uint16_t cp_str_mask;   /* 0x7F (v1/v2) or 0x7FFF (v3) */
+static uint8_t  region_flags;  /* byte 9: bit0=pin_hints, bit2=const_data */
 static uint8_t  m_ml[PJVM_METHOD_CAP], m_ac[PJVM_METHOD_CAP];
 static uint8_t  m_fl[PJVM_METHOD_CAP], m_vs[PJVM_METHOD_CAP], m_vmid[PJVM_METHOD_CAP];
 static uint8_t  m_ec[PJVM_METHOD_CAP], m_eo[PJVM_METHOD_CAP];
@@ -251,15 +248,12 @@ NI static int16_t bread(void) {
 
 #endif /* !PJVM_ASM_HELPERS */
 
-/* cpread always in C — v3 format needs cp16 branching that ASM doesn't handle */
+/* cpread: resolve 16-bit CP index to global index via per-method CP table */
 NI static uint16_t cpread(void) {
     uint16_t idx = (BC(g_pjvm->pc) << 8) | BC(g_pjvm->pc + 1);
     g_pjvm->pc += 2;
-    if (cp16) {
-        uint32_t off = cpr_off + (uint32_t)g_pjvm->cur_cb + (uint32_t)idx * 2;
-        return PROG16(off);
-    }
-    return PROG(cpr_off + g_pjvm->cur_cb + idx);
+    uint32_t off = cpr_off + (uint32_t)g_pjvm->cur_cb + (uint32_t)idx * 2;
+    return PROG16(off);
 }
 
 static int32_t pjvm_to32(uint16_t lo, uint16_t hi) {
@@ -294,42 +288,24 @@ static uint16_t pjvm_make_main_args(PJVMCtx *j) {
     return a;
 }
 
-/* --- .pjvm loader ----------------------------------------------------- */
+/* --- .pjvm loader (v3 only) ------------------------------------------ */
 void pjvm_parse(uint8_t *data) {
-    uint8_t version = data[1];
-    n_methods = data[2];
-    main_mi = data[3];
-
-    uint8_t *p;
-    if (version >= PJVM_VERSION_V3) {
-        /* v3: 16-bit n_static_fields, 16-bit CP entries */
-        n_static_fields = RD16LE(data + 4);
-        n_int_constants = data[6];
-        n_classes = data[7];
-        n_string_constants = data[8];
-        region_flags = data[9];
-        bytecodes_size = RD32LE(data + 10);
-        cp16 = 1;
-        cp_str_flag = PJVM_CP_STR_FLAG_16;
-        cp_str_mask = PJVM_CP_STR_MASK_16;
-        p = data + PJVM_HDR_SIZE_V3;
-    } else {
-        n_static_fields = data[4];
-        n_int_constants = data[5];
-        n_classes = data[6];
-        n_string_constants = data[7];
-        cp16 = 0;
-        cp_str_flag = PJVM_CP_STR_FLAG_8;
-        cp_str_mask = PJVM_CP_STR_MASK_8;
-        if (version == PJVM_VERSION_V2) {
-            bytecodes_size = RD32LE(data + 8);
-            p = data + PJVM_HDR_SIZE_V2;
-        } else {
-            bytecodes_size = (uint32_t)RD16LE(data + 8);
-            p = data + PJVM_HDR_SIZE_V1;
-        }
+    /* v1/v2 support removed — only v3 (0x4C) accepted.  See git history. */
+    if (data[1] != PJVM_VERSION_V3) {
+        pjvm_platform_trap(0xFD, data[1]);  /* 0xFD = bad version */
+        return;
     }
 
+    n_methods = data[2];
+    main_mi = data[3];
+    n_static_fields = RD16LE(data + 4);
+    n_int_constants = data[6];
+    n_classes = data[7];
+    n_string_constants = data[8];
+    region_flags = data[9];
+    bytecodes_size = RD32LE(data + 10);
+
+    uint8_t *p = data + PJVM_HDR_SIZE_V3;
     uint8_t vo = 0;
 
     for (uint8_t i = 0; i < n_classes; i++) {
@@ -344,17 +320,10 @@ void pjvm_parse(uint8_t *data) {
 
     for (uint8_t i = 0; i < n_methods; i++) {
         m_ml[i] = p[0]; m_ac[i] = p[2]; m_fl[i] = p[3];
-        if (version >= PJVM_VERSION_V2) {
-            m_co[i] = RD32LE(p + 4);
-            m_cb[i] = RD16LE(p + 8);
-            m_vs[i] = p[10]; m_vmid[i] = p[11];
-            m_ec[i] = p[12]; m_eo[i] = p[13]; p += PJVM_MT_ENTRY_V2;
-        } else {
-            m_co[i] = (uint32_t)RD16LE(p + 4);
-            m_cb[i] = RD16LE(p + 6);
-            m_vs[i] = p[8]; m_vmid[i] = p[9];
-            m_ec[i] = p[10]; m_eo[i] = p[11]; p += PJVM_MT_ENTRY_V1;
-        }
+        m_co[i] = RD32LE(p + 4);
+        m_cb[i] = RD16LE(p + 8);
+        m_vs[i] = p[10]; m_vmid[i] = p[11];
+        m_ec[i] = p[12]; m_eo[i] = p[13]; p += PJVM_MT_ENTRY;
     }
 
     uint16_t cpc = RD16LE(p);
@@ -873,16 +842,11 @@ static void pjvm_exec(void) {
             break;
         }
         case OP_LDC: {
-            uint16_t ci;
             uint8_t raw = bcread();
-            if (cp16) {
-                uint32_t off = cpr_off + (uint32_t)g_pjvm->cur_cb + (uint32_t)raw * 2;
-                ci = PROG16(off);
-            } else {
-                ci = PROG(cpr_off + g_pjvm->cur_cb + raw);
-            }
-            if (ci & cp_str_flag) {
-                spush(str_refs[ci & cp_str_mask], 0);
+            uint32_t off = cpr_off + (uint32_t)g_pjvm->cur_cb + (uint32_t)raw * 2;
+            uint16_t ci = PROG16(off);
+            if (ci & PJVM_CP_STR_FLAG_16) {
+                spush(str_refs[ci & PJVM_CP_STR_MASK_16], 0);
             } else {
                 uint32_t base = ic_off + (uint32_t)ci * 4;
                 spush(PROG16(base), PROG16(base + 2));
@@ -891,8 +855,8 @@ static void pjvm_exec(void) {
         }
         case OP_LDC_W: {
             uint16_t ci = cpread();
-            if (ci & cp_str_flag) {
-                spush(str_refs[ci & cp_str_mask], 0);
+            if (ci & PJVM_CP_STR_FLAG_16) {
+                spush(str_refs[ci & PJVM_CP_STR_MASK_16], 0);
             } else {
                 uint32_t base = ic_off + (uint32_t)ci * 4;
                 spush(PROG16(base), PROG16(base + 2));

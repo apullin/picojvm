@@ -47,8 +47,8 @@ picoJVM is part of a larger project: a full LLVM compiler backend for the Intel
 - **i8085-trace** (`i8085-trace/`): Standalone Intel 8085 CPU simulator with
   per-instruction NDJSON trace output. Used for all testing.
 - **picoJVM** (`tooling/picojvm/`): A portable Java bytecode interpreter
-  targeting 8-bit systems.  ~1200 lines of C, supports 57 JVM opcodes, with
-  optional paging for large programs.
+  targeting 8-bit systems.  ~1300 lines of C, supports 89 JVM opcodes, with
+  optional paging for large programs and file I/O.
 - **FreeRTOS port** (`FreeRTOS/`): Working RTOS port with task scheduling,
   queues, and heap management on simulated 8085.
 - **Benchmarks** (`tooling/examples/`): 15 C benchmarks and 8 JVM benchmarks,
@@ -78,18 +78,20 @@ picoJVM is a stack-based bytecode interpreter executing a subset of JVM
 bytecode.  It consists of:
 
 - **core.c** (~1200 lines): Portable interpreter loop.  Single giant `switch`
-  on 57 opcodes.  No target-specific code.
+  on 89 opcodes.  No target-specific code.
 - **pjvm.h**: Public header with all types, capacity defaults, and API.
 - **pjvmpack.py**: Python tool that converts `.class` files to `.pjvm` binary
   format.  Pre-resolves constant pool references, builds vtables, serializes
   class hierarchy.  **This is the tool that picojc replaces.**
-- **Platform shims**: Each platform implements 8 callbacks:
+- **Platform shims**: Each platform implements memory, I/O, and file callbacks:
   - `heap_alloc(ctx, size)` — allocate heap memory
   - `r8(addr)`, `w8(addr, val)` — byte read/write to object memory
   - `r16(addr)`, `w16(addr, val)` — 16-bit read/write (little-endian)
   - `pjvm_platform_putchar(ch)` — character output
   - `pjvm_platform_peek8(addr)`, `pjvm_platform_poke8(addr, val)` — raw I/O
+  - `pjvm_platform_out(port, val)` — port output
   - `pjvm_platform_trap(op, pc)` — fatal error handler
+  - `pjvm_platform_file_open/read_byte/write_byte/close/delete` — file I/O
 
 ### 2.2 Value Representation
 
@@ -155,9 +157,9 @@ Each method invocation pushes a `PJVMFrame`:
 typedef struct {
     uint32_t pc;     // Return address (bytecode offset)
     uint16_t cb;     // Caller's constant pool base
+    uint16_t lb;     // Caller's local variable base
+    uint16_t so;     // Caller's stack pointer (for unwinding)
     uint8_t  mi;     // Caller's method index
-    uint8_t  lb;     // Caller's local variable base
-    uint8_t  so;     // Caller's stack pointer (for unwinding)
 } PJVMFrame;
 ```
 
@@ -203,7 +205,7 @@ vtable slot.  Linear scan of the receiver's vtable for matching vmid.
 PJVM_METHOD_CAP    256   // Max methods across all classes
 PJVM_CLASS_CAP      64   // Max classes
 PJVM_VTABLE_CAP    256   // Max vtable entries (global)
-PJVM_STATIC_CAP     64   // Max static fields
+PJVM_STATIC_CAP   1024   // Max static fields
 PJVM_MAX_STACK     256   // Operand stack depth (per-thread)
 PJVM_MAX_LOCALS   1024   // Local variable array size
 PJVM_MAX_FRAMES     64   // Call stack depth
@@ -433,7 +435,7 @@ point.  All arithmetic is 32-bit integer.
 - `if` / `else if` / `else`
 - `while`, `do-while`
 - `for` (C-style)
-- Enhanced for (`for (int x : arr)`) — **optional, can desugar**
+- Enhanced for (`for (int x : arr)`) — desugars to indexed loop
 - `switch` / `case` / `default` (int and String)
 - `return`, `return expr`
 - `break`, `continue`
@@ -456,17 +458,27 @@ point.  All arithmetic is 32-bit integer.
 - Generics (no type erasure needed — picoJVM has no verifier)
 - Lambdas / anonymous classes / inner classes
 - Annotations
-- Enums (could be supported as sugar, but not required)
 - `synchronized` / `volatile`
 - Multi-catch (`catch (A | B e)`)
 - Try-with-resources
-- Varargs
 - Auto-boxing
 - String concatenation with `+` (no `StringBuilder`)
 - `assert`
-- Package declarations / imports (all classes in single compilation unit)
 
-### 4.7 String Handling
+### 4.7 Supported (Advanced)
+
+These features go beyond the minimal Java subset and are fully implemented:
+
+- **Enums**: `enum Color { RED, GREEN, BLUE }` — desugars to `static final int` constants (0, 1, 2).  Final field inlining means no runtime storage needed.
+- **Varargs**: `void foo(int... args)` — caller packs trailing arguments into an array; callee receives `int[]`.
+- **Package declarations / imports**: `package pkg;` and `import pkg.Class;` are supported.  Multi-file compilation with `Lexer.initDiskFiles()`.
+- **For-each loops**: `for (int x : arr)` — desugars to indexed loop with ARRAYLENGTH + xALOAD.
+- **`final` field inlining**: `static final int X = 42;` → references emit `BIPUSH 42` instead of `GETSTATIC`.
+- **File I/O**: `Native.fileOpen/fileReadByte/fileWriteByte/fileRead/fileWrite/fileClose/fileDelete` — enables disk-backed compilation on 8085.
+- **Method overloading**: Arity-aware dispatch with varargs fallback.
+- **Narrow type validation**: Compile-time rejection of invalid implicit narrowing (byte/short/char overflow).
+
+### 4.8 String Handling
 
 Strings are first-class objects in picoJVM with native method support.  String
 constants are interned (same literal = same reference).  Available methods:
@@ -1003,21 +1015,32 @@ class and emit the correct native stubs.
 
 ### 11.1 Native Method Table
 
-| Method | Native ID | Signature | Description |
-|--------|-----------|-----------|-------------|
-| `Native.putchar` | 0 | `(I)V` | Output byte |
-| `Native.in` | 1 | `(I)I` | Input from port |
-| `Native.out` | 2 | `(II)V` | Output to port |
-| `Native.peek` | 3 | `(I)I` | Read memory byte |
-| `Native.poke` | 4 | `(II)V` | Write memory byte |
-| `Native.halt` | 5 | `()V` | Stop interpreter |
-| `Object.<init>` | 6 | `()V` | No-op constructor |
-| `String.length` | 7 | `()I` | String length |
-| `String.charAt` | 8 | `(I)C` | Char at index |
-| `String.equals` | 9 | `(Ljava/lang/Object;)Z` | String equality |
-| `String.toString` | 10 | `()Ljava/lang/String;` | Identity |
-| `Native.print` | 11 | `(Ljava/lang/String;)V` | Print string |
-| `String.hashCode` | 12 | `()I` | Hash code |
+| Method | Native ID | Args | Return | Description |
+|--------|-----------|------|--------|-------------|
+| `Native.putchar` | 0 | 1 | void | Output byte |
+| `Native.in` | 1 | 1 | int | Input from port |
+| `Native.out` | 2 | 2 | void | Output to port |
+| `Native.peek` | 3 | 1 | int | Read memory byte |
+| `Native.poke` | 4 | 2 | void | Write memory byte |
+| `Native.halt` | 5 | 0 | void | Stop interpreter |
+| `Object.<init>` | 6 | 1 | void | No-op constructor |
+| `String.length` | 7 | 1 | int | String length |
+| `String.charAt` | 8 | 2 | int | Char at index |
+| `String.equals` | 9 | 2 | int | String equality |
+| `String.toString` | 10 | 1 | ref | Identity |
+| `Native.print` | 11 | 1 | void | Print string |
+| `String.hashCode` | 12 | 1 | int | Hash code |
+| `Native.arraycopy` | 13 | 5 | void | Array copy (src, srcOff, dst, dstOff, len) |
+| `Native.memcmp` | 14 | 5 | int | Memory compare |
+| `Native.writeBytes` | 15 | 3 | void | Write byte array to output |
+| `Native.stringFromBytes` | 16 | 3 | ref | Create String from byte array |
+| `Native.fileOpen` | 17 | 3 | int | Open file (name, nameLen, mode) |
+| `Native.fileReadByte` | 18 | 0 | int | Read byte (-1 on EOF) |
+| `Native.fileWriteByte` | 19 | 1 | void | Write byte |
+| `Native.fileRead` | 20 | 3 | int | Read into buffer (buf, off, len) |
+| `Native.fileWrite` | 21 | 3 | void | Write from buffer (buf, off, len) |
+| `Native.fileClose` | 22 | 1 | void | Close file (0=both, 1=read, 2=write) |
+| `Native.fileDelete` | 23 | 2 | int | Delete file (name, nameLen) |
 
 ### 11.2 Encoding
 
@@ -1057,10 +1080,19 @@ output and compares against expected values.
 
 ### 12.2 Test Program Catalog
 
-Tests are organized by feature complexity.  Each test specifies:
+Tests are organized by feature complexity (64 tests: T01-T65, plus 9 negative
+tests N01-N09).  Each test specifies:
 - Source `.java` file(s)
 - Expected output bytes (decimal or hex)
 - Which language features are exercised
+
+**Note**: The spec shows T01-T36 in detail below.  Tests T37-T65 cover
+additional features: recursion (T37), linked lists (T38), compound assignment
+(T39), increment/decrement (T40), for-each (T41), enum (T42), final inlining
+(T43), varargs (T44), char arrays (T36), multi-class patterns (T45-T54),
+method overloading (T55-T57), super (T58), narrow validation (T59-T60), main
+args (T61), array initializers (T62), package local/import (T63-T64), and big
+array init (T65).  Negative tests validate compile-time error detection.
 
 #### Tier 1: Core Language (must pass for basic functionality)
 
@@ -1752,11 +1784,11 @@ output** must match exactly.
 
 ```
 tooling/picojvm/picojc/
-    src/                     # picojc source .java files
-    tests/                   # Test .java files (T01..T36)
-    expected/                # Expected output files (one per test)
-    run_tests.py             # Test harness script
-    Makefile                 # Build + test targets
+    src/                     # picojc source .java files (11 files)
+    tests/                   # Test .java files (T01..T65, 64 tests)
+    expected/                # Expected output .txt files (one per test)
+    negative/                # Negative tests (N01..N09, must-fail)
+    Makefile                 # Build, test, selfhost, disk-mode targets
 ```
 
 ### 13.2 Expected Output Files
@@ -1813,7 +1845,7 @@ Options:
 ...
 [FAIL] T15_Inheritance      expected [68, 67], got [0, 0]
 ...
-Results: 30/36 passed, 6 failed
+Results: 62/64 passed, 2 failed
 ```
 
 #### Comparison Mode (`--compare`):
@@ -2101,44 +2133,39 @@ make test-compare      # compare against reference pipeline
 
 ### 15.3 I/O for the Compiler
 
-picojc running on picoJVM needs to:
-- **Read source file**: Via `Native.peek()` reading from a memory-mapped buffer,
-  or via a custom native method for file I/O
-- **Write .pjvm output**: Via `Native.poke()` to an output buffer, or via
-  custom native method
-
-For the host platform, the simplest approach: the test harness loads the source
-file into memory before launching picoJVM, and the compiler reads from a known
-address.  For 8085 target: source and output are in paged storage.
-
-**Design decision**: Define a simple file I/O protocol using `Native.peek/poke`
-on a memory-mapped region, or add new native methods:
+picojc uses native file I/O methods for reading source files and writing `.pjvm`
+output.  This works on both host (POSIX file I/O) and 8085 simulator (disk
+emulator via I/O ports 0xF0-0xF3).
 
 ```java
-// Option A: Memory-mapped I/O (works with existing natives)
-// Source loaded at 0xC000, length at 0xBFFE
-int srcLen = Native.peek(0xBFFE) | (Native.peek(0xBFFF) << 8);
-int ch = Native.peek(0xC000 + offset);
+// Reading source: Lexer opens file, reads byte-by-byte
+Native.fileOpen(fname, fnameLen, 1);  // mode 1 = read
+int ch = Native.fileReadByte();       // returns -1 on EOF
+Native.fileClose(1);                  // close read channel
 
-// Option B: New native methods (requires interpreter extension)
-// Native.openFile(name), Native.readByte(), Native.writeByte(), etc.
+// Writing output: Emit writes .pjvm to spill file
+Native.fileOpen(outName, outLen, 2);  // mode 2 = write
+Native.fileWriteByte(b);
+Native.fileClose(2);                  // close write channel
 ```
 
-Option A is simpler and requires no interpreter changes.  The test harness pre-
-loads the source file into the picoJVM memory image before execution.
+The disk-backed compiler (`DiskMain.java`) supports both single-file and
+multi-file compilation, re-reading source files for each compiler pass.
 
-### 15.4 Recommended File Structure
+### 15.4 Source File Structure
 
-```java
-// src/Lexer.java       — Tokenizer
-// src/Token.java       — Token types and values
-// src/Parser.java      — Recursive descent parser + code emitter
-// src/Resolver.java    — Pass 2: symbol resolution and layout
-// src/Emitter.java     — Bytecode emission helpers
-// src/SymbolTable.java — Symbol directory and resolved table
-// src/PjvmWriter.java  — Pass 4: .pjvm binary serialization
-// src/Compiler.java    — Main entry point, orchestrates passes
-// src/Native.java      — Native method stubs (same as picoJVM tests)
+```
+src/Compiler.java   — Central data arrays, native method table, constants
+src/Token.java      — Token type constants
+src/Lexer.java      — Tokenizer (memory and disk-backed modes)
+src/Catalog.java    — Pass 1: class/method/field survey
+src/Resolver.java   — Pass 2: slot assignment, vtable, overload resolution
+src/Emit.java       — Pass 3: bytecode emission
+src/Expr.java       — Expression compilation (recursive descent)
+src/Stmt.java       — Statement compilation
+src/Native.java     — Native method declarations
+src/Main.java       — Memory-backed compiler entry point
+src/DiskMain.java   — Disk-backed compiler entry point (single + multi-file)
 ```
 
 ---
@@ -2153,19 +2180,21 @@ picojc is self-hosting when:
    version on all test inputs
 3. Ideally: picojc.pjvm can compile itself (fixed point)
 
-### 16.2 Language Features Required for Self-Hosting
+### 16.2 Language Features Used by Self-Hosting
 
-picojc itself will use:
-- Classes with fields and methods
-- Arrays (byte[], int[], String[])
+picojc uses these features from its own supported subset:
+- Static fields and methods (all compiler state is static)
+- Arrays (byte[], int[], boolean[], String[])
 - String constants and operations (hashCode, equals, charAt, length)
-- Loops (for, while)
-- Switch statements (on int)
-- Exception handling (for parse errors: throw + catch)
-- Static methods (most of the compiler)
-- Possibly a few instances (Lexer, Parser, Emitter objects)
+- Loops (for, while, for-each)
+- Switch statements (on int, heavily used in lexer/parser)
+- File I/O natives (disk-backed compilation via DiskMain.java)
+- Enums (token types)
+- Final field inlining (opcode constants)
+- Method overloading
 
-This is well within picoJVM's supported subset.
+Self-hosting is achieved: gen0 (javac-compiled) compiles picojc source to gen1,
+gen1 compiles itself to gen2, gen1 == gen2 (fixpoint verified).
 
 ### 16.3 On-8085 Compilation
 

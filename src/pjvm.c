@@ -799,6 +799,22 @@ uint8_t  trace_sp[TRACE_BUF_SIZE];
 uint16_t trace_stk0[TRACE_BUF_SIZE];
 uint32_t trace_idx;
 
+/* --- branch helper macros --------------------------------------------- */
+/* Single-operand: pop one value, branch if cond(alo,ahi) is true */
+#define BRANCH1(cond) { \
+    int16_t o = bread(); \
+    alo = spop_lo(); ahi = spop_hi(); \
+    if (cond) g_pjvm->pc = opc + o; \
+    break; }
+
+/* Two-operand: pop b then a, branch if cond(alo,ahi,blo,bhi) is true */
+#define BRANCH2(cond) { \
+    int16_t o = bread(); \
+    blo = spop_lo(); bhi = spop_hi(); \
+    alo = spop_lo(); ahi = spop_hi(); \
+    if (cond) g_pjvm->pc = opc + o; \
+    break; }
+
 static void pjvm_exec(void) {
     uint32_t steps = 0;
     while (g_pjvm->pc != PJVM_PC_HALT) {
@@ -820,6 +836,8 @@ static void pjvm_exec(void) {
         uint16_t alo, ahi, blo, bhi;
 
         switch (op) {
+
+        /* --- constants ------------------------------------------------ */
         case OP_NOP: break;
         case OP_ACONST_NULL: spush(0, 0); break;
         case OP_ICONST_M1:  spush(0xFFFF, 0xFFFF); break;
@@ -868,12 +886,14 @@ static void pjvm_exec(void) {
             break;
         }
 
+        /* --- loads & stores ----------------------------------------------- */
         case OP_ILOAD: case OP_ALOAD: lload(bcread()); break;
         case OP_ILOAD_0: case OP_ALOAD_0: lload(0); break;
         case OP_ILOAD_1: case OP_ALOAD_1: lload(1); break;
         case OP_ILOAD_2: case OP_ALOAD_2: lload(2); break;
         case OP_ILOAD_3: case OP_ALOAD_3: lload(3); break;
 
+        /* --- array loads (heap + ROM) ------------------------------------- */
         case OP_IALOAD: case OP_AALOAD: {
             alo = spop_lo();
             blo = spop_lo(); bhi = spop_hi();
@@ -930,6 +950,7 @@ static void pjvm_exec(void) {
         case OP_ISTORE_2: case OP_ASTORE_2: lstore(2); break;
         case OP_ISTORE_3: case OP_ASTORE_3: lstore(3); break;
 
+        /* --- array stores ------------------------------------------------- */
         case OP_IASTORE: case OP_AASTORE: {
             alo = spop_lo(); ahi = spop_hi();
             blo = spop_lo();
@@ -974,6 +995,7 @@ static void pjvm_exec(void) {
             break;
         }
 
+        /* --- stack manipulation ------------------------------------------- */
         case OP_POP: g_pjvm->sp--; break;
         case OP_POP2: g_pjvm->sp -= 2; break;
         case OP_DUP: {
@@ -1012,6 +1034,7 @@ static void pjvm_exec(void) {
             break;
         }
 
+        /* --- arithmetic --------------------------------------------------- */
         case OP_IADD: {
             blo = spop_lo(); bhi = spop_hi();
             alo = spop_lo(); ahi = spop_hi();
@@ -1083,6 +1106,7 @@ static void pjvm_exec(void) {
             alo = spop_lo(); ahi = spop_hi();
             pjvm_push32((int32_t)((uint32_t)pjvm_to32(alo, ahi) >> (blo & 0x1F))); break;
 
+        /* --- conversions -------------------------------------------------- */
         case OP_I2B: {
             alo = spop_lo();
             int8_t v = (int8_t)alo;
@@ -1095,105 +1119,31 @@ static void pjvm_exec(void) {
             alo = spop_lo();
             spush(alo, (int16_t)alo < 0 ? 0xFFFF : 0); break;
 
-        case OP_IFEQ: {
-            int16_t o = bread();
-            alo = spop_lo(); ahi = spop_hi();
-            if (alo == 0 && ahi == 0) g_pjvm->pc = opc + o;
-            break;
-        }
-        case OP_IFNE: {
-            int16_t o = bread();
-            alo = spop_lo(); ahi = spop_hi();
-            if (alo != 0 || ahi != 0) g_pjvm->pc = opc + o;
-            break;
-        }
-        case OP_IFLT: {
-            int16_t o = bread();
-            spop_lo(); ahi = spop_hi();
-            if (ahi & 0x8000) g_pjvm->pc = opc + o;
-            break;
-        }
-        case OP_IFGE: {
-            int16_t o = bread();
-            spop_lo(); ahi = spop_hi();
-            if (!(ahi & 0x8000)) g_pjvm->pc = opc + o;
-            break;
-        }
-        case OP_IFGT: {
-            int16_t o = bread();
-            alo = spop_lo(); ahi = spop_hi();
-            if (!(ahi & 0x8000) && (alo | ahi)) g_pjvm->pc = opc + o;
-            break;
-        }
-        case OP_IFLE: {
-            int16_t o = bread();
-            alo = spop_lo(); ahi = spop_hi();
-            if ((ahi & 0x8000) || (alo == 0 && ahi == 0)) g_pjvm->pc = opc + o;
-            break;
-        }
-        case OP_IFNULL: {
-            int16_t o = bread();
-            alo = spop_lo(); ahi = spop_hi();
-            if (alo == 0 && ahi == 0) g_pjvm->pc = opc + o;
-            break;
-        }
-        case OP_IFNONNULL: {
-            int16_t o = bread();
-            alo = spop_lo(); ahi = spop_hi();
-            if (alo != 0 || ahi != 0) g_pjvm->pc = opc + o;
-            break;
-        }
+        /* --- branches ----------------------------------------------------- */
+        case OP_IFEQ:      BRANCH1(alo == 0 && ahi == 0)
+        case OP_IFNE:      BRANCH1(alo != 0 || ahi != 0)
+        case OP_IFLT:      BRANCH1(ahi & 0x8000)
+        case OP_IFGE:      BRANCH1(!(ahi & 0x8000))
+        case OP_IFGT:      BRANCH1(!(ahi & 0x8000) && (alo | ahi))
+        case OP_IFLE:      BRANCH1((ahi & 0x8000) || (alo == 0 && ahi == 0))
+        case OP_IFNULL:    BRANCH1(alo == 0 && ahi == 0)
+        case OP_IFNONNULL: BRANCH1(alo != 0 || ahi != 0)
 
-        case OP_IF_ICMPEQ: {
-            int16_t o = bread();
-            blo = spop_lo(); bhi = spop_hi();
-            alo = spop_lo(); ahi = spop_hi();
-            if (alo == blo && ahi == bhi) g_pjvm->pc = opc + o; break;
-        }
-        case OP_IF_ICMPNE: {
-            int16_t o = bread();
-            blo = spop_lo(); bhi = spop_hi();
-            alo = spop_lo(); ahi = spop_hi();
-            if (alo != blo || ahi != bhi) g_pjvm->pc = opc + o; break;
-        }
-        case OP_IF_ICMPLT: {
-            int16_t o = bread();
-            blo = spop_lo(); bhi = spop_hi();
-            alo = spop_lo(); ahi = spop_hi();
-            if ((int16_t)ahi < (int16_t)bhi || (ahi == bhi && alo < blo))
-                g_pjvm->pc = opc + o; break;
-        }
-        case OP_IF_ICMPGE: {
-            int16_t o = bread();
-            blo = spop_lo(); bhi = spop_hi();
-            alo = spop_lo(); ahi = spop_hi();
-            if ((int16_t)ahi > (int16_t)bhi || (ahi == bhi && alo >= blo))
-                g_pjvm->pc = opc + o; break;
-        }
-        case OP_IF_ICMPGT: {
-            int16_t o = bread();
-            blo = spop_lo(); bhi = spop_hi();
-            alo = spop_lo(); ahi = spop_hi();
-            if ((int16_t)ahi > (int16_t)bhi || (ahi == bhi && alo > blo))
-                g_pjvm->pc = opc + o; break;
-        }
-        case OP_IF_ICMPLE: {
-            int16_t o = bread();
-            blo = spop_lo(); bhi = spop_hi();
-            alo = spop_lo(); ahi = spop_hi();
-            if ((int16_t)ahi < (int16_t)bhi || (ahi == bhi && alo <= blo))
-                g_pjvm->pc = opc + o; break;
-        }
+        case OP_IF_ICMPEQ: BRANCH2(alo == blo && ahi == bhi)
+        case OP_IF_ICMPNE: BRANCH2(alo != blo || ahi != bhi)
+        case OP_IF_ICMPLT: BRANCH2((int16_t)ahi < (int16_t)bhi || (ahi == bhi && alo < blo))
+        case OP_IF_ICMPGE: BRANCH2((int16_t)ahi > (int16_t)bhi || (ahi == bhi && alo >= blo))
+        case OP_IF_ICMPGT: BRANCH2((int16_t)ahi > (int16_t)bhi || (ahi == bhi && alo > blo))
+        case OP_IF_ICMPLE: BRANCH2((int16_t)ahi < (int16_t)bhi || (ahi == bhi && alo <= blo))
+
         case OP_IF_ACMPEQ: {
             int16_t o = bread();
-            blo = spop_lo();
-            alo = spop_lo();
+            blo = spop_lo(); alo = spop_lo();
             if (alo == blo) g_pjvm->pc = opc + o; break;
         }
         case OP_IF_ACMPNE: {
             int16_t o = bread();
-            blo = spop_lo();
-            alo = spop_lo();
+            blo = spop_lo(); alo = spop_lo();
             if (alo != blo) g_pjvm->pc = opc + o; break;
         }
         case OP_GOTO: {
@@ -1201,6 +1151,7 @@ static void pjvm_exec(void) {
             g_pjvm->pc = opc + o; break;
         }
 
+        /* --- switches ----------------------------------------------------- */
         case OP_TABLESWITCH: {
             uint32_t base = m_co[g_pjvm->cur_mi];
             g_pjvm->pc = base + (((g_pjvm->pc - base) + 3) & ~3u);
@@ -1243,9 +1194,11 @@ static void pjvm_exec(void) {
             break;
         }
 
+        /* --- return ------------------------------------------------------- */
         case OP_IRETURN: case OP_ARETURN: pjvm_ret(1); break;
         case OP_RETURN: pjvm_ret(0); break;
 
+        /* --- fields ------------------------------------------------------- */
         case OP_GETSTATIC: {
             uint16_t s = cpread();
             spush(g_pjvm->sf_lo[s], g_pjvm->sf_hi[s]); break;
@@ -1277,6 +1230,7 @@ static void pjvm_exec(void) {
             w16(addr, alo); w16((uint16_t)(addr + 2), ahi); break;
         }
 
+        /* --- invocation --------------------------------------------------- */
         case OP_INVOKESTATIC: case OP_INVOKESPECIAL: {
             uint16_t mi = cpread();
             pjvm_inv(mi); break;
@@ -1309,6 +1263,7 @@ static void pjvm_exec(void) {
             break;
         }
 
+        /* --- object creation & type --------------------------------------- */
         case OP_NEW: {
             uint16_t ci = cpread();
             uint8_t nf = ci < n_classes ? cls_nf[ci] : 0;
@@ -1382,6 +1337,7 @@ static void pjvm_exec(void) {
             break;
         }
 
+        /* --- exceptions --------------------------------------------------- */
         case OP_ATHROW: {
             uint16_t exc_ref = spop_lo(); spop_hi();
             if (exc_ref == 0) {
@@ -1399,4 +1355,6 @@ static void pjvm_exec(void) {
     }
 }
 
+#undef BRANCH1
+#undef BRANCH2
 #undef NI

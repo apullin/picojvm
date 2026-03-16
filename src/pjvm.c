@@ -799,7 +799,21 @@ uint8_t  trace_sp[TRACE_BUF_SIZE];
 uint16_t trace_stk0[TRACE_BUF_SIZE];
 uint32_t trace_idx;
 
-/* --- branch helper macros --------------------------------------------- */
+/* --- opcode helper macros --------------------------------------------- */
+/* Binary 32-bit op: pop b, pop a, push expr(a, b) */
+#define BINOP32(expr) { \
+    blo = spop_lo(); bhi = spop_hi(); \
+    alo = spop_lo(); ahi = spop_hi(); \
+    int32_t a = pjvm_to32(alo, ahi), b = pjvm_to32(blo, bhi); \
+    pjvm_push32(expr); break; }
+
+/* Shift op: pop shift amount (lo only), pop a, push expr(a, s) */
+#define SHIFTOP(expr) { \
+    blo = spop_lo(); \
+    alo = spop_lo(); ahi = spop_hi(); \
+    int32_t a = pjvm_to32(alo, ahi); uint8_t s = blo & 0x1F; \
+    pjvm_push32(expr); break; }
+
 /* Single-operand: pop one value, branch if cond(alo,ahi) is true */
 #define BRANCH1(cond) { \
     int16_t o = bread(); \
@@ -1081,30 +1095,12 @@ static void pjvm_exec(void) {
             break;
         }
 
-        case OP_IMUL:
-            blo = spop_lo(); bhi = spop_hi();
-            alo = spop_lo(); ahi = spop_hi();
-            pjvm_push32(pjvm_to32(alo, ahi) * pjvm_to32(blo, bhi)); break;
-        case OP_IDIV:
-            blo = spop_lo(); bhi = spop_hi();
-            alo = spop_lo(); ahi = spop_hi();
-            pjvm_push32(pjvm_to32(alo, ahi) / pjvm_to32(blo, bhi)); break;
-        case OP_IREM:
-            blo = spop_lo(); bhi = spop_hi();
-            alo = spop_lo(); ahi = spop_hi();
-            pjvm_push32(pjvm_to32(alo, ahi) % pjvm_to32(blo, bhi)); break;
-        case OP_ISHL:
-            blo = spop_lo();
-            alo = spop_lo(); ahi = spop_hi();
-            pjvm_push32(pjvm_to32(alo, ahi) << (blo & 0x1F)); break;
-        case OP_ISHR:
-            blo = spop_lo();
-            alo = spop_lo(); ahi = spop_hi();
-            pjvm_push32(pjvm_to32(alo, ahi) >> (blo & 0x1F)); break;
-        case OP_IUSHR:
-            blo = spop_lo();
-            alo = spop_lo(); ahi = spop_hi();
-            pjvm_push32((int32_t)((uint32_t)pjvm_to32(alo, ahi) >> (blo & 0x1F))); break;
+        case OP_IMUL:  BINOP32(a * b)
+        case OP_IDIV:  BINOP32(a / b)
+        case OP_IREM:  BINOP32(a % b)
+        case OP_ISHL:  SHIFTOP(a << s)
+        case OP_ISHR:  SHIFTOP(a >> s)
+        case OP_IUSHR: SHIFTOP((int32_t)((uint32_t)a >> s))
 
         /* --- conversions -------------------------------------------------- */
         case OP_I2B: {
@@ -1355,6 +1351,8 @@ static void pjvm_exec(void) {
     }
 }
 
+#undef BINOP32
+#undef SHIFTOP
 #undef BRANCH1
 #undef BRANCH2
 #undef NI

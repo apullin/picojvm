@@ -31,6 +31,7 @@ in Java so that it can ultimately self-host: compile itself on picoJVM on real
 18. [Appendix B: Native Method ABI](#appendix-b-native-method-abi)
 19. [Appendix C: Existing picoJVM Test Programs](#appendix-c-existing-picojvm-test-programs)
 20. [Appendix D: .pjvm File Format Reference](#appendix-d-pjvm-file-format-reference)
+    - [D.9: Constant Data Arrays (const_data)](#d9-constant-data-arrays-const_data)
 
 ---
 
@@ -101,6 +102,8 @@ All values on the operand stack and in local variables are stored as
 - **int** (32-bit signed): `value = lo | (hi << 16)`.  Negative values have
   `hi = 0xFFFF` for sign extension.
 - **Reference** (16-bit heap address): stored in `lo`, `hi = 0`.
+- **ROM array reference** (32-bit program image offset): `hi != 0`.
+  See [Appendix D.9: Constant Data Arrays](#d9-constant-data-arrays-const_data).
 - **null**: `lo = 0, hi = 0`.
 
 The interpreter uses separate parallel arrays: `stk_lo[]`/`stk_hi[]` for the
@@ -2436,18 +2439,19 @@ public class Fib {
 
 ## Appendix D: .pjvm File Format Reference
 
-### D.1 Section Ordering (v1)
+### D.1 Section Ordering
 
 ```
 Bytes       Section
-[0..9]      Header (10 bytes)
-[10..]      Class table (variable)
-[..]        Method table (n_methods × 12 bytes)
-[..]        CP resolution table (2 + cp_size bytes)
+[0..15]     Header (16 bytes, v3)
+[16..]      Class table (variable)
+[..]        Method table (n_methods × 14 bytes)
+[..]        CP resolution table (variable, 16-bit entries in v3)
 [..]        Integer constants (n_integers × 4 bytes)
 [..]        String constants (variable)
 [..]        Bytecode section (bytecodes_size bytes)
 [..]        Exception table (Σ exc_count × 7 bytes)
+[..]        Constant data section (optional, see D.9)
 ```
 
 ### D.2 Byte Order
@@ -2507,6 +2511,189 @@ After 4-byte alignment padding:
 Note: picoJVM uses 2-byte npairs (not 4-byte) and 2-byte offsets (not 4-byte
 as standard JVM).  Match keys remain 4 bytes.
 
+### D.9 Constant Data Arrays (`const_data`)
+
+#### Motivation
+
+On a standard JVM, constant arrays (`static final int[] TABLE = {1, 2, 3, ...}`)
+are initialized at runtime: `<clinit>` allocates the array on the heap and fills
+it element-by-element via `newarray` + `bipush`/`sipush` + `iastore` bytecodes.
+This has two costs:
+
+1. **Bytecode bloat**: A 256-entry `int[]` table compiles to ~1,280 bytes of
+   initialization bytecodes — touched once during class loading, then never again.
+2. **Heap consumption**: The array data lives in RAM even though it never changes.
+
+On a system with 32KB of RAM, a single 256-entry int lookup table consumes ~7%
+of total memory (1KB heap + 1.3KB bytecode paging overhead).
+
+picoJVM's `const_data` section eliminates both costs by storing constant array
+data directly in the program image.  The data is accessed through `PROG()` — the
+same mechanism used for bytecodes and the constant pool — so it is automatically
+paged from disk on paged targets.  No heap allocation, no initialization
+bytecodes.
+
+This is architecturally significant: **the JVM's 32-bit value representation
+gives every picoJVM program a 4GB virtual read-only address space**, independent
+of the host CPU's physical address width.  An Intel 8085 with 2KB of RAM and an
+SD card can address gigabytes of constant data through the pager, because the
+operand stack slot that holds an array reference is 32 bits wide (`lo` + `hi`),
+and `PROG()` accepts a `uint32_t` offset.
+
+#### Source-Level Annotation
+
+Constant arrays are marked with a `@Const` annotation:
+
+```java
+@Const static final int[] SINE_TABLE = {0, 6, 12, 18, ...};
+@Const static final byte[] FONT_DATA = {0x3C, 0x42, 0x81, ...};
+```
+
+**Compatibility**: `@Const` is a standard Java annotation defined in a
+`Const.java` file (analogous to the existing `Native.java`).  `javac` preserves
+the annotation in the `.class` file as metadata.  A standard JVM ignores it —
+the array is allocated on the heap normally via `<clinit>`.  Only `pjvmpack.py`
+(or `picojc`) acts on it: extracting the constant values and emitting them in the
+`const_data` section instead of as initialization bytecodes.
+
+This means the same `.java` source compiles and runs correctly on:
+- Standard JVM (annotation ignored, heap-allocated as usual)
+- picoJVM host (ROM array via `PROG()`, zero heap cost)
+- picoJVM on 8085 sim (ROM array, paged from disk)
+
+#### .pjvm Format Extension
+
+The `const_data` section is appended after the exception table.  Its presence is
+indicated by a flag in the header:
+
+**Header field** (v3, byte 9 `region_flags`):
+- Bit 0: pin hints present (existing)
+- Bit 1: reserved (existing)
+- **Bit 2**: `const_data` section present
+
+**Section layout**:
+```
+Offset  Size       Field           Description
+0       2          n_const_arrays  Number of constant array entries (uint16_t LE)
+2       variable   entries[]       Array entries (see below)
+```
+
+**Each entry** (4-byte header + data, mirrors heap array layout):
+```
+Offset  Size       Field           Description
+0       2          n_elements      Element count (uint16_t LE)
+2       1          elem_type       Element type: 0=byte, 1=char, 2=short, 3=int
+3       1          reserved        Must be 0
+4       variable   data[]          Raw element data, little-endian
+```
+
+Element data sizes:
+- `byte` (type 0): `n_elements` bytes
+- `char` (type 1): `n_elements × 2` bytes (uint16_t LE)
+- `short` (type 2): `n_elements × 2` bytes (int16_t LE)
+- `int` (type 3): `n_elements × 4` bytes (int32_t LE)
+
+The offset of each entry's data within the `.pjvm` file is its **file-absolute
+byte offset**.  This offset is the value encoded in ROM array references (see
+below).
+
+#### Runtime Representation: ROM Array References
+
+picoJVM distinguishes heap arrays from ROM arrays using the `hi` half of the
+operand stack slot:
+
+| Type | `lo` | `hi` | Meaning |
+|------|-------|------|---------|
+| Heap array ref | 16-bit heap address | `0` | Normal mutable array in RAM |
+| ROM array ref | `offset[15:0]` | `(offset >> 16) + 1` | Read-only array in program image |
+| null | `0` | `0` | Null reference |
+
+**Encoding**: The 32-bit file offset of the `const_data` entry is stored as:
+```
+lo = offset & 0xFFFF
+hi = (offset >> 16) + 1
+```
+
+The `+1` bias guarantees `hi != 0` for any valid offset, including offset 0.
+This is the sole distinguishing invariant: **heap references always have `hi = 0`;
+ROM references always have `hi != 0`**.
+
+**Decoding** (in the interpreter):
+```c
+uint32_t offset = ((uint32_t)(ref_hi - 1) << 16) | ref_lo;
+```
+
+This encoding provides a **full 32-bit address space** (4GB) for constant data,
+minus 64KB (offsets 0xFFFF0000–0xFFFFFFFF, where `hi` would overflow).  In
+practice this is unlimited.
+
+#### Interpreter Changes
+
+The following opcodes must check `hi` before accessing array data:
+
+- **`iaload`/`aaload`**: If `hi != 0`, decode offset, read 4 bytes via
+  `PROG(offset + 4 + index * 4)` instead of `r16(addr)`/`r16(addr+2)`.
+- **`baload`**: If `hi != 0`, read 1 byte via `PROG(offset + 4 + index)`.
+- **`caload`/`saload`**: If `hi != 0`, read 2 bytes via `PROG(offset + 4 + index * 2)`.
+- **`arraylength`**: If `hi != 0`, read length from `PROG(offset)` | `PROG(offset+1) << 8`.
+- **`iastore`/`bastore`/`castore`/`sastore`**: If `hi != 0`, **trap** — writes
+  to a ROM array are a fatal error.
+
+The `const_data` entry header is deliberately **4 bytes** — matching the heap
+array header layout — so the `+4` element offset is identical for both ROM and
+heap arrays.  The interpreter only needs to switch the read function
+(`PROG()` vs `r8()`/`r16()`), not the address arithmetic:
+
+```
+Offset  Size  Contents
+0       2     n_elements (uint16_t LE) — same position as heap array length
+2       1     elem_type (0=byte, 1=char, 2=short, 3=int)
+3       1     reserved (0)
+4       ...   element data
+```
+
+For `arraylength`, the length is at `offset + 0` (2 bytes LE, same as heap).
+For `iaload`, the element is at `offset + 4 + index * 4` (same as heap).
+
+This alignment means the ROM path in the interpreter is just:
+```c
+uint32_t off = ((uint32_t)(ref_hi - 1) << 16) | ref_lo;
+// Then same +4 offset arithmetic as heap path, but read via PROG()
+```
+
+#### pjvmpack / picojc Behavior
+
+When packing a `.class` file, `pjvmpack.py` (or `picojc`):
+
+1. Scans field annotations for `@Const` on `static final` array fields.
+2. For each `@Const` field, simulates the relevant portion of `<clinit>` to
+   extract the constant values (the bytecode pattern is deterministic:
+   `newarray` + repeated `dup`/`iconst_or_push`/`xastore`/`putstatic`).
+3. Emits the values in the `const_data` section.
+4. Replaces the `<clinit>` initialization sequence with a CP-resolved
+   `getstatic` that returns a ROM array reference instead of a heap address.
+   The CP resolution entry for that static field is overloaded to hold the
+   `const_data` offset (encoded as a ROM reference).
+5. Sets header flag bit 2 (`const_data` present).
+
+If `@Const` is absent, behavior is unchanged — arrays are heap-allocated
+via `<clinit>` as before.
+
+#### Cost/Benefit Example
+
+256-entry `int[]` lookup table:
+
+| | Without `@Const` | With `@Const` |
+|---|---|---|
+| Bytecode | ~1,280B (`<clinit>` init) | ~0B (removed) |
+| Heap (RAM) | 1,028B (4B header + 256×4) | 0B |
+| Program image | 0B | 1,028B (4B header + 256×4) |
+| **Total RAM cost** | **1,028B** | **0B** |
+
+The program image cost (1,028B) is served through the pager and never occupies
+RAM simultaneously — only the 128B (or whatever page size) containing the
+currently accessed element is resident.
+
 ---
 
 ## Appendix E: Glossary
@@ -2526,3 +2713,6 @@ as standard JVM).  Match keys remain 4 bytes.
 | T-states | Clock cycles (cycle timing unit for 8085) |
 | LRU | Least Recently Used (page eviction policy) |
 | backpatch | Fill in branch target after it's known |
+| const_data | Program image section holding read-only array data |
+| ROM array | Array reference pointing into const_data (hi != 0) |
+| @Const | Java annotation marking a static final array for ROM placement |

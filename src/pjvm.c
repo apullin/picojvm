@@ -269,16 +269,16 @@ NI static void pjvm_push32(int32_t v) {
 }
 
 static uint16_t pjvm_make_string(PJVMCtx *j, const uint8_t *buf, uint16_t len) {
-    uint16_t a = heap_alloc(j, (uint16_t)(4 + len));
+    uint16_t a = heap_alloc(j, (uint16_t)(PJVM_OBJ_HEADER + len));
     w16(a, len);
     w16((uint16_t)(a + 2), 0);
-    for (uint16_t i = 0; i < len; i++) w8((uint16_t)(a + 4 + i), buf[i]);
+    for (uint16_t i = 0; i < len; i++) w8((uint16_t)(a + PJVM_OBJ_HEADER + i), buf[i]);
     return a;
 }
 
 static uint16_t pjvm_make_main_args(PJVMCtx *j) {
     uint16_t argc = j->prog_argc;
-    uint16_t a = heap_alloc(j, (uint16_t)(4 + argc * 4));
+    uint16_t a = heap_alloc(j, (uint16_t)(PJVM_OBJ_HEADER + argc * 4));
     w16(a, argc);
     w16((uint16_t)(a + 2), 0);
     for (uint16_t i = 0; i < argc; i++) {
@@ -286,20 +286,20 @@ static uint16_t pjvm_make_main_args(PJVMCtx *j) {
         uint16_t len = 0;
         if (arg != 0) while (arg[len] != 0) len++;
         uint16_t sref = pjvm_make_string(j, (const uint8_t *)arg, len);
-        w16((uint16_t)(a + 4 + i * 4), sref);
-        w16((uint16_t)(a + 4 + i * 4 + 2), 0);
+        w16((uint16_t)(a + PJVM_OBJ_HEADER + i * 4), sref);
+        w16((uint16_t)(a + PJVM_OBJ_HEADER + i * 4 + 2), 0);
     }
     return a;
 }
 
 /* --- .pjvm loader ----------------------------------------------------- */
 void pjvm_parse(uint8_t *data) {
-    uint8_t version = data[1];  /* 0x4A = v1, 0x4B = v2, 0x4C = v3 */
+    uint8_t version = data[1];
     n_methods = data[2];
     main_mi = data[3];
 
     uint8_t *p;
-    if (version >= 0x4C) {
+    if (version >= PJVM_VERSION_V3) {
         /* v3: 16-bit n_static_fields, 16-bit CP entries */
         n_static_fields = (uint16_t)data[4] | ((uint16_t)data[5] << 8);
         n_int_constants = data[6];
@@ -308,21 +308,25 @@ void pjvm_parse(uint8_t *data) {
         region_flags = data[9];
         bytecodes_size = (uint32_t)data[10] | ((uint32_t)data[11] << 8)
                        | ((uint32_t)data[12] << 16) | ((uint32_t)data[13] << 24);
-        cp16 = 1; cp_str_flag = 0x8000; cp_str_mask = 0x7FFF;
-        p = data + 16;
+        cp16 = 1;
+        cp_str_flag = PJVM_CP_STR_FLAG_16;
+        cp_str_mask = PJVM_CP_STR_MASK_16;
+        p = data + PJVM_HDR_SIZE_V3;
     } else {
         n_static_fields = data[4];
         n_int_constants = data[5];
         n_classes = data[6];
         n_string_constants = data[7];
-        cp16 = 0; cp_str_flag = 0x80; cp_str_mask = 0x7F;
-        if (version == 0x4B) {
+        cp16 = 0;
+        cp_str_flag = PJVM_CP_STR_FLAG_8;
+        cp_str_mask = PJVM_CP_STR_MASK_8;
+        if (version == PJVM_VERSION_V2) {
             bytecodes_size = (uint32_t)data[8] | ((uint32_t)data[9] << 8)
                            | ((uint32_t)data[10] << 16) | ((uint32_t)data[11] << 24);
-            p = data + 14;
+            p = data + PJVM_HDR_SIZE_V2;
         } else {
             bytecodes_size = (uint32_t)((uint16_t)data[8] | ((uint16_t)data[9] << 8));
-            p = data + 10;
+            p = data + PJVM_HDR_SIZE_V1;
         }
     }
 
@@ -340,17 +344,17 @@ void pjvm_parse(uint8_t *data) {
 
     for (uint8_t i = 0; i < n_methods; i++) {
         m_ml[i] = p[0]; m_ac[i] = p[2]; m_fl[i] = p[3];
-        if (version >= 0x4B) {
+        if (version >= PJVM_VERSION_V2) {
             m_co[i] = (uint32_t)((uint32_t)p[4] | ((uint32_t)p[5] << 8)
                      | ((uint32_t)p[6] << 16) | ((uint32_t)p[7] << 24));
             m_cb[i] = (uint16_t)p[8] | ((uint16_t)p[9] << 8);
             m_vs[i] = p[10]; m_vmid[i] = p[11];
-            m_ec[i] = p[12]; m_eo[i] = p[13]; p += 14;
+            m_ec[i] = p[12]; m_eo[i] = p[13]; p += PJVM_MT_ENTRY_V2;
         } else {
             m_co[i] = (uint32_t)((uint16_t)p[4] | ((uint16_t)p[5] << 8));
             m_cb[i] = (uint16_t)p[6] | ((uint16_t)p[7] << 8);
             m_vs[i] = p[8]; m_vmid[i] = p[9];
-            m_ec[i] = p[10]; m_eo[i] = p[11]; p += 12;
+            m_ec[i] = p[10]; m_eo[i] = p[11]; p += PJVM_MT_ENTRY_V1;
         }
     }
 
@@ -371,14 +375,14 @@ void pjvm_parse(uint8_t *data) {
         /* Count exception entries: sum of m_ec[] */
         uint16_t n_exc = 0;
         for (uint8_t i = 0; i < n_methods; i++) n_exc += m_ec[i];
-        p += n_exc * 7;  /* 7 bytes per exception entry */
+        p += n_exc * PJVM_ET_ENTRY;
 
         /* Skip pin hints if present (1 byte per method) */
-        if (region_flags & 0x01)
+        if (region_flags & PJVM_RF_PIN_HINTS)
             p += n_methods;
 
         /* const_data section offset */
-        if (region_flags & 0x04)
+        if (region_flags & PJVM_RF_CONST_DATA)
             cd_off = (uint32_t)(p - data);
         else
             cd_off = 0;
@@ -435,7 +439,7 @@ static void pjvm_inv(uint8_t mi) {
         case NATIVE_STR_CHARAT:
             blo = spop_lo(); spop_hi();
             alo = spop_lo();
-            spush(r8(alo + 4 + blo), 0);
+            spush(r8(alo + PJVM_OBJ_HEADER + blo), 0);
             break;
         case NATIVE_STR_EQUALS: {
             blo = spop_lo(); spop_hi();
@@ -445,7 +449,7 @@ static void pjvm_inv(uint8_t mi) {
             uint16_t la = r16(alo), lb = r16(blo);
             uint8_t eq = (la == lb) ? 1 : 0;
             for (uint16_t i = 0; eq && i < la; i++)
-                if (r8(alo + 4 + i) != r8(blo + 4 + i)) eq = 0;
+                if (r8(alo + PJVM_OBJ_HEADER + i) != r8(blo + PJVM_OBJ_HEADER + i)) eq = 0;
             spush(eq, 0);
             break;
         }
@@ -455,7 +459,7 @@ static void pjvm_inv(uint8_t mi) {
             alo = spop_lo();
             uint16_t slen = r16(alo);
             for (uint16_t i = 0; i < slen; i++)
-                pjvm_platform_putchar(r8(alo + 4 + i));
+                pjvm_platform_putchar(r8(alo + PJVM_OBJ_HEADER + i));
             break;
         }
         case NATIVE_STR_HASHCODE: {
@@ -463,7 +467,7 @@ static void pjvm_inv(uint8_t mi) {
             uint16_t slen = r16(alo);
             uint32_t h = 0;
             for (uint16_t i = 0; i < slen; i++)
-                h = h * 31 + (uint32_t)r8(alo + 4 + i);
+                h = h * 31 + (uint32_t)r8(alo + PJVM_OBJ_HEADER + i);
             pjvm_push32((int32_t)h);
             break;
         }
@@ -480,7 +484,7 @@ static void pjvm_inv(uint8_t mi) {
             uint16_t srcOff = spop_lo(); spop_hi();
             uint16_t src    = spop_lo();
             for (uint16_t i = 0; i < len; i++)
-                w8(dst + 4 + dstOff + i, r8(src + 4 + srcOff + i));
+                w8(dst + PJVM_OBJ_HEADER + dstOff + i, r8(src + PJVM_OBJ_HEADER + srcOff + i));
         }
 #endif
             break;
@@ -498,8 +502,8 @@ static void pjvm_inv(uint8_t mi) {
             uint16_t aref = spop_lo();
             int32_t result = 0;
             for (uint16_t i = 0; i < len; i++) {
-                uint8_t av = r8(aref + 4 + aOff + i);
-                uint8_t bv = r8(bref + 4 + bOff + i);
+                uint8_t av = r8(aref + PJVM_OBJ_HEADER + aOff + i);
+                uint8_t bv = r8(bref + PJVM_OBJ_HEADER + bOff + i);
                 if (av != bv) { result = (int32_t)av - (int32_t)bv; break; }
             }
             pjvm_push32(result);
@@ -516,7 +520,7 @@ static void pjvm_inv(uint8_t mi) {
             uint16_t off = spop_lo(); spop_hi();
             uint16_t ref = spop_lo();
             for (uint16_t i = 0; i < len; i++)
-                pjvm_platform_putchar(r8(ref + 4 + off + i));
+                pjvm_platform_putchar(r8(ref + PJVM_OBJ_HEADER + off + i));
         }
 #endif
             break;
@@ -529,10 +533,10 @@ static void pjvm_inv(uint8_t mi) {
             uint16_t len = spop_lo(); spop_hi();
             uint16_t off = spop_lo(); spop_hi();
             uint16_t src = spop_lo();
-            uint16_t a = heap_alloc(g_pjvm, (uint16_t)(4 + len));
+            uint16_t a = heap_alloc(g_pjvm, (uint16_t)(PJVM_OBJ_HEADER + len));
             w16(a, len); w16((uint16_t)(a + 2), 0);
             for (uint16_t i = 0; i < len; i++)
-                w8(a + 4 + i, r8(src + 4 + off + i));
+                w8(a + PJVM_OBJ_HEADER + i, r8(src + PJVM_OBJ_HEADER + off + i));
             spush(a, 0);
         }
 #endif
@@ -545,7 +549,7 @@ static void pjvm_inv(uint8_t mi) {
             uint8_t nameBuf[64];
             uint16_t nl = nameLen > 63 ? 63 : nameLen;
             for (uint16_t i = 0; i < nl; i++)
-                nameBuf[i] = r8(nameRef + 4 + i);
+                nameBuf[i] = r8(nameRef + PJVM_OBJ_HEADER + i);
             nameBuf[nl] = 0;
             int32_t result = pjvm_platform_file_open(nameBuf, (uint8_t)nl, (uint8_t)mode);
             pjvm_push32(result);
@@ -572,7 +576,7 @@ static void pjvm_inv(uint8_t mi) {
             for (uint16_t i = 0; i < len; i++) {
                 int32_t ch = pjvm_platform_file_read_byte();
                 if (ch < 0) break;
-                w8(ref + 4 + off + i, (uint8_t)ch);
+                w8(ref + PJVM_OBJ_HEADER + off + i, (uint8_t)ch);
                 total++;
             }
             pjvm_push32(total);
@@ -584,7 +588,7 @@ static void pjvm_inv(uint8_t mi) {
             uint16_t off = spop_lo(); spop_hi();
             uint16_t ref = spop_lo();
             for (uint16_t i = 0; i < len; i++)
-                pjvm_platform_file_write_byte(r8(ref + 4 + off + i));
+                pjvm_platform_file_write_byte(r8(ref + PJVM_OBJ_HEADER + off + i));
             break;
         }
         case NATIVE_FILE_CLOSE: {
@@ -600,7 +604,7 @@ static void pjvm_inv(uint8_t mi) {
             uint8_t nameBuf[64];
             uint16_t nl = nameLen > 63 ? 63 : nameLen;
             for (uint16_t i = 0; i < nl; i++)
-                nameBuf[i] = r8(nameRef + 4 + i);
+                nameBuf[i] = r8(nameRef + PJVM_OBJ_HEADER + i);
             nameBuf[nl] = 0;
             int32_t result = pjvm_platform_file_delete(nameBuf, (uint8_t)nl);
             pjvm_push32(result);
@@ -702,13 +706,13 @@ static void pjvm_throw(uint16_t exc_ref, uint32_t throw_pc) {
 
 static uint16_t pjvm_multi_alloc(uint16_t *sizes, uint8_t depth, uint8_t dims) {
     uint16_t count = sizes[depth];
-    uint16_t a = heap_alloc(g_pjvm, (uint16_t)(4 + count * 4));
+    uint16_t a = heap_alloc(g_pjvm, (uint16_t)(PJVM_OBJ_HEADER + count * 4));
     w16(a, count); w16((uint16_t)(a + 2), 0);
     if (depth + 1 < dims) {
         for (uint16_t i = 0; i < count; i++) {
             uint16_t inner = pjvm_multi_alloc(sizes, depth + 1, dims);
-            w16(a + 4 + i * 4, inner);
-            w16((uint16_t)(a + 4 + i * 4 + 2), 0);
+            w16(a + PJVM_OBJ_HEADER + i * 4, inner);
+            w16((uint16_t)(a + PJVM_OBJ_HEADER + i * 4 + 2), 0);
         }
     }
     return a;
@@ -724,9 +728,9 @@ void pjvm_run(PJVMCtx *j) {
         for (uint8_t i = 0; i < n_string_constants; i++) {
             uint16_t slen = (uint16_t)PROG(soff) | ((uint16_t)PROG(soff + 1) << 8);
             soff += 2;
-            uint16_t a = heap_alloc(j, (uint16_t)(4 + slen));
+            uint16_t a = heap_alloc(j, (uint16_t)(PJVM_OBJ_HEADER + slen));
             w16(a, slen); w16((uint16_t)(a + 2), 0);
-            for (uint16_t k = 0; k < slen; k++) w8(a + 4 + k, PROG(soff + k));
+            for (uint16_t k = 0; k < slen; k++) w8(a + PJVM_OBJ_HEADER + k, PROG(soff + k));
             soff += slen;
             str_refs[i] = a;
         }
@@ -764,7 +768,7 @@ void pjvm_run(PJVMCtx *j) {
 
     /* Run static initializers (<clinit>) */
     for (uint8_t ci = 0; ci < n_classes; ci++) {
-        if (cls_ci[ci] == 0xFF) continue;
+        if (cls_ci[ci] == PJVM_NO_CLINIT) continue;
         uint8_t mi = cls_ci[ci];
         j->cur_mi = mi; j->cur_lb = 0; j->cur_cb = m_cb[mi];
         j->lt = m_ml[mi]; j->pc = m_co[mi];
@@ -879,12 +883,12 @@ static void pjvm_exec(void) {
             if (bhi) {
                 /* ROM array: decode 32-bit offset, read via PROG() */
                 uint32_t off = ((uint32_t)(bhi - 1) << 16) | blo;
-                off += 4 + (uint32_t)alo * 4;
+                off += PJVM_OBJ_HEADER + (uint32_t)alo * 4;
                 uint16_t vlo = (uint16_t)PROG(off) | ((uint16_t)PROG(off + 1) << 8);
                 uint16_t vhi = (uint16_t)PROG(off + 2) | ((uint16_t)PROG(off + 3) << 8);
                 spush(vlo, vhi);
             } else {
-                uint16_t addr = blo + 4 + alo * 4;
+                uint16_t addr = blo + PJVM_OBJ_HEADER + alo * 4;
                 spush(r16(addr), r16((uint16_t)(addr + 2)));
             }
             break;
@@ -894,10 +898,10 @@ static void pjvm_exec(void) {
             blo = spop_lo(); bhi = spop_hi();
             if (bhi) {
                 uint32_t off = ((uint32_t)(bhi - 1) << 16) | blo;
-                int8_t bv = (int8_t)PROG(off + 4 + alo);
+                int8_t bv = (int8_t)PROG(off + PJVM_OBJ_HEADER + alo);
                 spush((uint16_t)(int16_t)bv, bv < 0 ? 0xFFFF : 0);
             } else {
-                int8_t bv = (int8_t)r8(blo + 4 + alo);
+                int8_t bv = (int8_t)r8(blo + PJVM_OBJ_HEADER + alo);
                 spush((uint16_t)(int16_t)bv, bv < 0 ? 0xFFFF : 0);
             }
             break;
@@ -907,10 +911,10 @@ static void pjvm_exec(void) {
             blo = spop_lo(); bhi = spop_hi();
             if (bhi) {
                 uint32_t off = ((uint32_t)(bhi - 1) << 16) | blo;
-                off += 4 + (uint32_t)alo * 2;
+                off += PJVM_OBJ_HEADER + (uint32_t)alo * 2;
                 spush((uint16_t)PROG(off) | ((uint16_t)PROG(off + 1) << 8), 0);
             } else {
-                spush(r16(blo + 4 + alo * 2), 0);
+                spush(r16(blo + PJVM_OBJ_HEADER + alo * 2), 0);
             }
             break;
         }
@@ -919,11 +923,11 @@ static void pjvm_exec(void) {
             blo = spop_lo(); bhi = spop_hi();
             if (bhi) {
                 uint32_t off = ((uint32_t)(bhi - 1) << 16) | blo;
-                off += 4 + (uint32_t)alo * 2;
+                off += PJVM_OBJ_HEADER + (uint32_t)alo * 2;
                 uint16_t sv = (uint16_t)PROG(off) | ((uint16_t)PROG(off + 1) << 8);
                 spush(sv, (int16_t)sv < 0 ? 0xFFFF : 0);
             } else {
-                uint16_t sv = r16(blo + 4 + alo * 2);
+                uint16_t sv = r16(blo + PJVM_OBJ_HEADER + alo * 2);
                 spush(sv, (int16_t)sv < 0 ? 0xFFFF : 0);
             }
             break;
@@ -949,7 +953,7 @@ static void pjvm_exec(void) {
               }
             }
             #endif
-            uint16_t addr = aref + 4 + blo * 4;
+            uint16_t addr = aref + PJVM_OBJ_HEADER + blo * 4;
             w16(addr, alo); w16((uint16_t)(addr + 2), ahi);
             break;
         }
@@ -967,7 +971,7 @@ static void pjvm_exec(void) {
               }
             }
             #endif
-            w8(aref + 4 + blo, (uint8_t)alo);
+            w8(aref + PJVM_OBJ_HEADER + blo, (uint8_t)alo);
             break;
         }
         case OP_CASTORE: case OP_SASTORE: {
@@ -975,7 +979,7 @@ static void pjvm_exec(void) {
             blo = spop_lo();
             uint16_t aref = spop_lo(); uint16_t aref_hi = spop_hi();
             if (aref_hi) { pjvm_platform_trap(op, (uint16_t)g_pjvm->pc); break; }
-            w16(aref + 4 + blo * 2, alo);
+            w16(aref + PJVM_OBJ_HEADER + blo * 2, alo);
             break;
         }
 
@@ -1271,14 +1275,14 @@ static void pjvm_exec(void) {
         case OP_GETFIELD: {
             uint16_t s = cpread();
             alo = spop_lo();
-            uint16_t addr = alo + 4 + s * 4;
+            uint16_t addr = alo + PJVM_OBJ_HEADER + s * 4;
             spush(r16(addr), r16((uint16_t)(addr + 2))); break;
         }
         case OP_PUTFIELD: {
             uint16_t s = cpread();
             alo = spop_lo(); ahi = spop_hi();
             blo = spop_lo();
-            uint16_t addr = blo + 4 + s * 4;
+            uint16_t addr = blo + PJVM_OBJ_HEADER + s * 4;
             w16(addr, alo); w16((uint16_t)(addr + 2), ahi); break;
         }
 
@@ -1317,7 +1321,7 @@ static void pjvm_exec(void) {
         case OP_NEW: {
             uint16_t ci = cpread();
             uint8_t nf = ci < n_classes ? cls_nf[ci] : 0;
-            uint16_t a = heap_alloc(g_pjvm, (uint16_t)(4 + nf * 4));
+            uint16_t a = heap_alloc(g_pjvm, (uint16_t)(PJVM_OBJ_HEADER + nf * 4));
             w16(a, ci); w16((uint16_t)(a + 2), 0);
             spush(a, 0); break;
         }
@@ -1327,14 +1331,14 @@ static void pjvm_exec(void) {
             uint8_t esz = 4;
             if (atype == 4 || atype == 8) esz = 1;
             else if (atype == 5 || atype == 9) esz = 2;
-            uint16_t a = heap_alloc(g_pjvm, (uint16_t)(4 + alo * esz));
+            uint16_t a = heap_alloc(g_pjvm, (uint16_t)(PJVM_OBJ_HEADER + alo * esz));
             w16(a, alo); w16((uint16_t)(a + 2), 0);
             spush(a, 0); break;
         }
         case OP_ANEWARRAY: {
             g_pjvm->pc += 2;
             alo = spop_lo();
-            uint16_t a = heap_alloc(g_pjvm, (uint16_t)(4 + alo * 4));
+            uint16_t a = heap_alloc(g_pjvm, (uint16_t)(PJVM_OBJ_HEADER + alo * 4));
             w16(a, alo); w16((uint16_t)(a + 2), 0);
             spush(a, 0); break;
         }

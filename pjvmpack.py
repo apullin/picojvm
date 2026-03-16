@@ -19,6 +19,36 @@ import struct
 import sys
 import os
 
+# --- .pjvm format constants (must be kept in sync with pjvm.h) ---
+PJVM_MAGIC        = 0x85
+PJVM_VERSION_V3   = 0x4C
+PJVM_HDR_SIZE_V3  = 16
+PJVM_MT_ENTRY_V2  = 14      # method table entry size (v2+)
+PJVM_ET_ENTRY     = 7       # exception table entry size
+
+# region_flags (header byte 9)
+PJVM_RF_PIN_HINTS  = 0x01   # bit 0: pin hints present
+PJVM_RF_CONST_DATA = 0x04   # bit 2: const_data section present
+
+# CP resolution flags
+PJVM_CP_STR_FLAG   = 0x8000 # v3: string constant flag
+PJVM_CP_UNRESOLVED = 0xFFFF # unresolved CP entry
+
+# sentinel values
+PJVM_NO_CLASS  = 0xFF       # no parent class / no class_id
+PJVM_NO_VTABLE = 0xFF       # not a virtual method
+PJVM_NO_CLINIT = 0xFF       # no <clinit> method
+
+# JVM access flags
+ACC_STATIC = 0x0008
+ACC_NATIVE = 0x0100
+
+# const_data elem_type codes
+PJVM_ELEM_BYTE  = 0
+PJVM_ELEM_CHAR  = 1
+PJVM_ELEM_SHORT = 2
+PJVM_ELEM_INT   = 3
+
 # --- Constant pool tags ---
 CP_UTF8 = 1
 CP_INTEGER = 3
@@ -300,7 +330,8 @@ def resolve_method_name(cp, methodref_idx):
 # JVM newarray type tags
 _ATYPE = {4: 'Z', 5: 'C', 6: 'F', 7: 'D', 8: 'B', 9: 'S', 10: 'I', 11: 'J'}
 # elem_type encoding for const_data: 0=byte, 1=char, 2=short, 3=int
-_ELEM_TYPE = {'B': 0, 'C': 1, 'S': 2, 'I': 3, 'Z': 0}
+_ELEM_TYPE = {'B': PJVM_ELEM_BYTE, 'C': PJVM_ELEM_CHAR, 'S': PJVM_ELEM_SHORT,
+              'I': PJVM_ELEM_INT, 'Z': PJVM_ELEM_BYTE}
 
 
 def _extract_const_arrays(cls, cp, static_field_base_slot, verbose=False):
@@ -490,7 +521,7 @@ class ClassInfo:
         self.fields_raw = fields_raw
         self.methods_raw = methods_raw
         self.class_id = -1
-        self.parent_class_id = 0xFF
+        self.parent_class_id = PJVM_NO_CLASS
         self.static_fields = []      # field names
         self.const_fields = set()    # names of @Const static final array fields
         self.own_instance_fields = [] # (name, global_slot_index) pairs
@@ -498,7 +529,7 @@ class ClassInfo:
         self.vtable = []             # list of global method indices
         self.method_vtable_slots = {}  # (name, desc) -> vtable_slot
         self.global_methods = {}     # (name, desc) -> global method index
-        self.clinit_mi = 0xFF        # global method index of <clinit>, 0xFF if none
+        self.clinit_mi = PJVM_NO_CLINIT
 
 
 def topological_sort(classes):
@@ -542,7 +573,7 @@ def pack_pjvm(class_data_list, verbose=False, v2=False, pin_hints=None):  # v2 i
         if parent_name and parent_name in classes:
             classes[name].parent_class_id = classes[parent_name].class_id
         else:
-            classes[name].parent_class_id = 0xFF
+            classes[name].parent_class_id = PJVM_NO_CLASS
 
     if verbose:
         for name in class_order:
@@ -632,7 +663,7 @@ def pack_pjvm(class_data_list, verbose=False, v2=False, pin_hints=None):  # v2 i
             if parent in classes:
                 cls.parent_class_id = classes[parent].class_id
             else:
-                cls.parent_class_id = 0xFF
+                cls.parent_class_id = PJVM_NO_CLASS
             classes[ename] = cls
             class_order.append(ename)
             if verbose:
@@ -642,7 +673,7 @@ def pack_pjvm(class_data_list, verbose=False, v2=False, pin_hints=None):  # v2 i
     # Re-resolve parent_class_ids now that synthetic classes exist
     for name in class_order:
         cls = classes[name]
-        if cls.parent_class_id == 0xFF and cls.parent_name and cls.parent_name in classes:
+        if cls.parent_class_id == PJVM_NO_CLASS and cls.parent_name and cls.parent_name in classes:
             cls.parent_class_id = classes[cls.parent_name].class_id
 
     # --- Step 3: Build field layouts ---
@@ -657,7 +688,7 @@ def pack_pjvm(class_data_list, verbose=False, v2=False, pin_hints=None):  # v2 i
 
         for f_access, f_name_idx, f_desc_idx, f_is_const in cls.fields_raw:
             field_name = cls.cp[f_name_idx][1]
-            if f_access & 0x0008:  # ACC_STATIC
+            if f_access & ACC_STATIC:  # ACC_STATIC
                 cls.static_fields.append(field_name)
                 if f_is_const:
                     cls.const_fields.add(field_name)
@@ -698,8 +729,8 @@ def pack_pjvm(class_data_list, verbose=False, v2=False, pin_hints=None):  # v2 i
             m_name = cls.cp[m_name_idx][1]
             m_desc = cls.cp[m_desc_idx][1]
 
-            is_static = bool(m_access & 0x0008)
-            is_native = bool(m_access & 0x0100)
+            is_static = bool(m_access & ACC_STATIC)
+            is_native = bool(m_access & ACC_NATIVE)
 
             if is_native:
                 continue  # declared native (like Native.java) — skip
@@ -747,7 +778,7 @@ def pack_pjvm(class_data_list, verbose=False, v2=False, pin_hints=None):  # v2 i
                 cls.clinit_mi = global_idx
 
             # Determine vtable slot
-            vtable_slot = 0xFF  # not virtual (static or constructor)
+            vtable_slot = PJVM_NO_VTABLE
             if not is_static and m_name != "<init>":
                 key = (m_name, m_desc)
                 if key in cls.method_vtable_slots:
@@ -773,14 +804,14 @@ def pack_pjvm(class_data_list, verbose=False, v2=False, pin_hints=None):  # v2 i
                 "native_id": 0,
                 "class_id": cls.class_id,
                 "vtable_slot": vtable_slot,
-                "vmid": get_vmid(m_name, m_desc) if vtable_slot != 0xFF else 0xFF,
+                "vmid": get_vmid(m_name, m_desc) if vtable_slot != PJVM_NO_VTABLE else PJVM_NO_VTABLE,
                 "cp_base": 0,  # filled later
                 "exc_table": exc_table,
                 "line_table": line_number_table,
             })
 
             if verbose:
-                vt_str = f"vt={vtable_slot}" if vtable_slot != 0xFF else "static"
+                vt_str = f"vt={vtable_slot}" if vtable_slot != PJVM_NO_VTABLE else "static"
                 print(f"  Method #{global_idx}: {name}.{m_name}{m_desc} "
                       f"(locals={max_locals}, stack={max_stack}, args={arg_count}, "
                       f"code={len(bytecode)}B, {vt_str})")
@@ -823,9 +854,9 @@ def pack_pjvm(class_data_list, verbose=False, v2=False, pin_hints=None):  # v2 i
                     "bytecode": b"",
                     "is_native": True,
                     "native_id": NATIVE_IDS[ref_method],
-                    "class_id": 0xFF,
-                    "vtable_slot": 0xFF,
-                    "vmid": 0xFF,
+                    "class_id": PJVM_NO_CLASS,
+                    "vtable_slot": PJVM_NO_VTABLE,
+                    "vmid": PJVM_NO_VTABLE,
                     "cp_base": 0,
                     "exc_table": [],
                     "line_table": [],
@@ -848,9 +879,9 @@ def pack_pjvm(class_data_list, verbose=False, v2=False, pin_hints=None):  # v2 i
                     "bytecode": b"",
                     "is_native": True,
                     "native_id": NATIVE_OBJECT_INIT,
-                    "class_id": 0xFF,
-                    "vtable_slot": 0xFF,
-                    "vmid": 0xFF,
+                    "class_id": PJVM_NO_CLASS,
+                    "vtable_slot": PJVM_NO_VTABLE,
+                    "vmid": PJVM_NO_VTABLE,
                     "cp_base": 0,
                     "exc_table": [],
                     "line_table": [],
@@ -873,9 +904,9 @@ def pack_pjvm(class_data_list, verbose=False, v2=False, pin_hints=None):  # v2 i
                         "bytecode": b"",
                         "is_native": True,
                         "native_id": STRING_NATIVE_IDS[str_key],
-                        "class_id": 0xFF,
-                        "vtable_slot": 0xFF,
-                        "vmid": 0xFF,
+                        "class_id": PJVM_NO_CLASS,
+                        "vtable_slot": PJVM_NO_VTABLE,
+                        "vmid": PJVM_NO_VTABLE,
                         "cp_base": 0,
                         "exc_table": [],
                         "line_table": [],
@@ -907,8 +938,8 @@ def pack_pjvm(class_data_list, verbose=False, v2=False, pin_hints=None):  # v2 i
                 "bytecode": b"",
                 "is_native": False,
                 "native_id": 0,
-                "class_id": 0xFF,
-                "vtable_slot": 0xFF,
+                "class_id": PJVM_NO_CLASS,
+                "vtable_slot": PJVM_NO_VTABLE,
                 "vmid": get_vmid(ref_method, ref_desc),
                 "cp_base": 0,
                 "exc_table": [],
@@ -942,7 +973,7 @@ def pack_pjvm(class_data_list, verbose=False, v2=False, pin_hints=None):  # v2 i
         cp_base = len(global_cp_resolve) * 2  # byte offset (2 bytes per entry)
         cp_bases[name] = cp_base
 
-        cp_resolve = [0xFFFF] * len(cp)
+        cp_resolve = [PJVM_CP_UNRESOLVED] * len(cp)
 
         # Resolve Methodrefs
         for cp_idx in range(1, len(cp)):
@@ -1048,7 +1079,7 @@ def pack_pjvm(class_data_list, verbose=False, v2=False, pin_hints=None):  # v2 i
                 sc_idx = len(global_string_constants)
                 global_string_constants.append(utf8_text.encode("utf-8"))
                 string_constant_dedup[utf8_text] = sc_idx
-            cp_resolve[cp_idx] = 0x8000 | sc_idx
+            cp_resolve[cp_idx] = PJVM_CP_STR_FLAG | sc_idx
 
         # Resolve Class refs → class_id (for 'new' and 'anewarray')
         for cp_idx in range(1, len(cp)):
@@ -1064,7 +1095,7 @@ def pack_pjvm(class_data_list, verbose=False, v2=False, pin_hints=None):  # v2 i
     # Set cp_base on all method entries
     for mt in method_table:
         cid = mt["class_id"]
-        if cid != 0xFF:
+        if cid != PJVM_NO_CLASS:
             for cname in class_order:
                 if classes[cname].class_id == cid:
                     mt["cp_base"] = cp_bases[cname]
@@ -1077,13 +1108,13 @@ def pack_pjvm(class_data_list, verbose=False, v2=False, pin_hints=None):  # v2 i
         mt["exc_count"] = len(mt["exc_table"])
         for (e_start, e_end, e_handler, e_catch_cp) in mt["exc_table"]:
             if e_catch_cp == 0:
-                catch_cid = 0xFF  # catch-all (finally)
+                catch_cid = PJVM_NO_CLASS  # catch-all (finally)
             else:
                 # Resolve CP index to class name, then to class_id
                 cid = mt.get("class_id", 0xFF)
-                catch_cid = 0xFF
+                catch_cid = PJVM_NO_CLASS
                 # Find the class whose CP owns this method
-                if cid != 0xFF:
+                if cid != PJVM_NO_CLASS:
                     for cname in class_order:
                         if classes[cname].class_id == cid:
                             cp = classes[cname].cp
@@ -1099,7 +1130,7 @@ def pack_pjvm(class_data_list, verbose=False, v2=False, pin_hints=None):  # v2 i
     if verbose and global_exc_table:
         print(f"  Exception table: {len(global_exc_table)} entries")
         for i, (s, e, h, ct) in enumerate(global_exc_table):
-            ct_str = "catch-all" if ct == 0xFF else f"class#{ct}"
+            ct_str = "catch-all" if ct == PJVM_NO_CLASS else f"class#{ct}"
             print(f"    [{i}] start={s} end={e} handler={h} {ct_str}")
 
     # --- Step 7c: Extract @Const arrays from <clinit> ---
@@ -1141,15 +1172,15 @@ def pack_pjvm(class_data_list, verbose=False, v2=False, pin_hints=None):  # v2 i
     out = bytearray()
 
     # v3 Header (16 bytes): 16-bit CP entries, 16-bit n_static_fields
-    hdr_size = 16
-    mt_entry_size = 14
+    hdr_size = PJVM_HDR_SIZE_V3
+    mt_entry_size = PJVM_MT_ENTRY_V2
     region_flags = 0
     if pin_hints:
-        region_flags |= 0x02  # bit 1: pin hints present
+        region_flags |= PJVM_RF_PIN_HINTS
     if const_arrays:
-        region_flags |= 0x04  # bit 2: const_data present
-    out.append(0x85)           # [0] magic
-    out.append(0x4C)           # [1] v3
+        region_flags |= PJVM_RF_CONST_DATA
+    out.append(PJVM_MAGIC)     # [0] magic
+    out.append(PJVM_VERSION_V3)  # [1] v3
     out.append(len(method_table))  # [2]
     out.append(main_index)     # [3]
     out.extend(struct.pack("<H", total_static_fields))  # [4..5] 16-bit
@@ -1182,7 +1213,7 @@ def pack_pjvm(class_data_list, verbose=False, v2=False, pin_hints=None):  # v2 i
         out.extend(struct.pack("<I", mt["code_offset"]))  # 32-bit
         out.extend(struct.pack("<H", mt["cp_base"]))
         out.append(mt["vtable_slot"])
-        out.append(mt.get("vmid", 0xFF))
+        out.append(mt.get("vmid", PJVM_NO_VTABLE))
         out.append(mt["exc_count"])
         out.append(mt["exc_offset_idx"])
 
@@ -1325,7 +1356,7 @@ def emit_map(class_order, method_table):
         out.extend(encoded)
 
     for mt in method_table:
-        cid = mt["class_id"] if mt["class_id"] != 0xFF else 0xFF
+        cid = mt["class_id"] if mt["class_id"] != PJVM_NO_CLASS else PJVM_NO_CLASS
         out.append(cid)
         encoded = mt["name"].encode("utf-8")
         out.append(len(encoded))

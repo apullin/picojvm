@@ -34,6 +34,44 @@
 
 #define PJVM_PC_HALT 0xFFFFFFFFu
 
+/* --- .pjvm binary format constants ----------------------------------- */
+#define PJVM_MAGIC        0x85
+#define PJVM_VERSION_V1   0x4A
+#define PJVM_VERSION_V2   0x4B
+#define PJVM_VERSION_V3   0x4C
+
+#define PJVM_HDR_SIZE_V1  10
+#define PJVM_HDR_SIZE_V2  14
+#define PJVM_HDR_SIZE_V3  16
+
+#define PJVM_MT_ENTRY_V1  12   /* method table entry size (v1) */
+#define PJVM_MT_ENTRY_V2  14   /* method table entry size (v2+) */
+#define PJVM_ET_ENTRY     7    /* exception table entry size */
+
+/* region_flags (header byte 9 in v3) */
+#define PJVM_RF_PIN_HINTS  0x01   /* bit 0: pin hints present */
+#define PJVM_RF_CONST_DATA 0x04   /* bit 2: const_data section present */
+
+/* CP resolution string flag / mask */
+#define PJVM_CP_STR_FLAG_8   0x80     /* v1/v2: 8-bit CP string flag */
+#define PJVM_CP_STR_MASK_8   0x7F
+#define PJVM_CP_STR_FLAG_16  0x8000   /* v3: 16-bit CP string flag */
+#define PJVM_CP_STR_MASK_16  0x7FFF
+
+/* sentinel values */
+#define PJVM_NO_CLASS     0xFF   /* parent_class_id / class_id = none */
+#define PJVM_NO_VTABLE    0xFF   /* vtable_slot = not virtual */
+#define PJVM_NO_CLINIT    0xFF   /* clinit_mi = no <clinit> */
+
+/* const_data elem_type codes */
+#define PJVM_ELEM_BYTE    0
+#define PJVM_ELEM_CHAR    1
+#define PJVM_ELEM_SHORT   2
+#define PJVM_ELEM_INT     3
+
+/* object/array memory layout */
+#define PJVM_OBJ_HEADER   4     /* bytes before element data in arrays */
+
 /* --- per-execution context -------------------------------------------- */
 typedef struct {
     uint32_t pc;

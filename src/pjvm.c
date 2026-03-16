@@ -118,6 +118,8 @@ static uint8_t prog_fetch(uint32_t offset);
 #define PROG(off) pjvm_prog[(off)]
 #endif
 #define BC(a) PROG(bc_off + (a))
+#define PROG16(off) ((uint16_t)PROG(off) | ((uint16_t)PROG((off) + 1) << 8))
+#define ROM_OFF(hi, lo) (((uint32_t)((hi) - 1) << 16) | (lo))
 
 /* --- paged mode implementation ---------------------------------------- */
 #ifdef PJVM_PAGED
@@ -255,7 +257,7 @@ NI static uint16_t cpread(void) {
     g_pjvm->pc += 2;
     if (cp16) {
         uint32_t off = cpr_off + (uint32_t)g_pjvm->cur_cb + (uint32_t)idx * 2;
-        return (uint16_t)PROG(off) | ((uint16_t)PROG(off + 1) << 8);
+        return PROG16(off);
     }
     return PROG(cpr_off + g_pjvm->cur_cb + idx);
 }
@@ -301,13 +303,12 @@ void pjvm_parse(uint8_t *data) {
     uint8_t *p;
     if (version >= PJVM_VERSION_V3) {
         /* v3: 16-bit n_static_fields, 16-bit CP entries */
-        n_static_fields = (uint16_t)data[4] | ((uint16_t)data[5] << 8);
+        n_static_fields = RD16LE(data + 4);
         n_int_constants = data[6];
         n_classes = data[7];
         n_string_constants = data[8];
         region_flags = data[9];
-        bytecodes_size = (uint32_t)data[10] | ((uint32_t)data[11] << 8)
-                       | ((uint32_t)data[12] << 16) | ((uint32_t)data[13] << 24);
+        bytecodes_size = RD32LE(data + 10);
         cp16 = 1;
         cp_str_flag = PJVM_CP_STR_FLAG_16;
         cp_str_mask = PJVM_CP_STR_MASK_16;
@@ -321,11 +322,10 @@ void pjvm_parse(uint8_t *data) {
         cp_str_flag = PJVM_CP_STR_FLAG_8;
         cp_str_mask = PJVM_CP_STR_MASK_8;
         if (version == PJVM_VERSION_V2) {
-            bytecodes_size = (uint32_t)data[8] | ((uint32_t)data[9] << 8)
-                           | ((uint32_t)data[10] << 16) | ((uint32_t)data[11] << 24);
+            bytecodes_size = RD32LE(data + 8);
             p = data + PJVM_HDR_SIZE_V2;
         } else {
-            bytecodes_size = (uint32_t)((uint16_t)data[8] | ((uint16_t)data[9] << 8));
+            bytecodes_size = (uint32_t)RD16LE(data + 8);
             p = data + PJVM_HDR_SIZE_V1;
         }
     }
@@ -345,26 +345,25 @@ void pjvm_parse(uint8_t *data) {
     for (uint8_t i = 0; i < n_methods; i++) {
         m_ml[i] = p[0]; m_ac[i] = p[2]; m_fl[i] = p[3];
         if (version >= PJVM_VERSION_V2) {
-            m_co[i] = (uint32_t)((uint32_t)p[4] | ((uint32_t)p[5] << 8)
-                     | ((uint32_t)p[6] << 16) | ((uint32_t)p[7] << 24));
-            m_cb[i] = (uint16_t)p[8] | ((uint16_t)p[9] << 8);
+            m_co[i] = RD32LE(p + 4);
+            m_cb[i] = RD16LE(p + 8);
             m_vs[i] = p[10]; m_vmid[i] = p[11];
             m_ec[i] = p[12]; m_eo[i] = p[13]; p += PJVM_MT_ENTRY_V2;
         } else {
-            m_co[i] = (uint32_t)((uint16_t)p[4] | ((uint16_t)p[5] << 8));
-            m_cb[i] = (uint16_t)p[6] | ((uint16_t)p[7] << 8);
+            m_co[i] = (uint32_t)RD16LE(p + 4);
+            m_cb[i] = RD16LE(p + 6);
             m_vs[i] = p[8]; m_vmid[i] = p[9];
             m_ec[i] = p[10]; m_eo[i] = p[11]; p += PJVM_MT_ENTRY_V1;
         }
     }
 
-    uint16_t cpc = (uint16_t)p[0] | ((uint16_t)p[1] << 8);
+    uint16_t cpc = RD16LE(p);
     p += 2;
     cpr_off = (uint32_t)(p - data); p += cpc;
     ic_off  = (uint32_t)(p - data); p += (uint16_t)n_int_constants * 4;
     sc_off  = (uint32_t)(p - data);
     for (uint8_t i = 0; i < n_string_constants; i++) {
-        uint16_t slen = (uint16_t)p[0] | ((uint16_t)p[1] << 8);
+        uint16_t slen = RD16LE(p);
         p += 2 + slen;
     }
     bc_off = (uint32_t)(p - data); p += bytecodes_size;
@@ -663,9 +662,9 @@ static void pjvm_throw(uint16_t exc_ref, uint32_t throw_pc) {
 
         for (uint8_t i = 0; i < count; i++) {
             uint32_t eoff = et_off + (uint16_t)(base + i) * 7;
-            uint16_t e_start = (uint16_t)PROG(eoff) | ((uint16_t)PROG(eoff + 1) << 8);
-            uint16_t e_end   = (uint16_t)PROG(eoff + 2) | ((uint16_t)PROG(eoff + 3) << 8);
-            uint16_t e_handler = (uint16_t)PROG(eoff + 4) | ((uint16_t)PROG(eoff + 5) << 8);
+            uint16_t e_start = PROG16(eoff);
+            uint16_t e_end   = PROG16(eoff + 2);
+            uint16_t e_handler = PROG16(eoff + 4);
             uint8_t  e_catch  = PROG(eoff + 6);
 
             if (rel_pc >= e_start && rel_pc < e_end) {
@@ -726,7 +725,7 @@ void pjvm_run(PJVMCtx *j) {
     {
         uint32_t soff = sc_off;
         for (uint8_t i = 0; i < n_string_constants; i++) {
-            uint16_t slen = (uint16_t)PROG(soff) | ((uint16_t)PROG(soff + 1) << 8);
+            uint16_t slen = PROG16(soff);
             soff += 2;
             uint16_t a = heap_alloc(j, (uint16_t)(PJVM_OBJ_HEADER + slen));
             w16(a, slen); w16((uint16_t)(a + 2), 0);
@@ -739,11 +738,11 @@ void pjvm_run(PJVMCtx *j) {
     /* Pre-initialize static fields from const_data init table (ROM refs) */
     if (cd_off) {
         uint32_t p_cd = cd_off;
-        uint16_t n_ca = (uint16_t)PROG(p_cd) | ((uint16_t)PROG(p_cd + 1) << 8);
+        uint16_t n_ca = PROG16(p_cd);
         p_cd += 2;
         /* Skip past array entries to reach init table */
         for (uint16_t i = 0; i < n_ca; i++) {
-            uint16_t ne = (uint16_t)PROG(p_cd) | ((uint16_t)PROG(p_cd + 1) << 8);
+            uint16_t ne = PROG16(p_cd);
             uint8_t et = PROG(p_cd + 2);
             p_cd += 4; /* skip 4-byte header */
             uint16_t dsz = ne;
@@ -752,12 +751,12 @@ void pjvm_run(PJVMCtx *j) {
             p_cd += dsz;
         }
         /* Read init table: n_init entries of (slot:2, lo:2, hi:2) */
-        uint16_t n_init = (uint16_t)PROG(p_cd) | ((uint16_t)PROG(p_cd + 1) << 8);
+        uint16_t n_init = PROG16(p_cd);
         p_cd += 2;
         for (uint16_t i = 0; i < n_init; i++) {
-            uint16_t slot = (uint16_t)PROG(p_cd) | ((uint16_t)PROG(p_cd + 1) << 8);
-            uint16_t lo   = (uint16_t)PROG(p_cd + 2) | ((uint16_t)PROG(p_cd + 3) << 8);
-            uint16_t hi   = (uint16_t)PROG(p_cd + 4) | ((uint16_t)PROG(p_cd + 5) << 8);
+            uint16_t slot = PROG16(p_cd);
+            uint16_t lo   = PROG16(p_cd + 2);
+            uint16_t hi   = PROG16(p_cd + 4);
             j->sf_lo[slot] = lo;
             j->sf_hi[slot] = hi;
             p_cd += 6;
@@ -846,7 +845,7 @@ static void pjvm_exec(void) {
             uint8_t raw = bcread();
             if (cp16) {
                 uint32_t off = cpr_off + (uint32_t)g_pjvm->cur_cb + (uint32_t)raw * 2;
-                ci = (uint16_t)PROG(off) | ((uint16_t)PROG(off + 1) << 8);
+                ci = PROG16(off);
             } else {
                 ci = PROG(cpr_off + g_pjvm->cur_cb + raw);
             }
@@ -854,8 +853,7 @@ static void pjvm_exec(void) {
                 spush(str_refs[ci & cp_str_mask], 0);
             } else {
                 uint32_t base = ic_off + (uint32_t)ci * 4;
-                spush((uint16_t)PROG(base) | ((uint16_t)PROG(base + 1) << 8),
-                      (uint16_t)PROG(base + 2) | ((uint16_t)PROG(base + 3) << 8));
+                spush(PROG16(base), PROG16(base + 2));
             }
             break;
         }
@@ -865,8 +863,7 @@ static void pjvm_exec(void) {
                 spush(str_refs[ci & cp_str_mask], 0);
             } else {
                 uint32_t base = ic_off + (uint32_t)ci * 4;
-                spush((uint16_t)PROG(base) | ((uint16_t)PROG(base + 1) << 8),
-                      (uint16_t)PROG(base + 2) | ((uint16_t)PROG(base + 3) << 8));
+                spush(PROG16(base), PROG16(base + 2));
             }
             break;
         }
@@ -882,11 +879,8 @@ static void pjvm_exec(void) {
             blo = spop_lo(); bhi = spop_hi();
             if (bhi) {
                 /* ROM array: decode 32-bit offset, read via PROG() */
-                uint32_t off = ((uint32_t)(bhi - 1) << 16) | blo;
-                off += PJVM_OBJ_HEADER + (uint32_t)alo * 4;
-                uint16_t vlo = (uint16_t)PROG(off) | ((uint16_t)PROG(off + 1) << 8);
-                uint16_t vhi = (uint16_t)PROG(off + 2) | ((uint16_t)PROG(off + 3) << 8);
-                spush(vlo, vhi);
+                uint32_t off = ROM_OFF(bhi, blo) + PJVM_OBJ_HEADER + (uint32_t)alo * 4;
+                spush(PROG16(off), PROG16(off + 2));
             } else {
                 uint16_t addr = blo + PJVM_OBJ_HEADER + alo * 4;
                 spush(r16(addr), r16((uint16_t)(addr + 2)));
@@ -897,8 +891,7 @@ static void pjvm_exec(void) {
             alo = spop_lo();
             blo = spop_lo(); bhi = spop_hi();
             if (bhi) {
-                uint32_t off = ((uint32_t)(bhi - 1) << 16) | blo;
-                int8_t bv = (int8_t)PROG(off + PJVM_OBJ_HEADER + alo);
+                int8_t bv = (int8_t)PROG(ROM_OFF(bhi, blo) + PJVM_OBJ_HEADER + alo);
                 spush((uint16_t)(int16_t)bv, bv < 0 ? 0xFFFF : 0);
             } else {
                 int8_t bv = (int8_t)r8(blo + PJVM_OBJ_HEADER + alo);
@@ -910,9 +903,8 @@ static void pjvm_exec(void) {
             alo = spop_lo();
             blo = spop_lo(); bhi = spop_hi();
             if (bhi) {
-                uint32_t off = ((uint32_t)(bhi - 1) << 16) | blo;
-                off += PJVM_OBJ_HEADER + (uint32_t)alo * 2;
-                spush((uint16_t)PROG(off) | ((uint16_t)PROG(off + 1) << 8), 0);
+                uint32_t off = ROM_OFF(bhi, blo) + PJVM_OBJ_HEADER + (uint32_t)alo * 2;
+                spush(PROG16(off), 0);
             } else {
                 spush(r16(blo + PJVM_OBJ_HEADER + alo * 2), 0);
             }
@@ -922,9 +914,8 @@ static void pjvm_exec(void) {
             alo = spop_lo();
             blo = spop_lo(); bhi = spop_hi();
             if (bhi) {
-                uint32_t off = ((uint32_t)(bhi - 1) << 16) | blo;
-                off += PJVM_OBJ_HEADER + (uint32_t)alo * 2;
-                uint16_t sv = (uint16_t)PROG(off) | ((uint16_t)PROG(off + 1) << 8);
+                uint32_t off = ROM_OFF(bhi, blo) + PJVM_OBJ_HEADER + (uint32_t)alo * 2;
+                uint16_t sv = PROG16(off);
                 spush(sv, (int16_t)sv < 0 ? 0xFFFF : 0);
             } else {
                 uint16_t sv = r16(blo + PJVM_OBJ_HEADER + alo * 2);
@@ -1345,8 +1336,7 @@ static void pjvm_exec(void) {
         case OP_ARRAYLENGTH:
             alo = spop_lo(); ahi = spop_hi();
             if (ahi) {
-                uint32_t off = ((uint32_t)(ahi - 1) << 16) | alo;
-                spush((uint16_t)PROG(off) | ((uint16_t)PROG(off + 1) << 8), 0);
+                spush(PROG16(ROM_OFF(ahi, alo)), 0);
             } else {
                 spush(r16(alo), r16((uint16_t)(alo + 2)));
             }

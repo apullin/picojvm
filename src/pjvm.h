@@ -9,6 +9,11 @@
 
 #include <stdint.h>
 
+/* --- little-endian read helpers --------------------------------------- */
+#define RD16LE(p) ((uint16_t)(p)[0] | ((uint16_t)(p)[1] << 8))
+#define RD32LE(p) ((uint32_t)(p)[0] | ((uint32_t)(p)[1] << 8) \
+                 | ((uint32_t)(p)[2] << 16) | ((uint32_t)(p)[3] << 24))
+
 /* --- capacity defaults (override with -D flags) ----------------------- */
 #ifndef PJVM_METHOD_CAP
 #define PJVM_METHOD_CAP 256

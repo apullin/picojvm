@@ -127,15 +127,47 @@ public class Stmt {
 
 	// ==================== CONTROL FLOW ====================
 
+	// Parse a condition and branch directly when the tail is a materialized cmpBool.
+	static void pCondBr(int lbl, boolean onTrue) {
+		int savedDepth = C.stkDepth;
+		Expr.pExpr();
+		if (C.mcLen >= 8 && C.patC >= 2) {
+			int start = C.mcLen - 8;
+			int op = C.mcode[start] & 0xFF;
+			int br = op;
+			int p0 = C.patC - 2;
+			if (!onTrue) {
+				if (op == E.IFEQ) br = E.IFNE;
+				else if (op == E.IFNE) br = E.IFEQ;
+				else if (op >= 0x9F && op <= 0xA6) br = ((op & 1) == 1) ? op + 1 : op - 1;
+				else br = -1;
+			}
+			if (br >= 0 &&
+				(C.mcode[start + 1] & 0xFF) == 0 && (C.mcode[start + 2] & 0xFF) == 0 &&
+				(C.mcode[start + 3] & 0xFF) == E.ICONST_0 &&
+				(C.mcode[start + 4] & 0xFF) == E.GOTO &&
+				(C.mcode[start + 5] & 0xFF) == 0 && (C.mcode[start + 6] & 0xFF) == 0 &&
+				(C.mcode[start + 7] & 0xFF) == E.ICONST_1 &&
+				(C.patLoc[p0] & 0xFFFF) == start + 1 &&
+				(C.patLoc[p0 + 1] & 0xFFFF) == start + 5) {
+				C.mcode[start] = (byte)br;
+				C.patLbl[p0] = (short)lbl;
+				C.patC--;
+				C.mcLen = start + 3;
+				C.stkDepth = savedDepth;
+				return;
+			}
+		}
+		E.pop();
+		E.eBr(onTrue ? E.IFNE : E.IFEQ, lbl);
+	}
+
 	static void pIf() {
 		Lexer.nextToken(); // skip 'if'
 		Lexer.expect(Tk.LPAREN);
-		Expr.pExpr();
-		Lexer.expect(Tk.RPAREN);
-		E.pop();
-
 		int lblElse = E.label();
-		E.eBr(E.IFEQ, lblElse); // IFEQ → else
+		pCondBr(lblElse, false);
+		Lexer.expect(Tk.RPAREN);
 
 		pStmt();
 
@@ -159,10 +191,8 @@ public class Stmt {
 		E.mark(lblTop);
 
 		Lexer.expect(Tk.LPAREN);
-		Expr.pExpr();
+		pCondBr(lblEnd, false);
 		Lexer.expect(Tk.RPAREN);
-		E.pop();
-		E.eBr(E.IFEQ, lblEnd); // IFEQ → end
 
 		E.pushLp(lblEnd, lblCont);
 		pStmt();
@@ -186,10 +216,8 @@ public class Stmt {
 		Lexer.expect(Tk.WHILE);
 		E.mark(lblCont);
 		Lexer.expect(Tk.LPAREN);
-		Expr.pExpr();
+		pCondBr(lblTop, true);
 		Lexer.expect(Tk.RPAREN);
-		E.pop();
-		E.eBr(E.IFNE, lblTop); // IFNE → top
 		E.mark(lblEnd);
 		Lexer.expect(Tk.SEMI);
 	}
@@ -260,9 +288,7 @@ public class Stmt {
 		E.mark(lblCond);
 		boolean hasUpdate = false;
 		if (Tk.type != Tk.SEMI) {
-			Expr.pExpr();
-			E.pop();
-			E.eBr(E.IFEQ, lblEnd); // IFEQ → end
+			pCondBr(lblEnd, false);
 		}
 		Lexer.expect(Tk.SEMI);
 

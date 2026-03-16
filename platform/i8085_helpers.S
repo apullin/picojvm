@@ -180,51 +180,7 @@ bread:
     MOV C, M                        ; C = bc[pc+1] (low byte)
     RET
 
-/* ====================================================================== */
-/*  cpread(void) → uint8_t in A                                          */
-/*  Reads 2-byte CP index, resolves through cpr[cur_cb + index].         */
-/* ====================================================================== */
-    .globl  cpread
-    .type   cpread, @function
-cpread:
-    /* Read 2-byte big-endian index and advance pc by 2 */
-    LHLD g_pjvm
-    LXI D, OFF_PC
-    DAD D                           ; HL = &pc
-    MOV E, M
-    INX H
-    MOV D, M                        ; DE = pc
-    INX D
-    INX D                           ; DE = pc+2
-    MOV M, D
-    DCX H
-    MOV M, E                        ; store pc+2
-    DCX D
-    DCX D                           ; DE = old pc
-    LHLD (bc)
-    DAD D                           ; HL = &bc[pc]
-    MOV D, M                        ; D = high byte
-    INX H
-    MOV E, M                        ; E = low byte
-    /* DE = CP index (big-endian → native 16-bit) */
-
-    /* Add cur_cb */
-    LHLD g_pjvm
-    PUSH D                          ; save CP index
-    LXI D, OFF_CUR_CB
-    DAD D                           ; HL = &cur_cb
-    MOV E, M
-    INX H
-    MOV D, M                        ; DE = cur_cb
-    POP H                           ; HL = CP index
-    DAD D                           ; HL = cur_cb + CP_index
-    XCHG                            ; DE = cur_cb + CP_index
-
-    /* cpr[cur_cb + index] */
-    LHLD cpr
-    DAD D                           ; HL = &cpr[cur_cb + index]
-    MOV A, M                        ; A = resolved value
-    RET
+/* cpread is now always compiled in C (v3 cp16 branching needed) */
 
 /* ====================================================================== */
 /*  lload(uint8_t slot) — load local onto operand stack                   */

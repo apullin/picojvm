@@ -201,7 +201,7 @@ extern void     lload(uint8_t slot);
 extern void     lstore(uint8_t slot);
 extern uint8_t  bcread(void);
 extern int16_t  bread(void);
-extern uint8_t  cpread(void);
+/* cpread is NOT in ASM — v3 format needs cp16 branching (see below) */
 /* Native handler ASM implementations */
 extern void     pjvm_native_arraycopy(void);
 extern void     pjvm_native_memcmp(void);
@@ -246,6 +246,9 @@ NI static int16_t bread(void) {
     return o;
 }
 
+#endif /* !PJVM_ASM_HELPERS */
+
+/* cpread always in C — v3 format needs cp16 branching that ASM doesn't handle */
 NI static uint16_t cpread(void) {
     uint16_t idx = (BC(g_pjvm->pc) << 8) | BC(g_pjvm->pc + 1);
     g_pjvm->pc += 2;
@@ -255,7 +258,6 @@ NI static uint16_t cpread(void) {
     }
     return PROG(cpr_off + g_pjvm->cur_cb + idx);
 }
-#endif
 
 static int32_t pjvm_to32(uint16_t lo, uint16_t hi) {
     return (int32_t)((uint32_t)lo | ((uint32_t)hi << 16));

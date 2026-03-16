@@ -76,62 +76,74 @@ void pjvm_platform_trap(uint8_t op, uint16_t pc) {
     __asm__ volatile("hlt");
 }
 
-/* --- File I/O via disk emulator ports (0xF0-0xF3) -------------------- */
-static inline void io_out(uint8_t port, uint8_t val) {
-    __asm__ volatile("out %0" : : "iN"(port), "a"(val));
-}
+/* --- Port I/O macros ------------------------------------------------- */
+/* 8085 IN/OUT require immediate port — use "r" constraint + MOV A,reg.
+ * Port arg must be a compile-time constant (stringified into the asm). */
+#define _IO_OUT(port, val) do { \
+    uint8_t _v = (val); \
+    __asm__ volatile("mov a,%0\n\tout " #port : : "r"(_v) : "a"); \
+} while(0)
+#define IO_OUT(port, val) _IO_OUT(port, val)
 
-static inline uint8_t io_in(uint8_t port) {
-    uint8_t val;
-    __asm__ volatile("in %1" : "=a"(val) : "iN"(port));
-    return val;
-}
+#define _IO_IN(port) ({ \
+    uint8_t _v; \
+    __asm__ volatile("in " #port "\n\tmov %0,a" : "=r"(_v) : : "a"); \
+    _v; \
+})
+#define IO_IN(port) _IO_IN(port)
+
+/* --- Disk emulator port definitions ---------------------------------- */
+#define DISK_CMD   0xF0    /* command / status */
+#define DISK_DATA  0xF1    /* data / param byte */
+#define DISK_ADRL  0xF2    /* buffer address low */
+#define DISK_ADRH  0xF3    /* buffer address high */
+#define DISK_OPEN_READ  1
+#define DISK_OPEN_WRITE 2
+#define DISK_READ_BYTE  3
+#define DISK_WRITE_BYTE 4
+#define DISK_CLOSE      5
+#define DISK_DELETE      6
+#define DISK_FNAME_BUF  0x6F00
 
 int32_t pjvm_platform_file_open(const uint8_t *name, uint8_t nameLen, uint8_t mode) {
-    /* Copy filename into a known memory location for disk emu */
-    uint8_t *fname_buf = (uint8_t *)(uintptr_t)0x6F00;
+    uint8_t *fname_buf = (uint8_t *)(uintptr_t)DISK_FNAME_BUF;
     for (uint8_t i = 0; i < nameLen; i++)
         fname_buf[i] = name[i];
-    /* Set address to filename buffer */
-    io_out(0xF2, 0x00);  /* addr lo = 0x00 */
-    io_out(0xF3, 0x6F);  /* addr hi = 0x6F → 0x6F00 */
-    /* Set filename length */
-    io_out(0xF1, nameLen);
-    /* Issue OPEN command */
-    io_out(0xF0, mode);   /* 1=OPEN_READ, 2=OPEN_WRITE */
-    /* Check status */
-    uint8_t status = io_in(0xF0);
+    IO_OUT(DISK_ADRL, 0x00);           /* addr lo = 0x00 */
+    IO_OUT(DISK_ADRH, 0x6F);           /* addr hi = 0x6F → 0x6F00 */
+    IO_OUT(DISK_DATA, nameLen);
+    IO_OUT(DISK_CMD, mode);            /* 1=OPEN_READ, 2=OPEN_WRITE */
+    uint8_t status = IO_IN(DISK_CMD);
     return status == 0 ? 0 : -1;
 }
 
 int32_t pjvm_platform_file_read_byte(void) {
-    /* Issue READ_BYTE command */
-    io_out(0xF0, 0x03);
-    uint8_t status = io_in(0xF0);
-    if (status == 0x01) return -1;  /* EOF */
-    if (status != 0x00) return -1;  /* error */
-    return (int32_t)(uint8_t)io_in(0xF1);
+    IO_OUT(DISK_CMD, DISK_READ_BYTE);
+    uint8_t status = IO_IN(DISK_CMD);
+    if (status == 0x01) return -1;     /* EOF */
+    if (status != 0x00) return -1;     /* error */
+    return (int32_t)(uint8_t)IO_IN(DISK_DATA);
 }
 
 void pjvm_platform_file_write_byte(uint8_t b) {
-    io_out(0xF1, b);       /* set data byte */
-    io_out(0xF0, 0x04);    /* WRITE_BYTE command */
+    IO_OUT(DISK_DATA, b);
+    IO_OUT(DISK_CMD, DISK_WRITE_BYTE);
 }
 
 void pjvm_platform_file_close(uint8_t mode) {
-    io_out(0xF1, mode);    /* 0=both, 1=read, 2=write */
-    io_out(0xF0, 0x05);    /* CLOSE command */
+    IO_OUT(DISK_DATA, mode);           /* 0=both, 1=read, 2=write */
+    IO_OUT(DISK_CMD, DISK_CLOSE);
 }
 
 int32_t pjvm_platform_file_delete(const uint8_t *name, uint8_t nameLen) {
-    uint8_t *fname_buf = (uint8_t *)(uintptr_t)0x6F00;
+    uint8_t *fname_buf = (uint8_t *)(uintptr_t)DISK_FNAME_BUF;
     for (uint8_t i = 0; i < nameLen; i++)
         fname_buf[i] = name[i];
-    io_out(0xF2, 0x00);  /* addr lo */
-    io_out(0xF3, 0x6F);  /* addr hi → 0x6F00 */
-    io_out(0xF1, nameLen);
-    io_out(0xF0, 0x06);  /* DELETE command */
-    uint8_t status = io_in(0xF0);
+    IO_OUT(DISK_ADRL, 0x00);
+    IO_OUT(DISK_ADRH, 0x6F);           /* addr hi → 0x6F00 */
+    IO_OUT(DISK_DATA, nameLen);
+    IO_OUT(DISK_CMD, DISK_DELETE);
+    uint8_t status = IO_IN(DISK_CMD);
     return status == 0 ? 0 : -1;
 }
 

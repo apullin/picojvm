@@ -184,7 +184,7 @@ $(BUILDDIR)/i8085_sim.o: platform/i8085_sim.c src/pjvm.h | $(BUILDDIR)
 	$(CLANG) --target=i8085-unknown-elf -ffreestanding -fno-builtin -$(TARGET_OPT) $(SIM_CAPS) -DPJVM_ASM_HELPERS -c $< -o $@
 
 $(BUILDDIR)/i8085_helpers.o: platform/i8085_helpers.S | $(BUILDDIR)
-	$(CLANG) --target=i8085-unknown-elf -c $< -o $@
+	$(CLANG) --target=i8085-unknown-elf -DPJVM_ASM_HELPERS -c $< -o $@
 
 $(BUILDDIR)/pjvm_data.o: $(BUILDDIR)/pjvm_data.c | $(BUILDDIR)
 	$(CLANG) --target=i8085-unknown-elf -ffreestanding -fno-builtin -$(TARGET_OPT) -c $< -o $@

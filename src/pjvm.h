@@ -8,6 +8,7 @@
 #define PJVM_H
 
 #include <stdint.h>
+#include "pjvm_opts.h"
 
 /* --- little-endian read helpers --------------------------------------- */
 #define RD16LE(p) ((uint16_t)(p)[0] | ((uint16_t)(p)[1] << 8))
@@ -146,6 +147,7 @@ extern PJVMCtx *g_pjvm;
 /* 8085 ASM helpers need direct pointers (non-paged target only) */
 extern uint8_t *cpr;
 extern uint8_t *bc;
+extern uint8_t *sc;
 #endif
 
 /* --- core API (implemented in core.c) --------------------------------- */

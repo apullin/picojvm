@@ -91,6 +91,7 @@ PJVMCtx *g_pjvm;
 #ifdef PJVM_ASM_HELPERS
 uint8_t *cpr;
 uint8_t *bc;
+uint8_t *sc;
 #endif
 
 /* --- internal globals (file-scope) ------------------------------------ */
@@ -200,7 +201,18 @@ extern void     lload(uint8_t slot);
 extern void     lstore(uint8_t slot);
 extern uint8_t  bcread(void);
 extern int16_t  bread(void);
+#if PJVM_USE_ASM_CPREAD
 extern uint16_t cpread(void);
+#endif
+#if PJVM_USE_ASM_ROM_STRING_DATA
+extern uint32_t pjvm_rom_string_data(uint16_t idx, uint16_t *len_out);
+#endif
+#if PJVM_USE_ASM_STRING_LEN
+extern uint16_t pjvm_string_len(uint16_t lo, uint16_t hi);
+#endif
+#if PJVM_USE_ASM_STRING_BYTE
+extern uint8_t  pjvm_string_byte(uint16_t lo, uint16_t hi, uint16_t idx);
+#endif
 /* Native handler ASM implementations */
 extern void     pjvm_native_arraycopy(void);
 extern void     pjvm_native_memcmp(void);
@@ -257,7 +269,7 @@ NI static uint16_t cpread(void) {
 }
 #endif
 
-#ifndef PJVM_ASM_HELPERS
+#if !PJVM_USE_ASM_CPREAD
 NI static uint16_t cpread(void) {
     uint16_t idx = (BC(g_pjvm->pc) << 8) | BC(g_pjvm->pc + 1);
     g_pjvm->pc += 2;
@@ -287,6 +299,7 @@ static uint8_t pjvm_is_rom_string(uint16_t hi) {
     return hi == PJVM_REF_ROM_STRING;
 }
 
+#if !PJVM_USE_ASM_ROM_STRING_DATA
 static uint32_t pjvm_rom_string_data(uint16_t idx, uint16_t *len_out) {
     uint32_t off = sc_off;
     for (uint16_t i = 0; i < idx; i++) {
@@ -295,7 +308,9 @@ static uint32_t pjvm_rom_string_data(uint16_t idx, uint16_t *len_out) {
     *len_out = PROG16(off);
     return off + 2;
 }
+#endif
 
+#if !PJVM_USE_ASM_STRING_LEN
 static uint16_t pjvm_string_len(uint16_t lo, uint16_t hi) {
     if (pjvm_is_rom_string(hi)) {
         uint16_t len = 0;
@@ -304,7 +319,9 @@ static uint16_t pjvm_string_len(uint16_t lo, uint16_t hi) {
     }
     return r16(lo);
 }
+#endif
 
+#if !PJVM_USE_ASM_STRING_BYTE
 static uint8_t pjvm_string_byte(uint16_t lo, uint16_t hi, uint16_t idx) {
     if (pjvm_is_rom_string(hi)) {
         uint16_t len = 0;
@@ -314,6 +331,7 @@ static uint8_t pjvm_string_byte(uint16_t lo, uint16_t hi, uint16_t idx) {
     }
     return r8((uint16_t)(lo + PJVM_OBJ_HEADER + idx));
 }
+#endif
 
 static uint16_t pjvm_make_main_args(PJVMCtx *j) {
     uint16_t argc = j->prog_argc;
@@ -401,6 +419,7 @@ void pjvm_parse(uint8_t *data) {
 
 #ifdef PJVM_ASM_HELPERS
     cpr = data + cpr_off;
+    sc  = data + sc_off;
     bc  = data + bc_off;
 #endif
 }
@@ -483,7 +502,7 @@ static void pjvm_inv(uint8_t mi) {
             break;
         }
         case NATIVE_ARRAYCOPY:
-#ifdef PJVM_ASM_HELPERS
+#if PJVM_USE_ASM_ARRAYCOPY
             pjvm_native_arraycopy();
 #else
         {
@@ -500,7 +519,7 @@ static void pjvm_inv(uint8_t mi) {
 #endif
             break;
         case NATIVE_MEMCMP:
-#ifdef PJVM_ASM_HELPERS
+#if PJVM_USE_ASM_MEMCMP
             pjvm_native_memcmp();
 #else
         {
@@ -522,7 +541,7 @@ static void pjvm_inv(uint8_t mi) {
 #endif
             break;
         case NATIVE_WRITE_BYTES:
-#ifdef PJVM_ASM_HELPERS
+#if PJVM_USE_ASM_WRITE_BYTES
             pjvm_native_write_bytes();
 #else
         {
@@ -536,7 +555,7 @@ static void pjvm_inv(uint8_t mi) {
 #endif
             break;
         case NATIVE_STRING_FROM_BYTES:
-#ifdef PJVM_ASM_HELPERS
+#if PJVM_USE_ASM_STRING_FROM_BYTES
             pjvm_native_string_from_bytes();
 #else
         {

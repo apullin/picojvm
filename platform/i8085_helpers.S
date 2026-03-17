@@ -26,6 +26,8 @@
  *   heap_ptr = 1086   (uint16_t)
  */
 
+#include "../src/pjvm_opts.h"
+
     .text
 
 /* ---- offsets --------------------------------------------------------- */
@@ -180,6 +182,7 @@ bread:
     MOV C, M                        ; C = bc[pc+1] (low byte)
     RET
 
+#if PJVM_USE_ASM_CPREAD
 /* ====================================================================== */
 /*  cpread(void) -> uint16_t in BC                                        */
 /*  Reads a big-endian CP index from bc[pc], advances pc by 2, then       */
@@ -231,6 +234,164 @@ cpread:
     INX H
     MOV B, M                        ; BC = resolved CP entry
     RET
+#endif
+
+#if PJVM_USE_ASM_ROM_STRING_DATA || PJVM_USE_ASM_STRING_LEN || PJVM_USE_ASM_STRING_BYTE
+/* ====================================================================== */
+/*  _pjvm_rom_string_scan                                                 */
+/*  In:  BC = string constant index                                       */
+/*  Out: BC = string length, HL = pointer to first payload byte           */
+/* ====================================================================== */
+    .type   _pjvm_rom_string_scan, @function
+_pjvm_rom_string_scan:
+    LHLD (sc)                       ; HL = first string record
+    MOV A, B
+    ORA C
+    JZ .Lrom_done
+.Lrom_next:
+    MOV E, M
+    INX H
+    MOV D, M                        ; DE = record length
+    INX H                           ; HL = payload
+    DAD D                           ; HL = next record
+    DCX B
+    MOV A, B
+    ORA C
+    JNZ .Lrom_next
+.Lrom_done:
+    MOV C, M
+    INX H
+    MOV B, M                        ; BC = length
+    INX H                           ; HL = payload
+    RET
+#endif
+
+#if PJVM_USE_ASM_ROM_STRING_DATA
+/* ====================================================================== */
+/*  pjvm_rom_string_data(uint16_t idx, uint16_t *len_out) -> uint32_t     */
+/*  Returns data pointer in BC:DE as 0000:data_ptr and stores len in      */
+/*  *len_out.                                                             */
+/* ====================================================================== */
+    .globl  pjvm_rom_string_data
+    .type   pjvm_rom_string_data, @function
+pjvm_rom_string_data:
+    LXI H, 2
+    DAD SP
+    MOV C, M
+    INX H
+    MOV B, M                        ; BC = idx
+    CALL _pjvm_rom_string_scan      ; BC = len, HL = payload
+    XCHG                            ; DE = payload, HL free
+    LXI H, 4
+    DAD SP
+    MOV A, M
+    INX H
+    MOV H, M
+    MOV L, A                        ; HL = len_out
+    MOV M, C
+    INX H
+    MOV M, B                        ; *len_out = len
+    MOV C, E
+    MOV B, D                        ; BC = payload
+    MVI D, 0
+    MVI E, 0                        ; DE = high 16 bits
+    RET
+#endif
+
+#if PJVM_USE_ASM_STRING_LEN
+/* ====================================================================== */
+/*  pjvm_string_len(uint16_t lo, uint16_t hi) -> uint16_t in BC           */
+/* ====================================================================== */
+    .globl  pjvm_string_len
+    .type   pjvm_string_len, @function
+pjvm_string_len:
+    LXI H, 4
+    DAD SP
+    MOV A, M
+    ORA A
+    JNZ .Lheap_string_len
+    INX H
+    MOV A, M
+    CPI 0x80
+    JNZ .Lheap_string_len
+    LXI H, 2
+    DAD SP
+    MOV C, M
+    INX H
+    MOV B, M                        ; BC = string index
+    CALL _pjvm_rom_string_scan
+    RET                             ; BC already holds len
+.Lheap_string_len:
+    LXI H, 2
+    DAD SP
+    MOV C, M
+    INX H
+    MOV B, M                        ; BC = heap ref
+    MOV H, B
+    MOV L, C
+    MOV C, M
+    INX H
+    MOV B, M
+    RET
+#endif
+
+#if PJVM_USE_ASM_STRING_BYTE
+/* ====================================================================== */
+/*  pjvm_string_byte(uint16_t lo, uint16_t hi, uint16_t idx) -> uint8_t   */
+/* ====================================================================== */
+    .globl  pjvm_string_byte
+    .type   pjvm_string_byte, @function
+pjvm_string_byte:
+    LXI H, 4
+    DAD SP
+    MOV A, M
+    ORA A
+    JNZ .Lheap_string_byte
+    INX H
+    MOV A, M
+    CPI 0x80
+    JNZ .Lheap_string_byte
+    LXI H, 2
+    DAD SP
+    MOV C, M
+    INX H
+    MOV B, M                        ; BC = string index
+    CALL _pjvm_rom_string_scan      ; HL = payload
+    XCHG                            ; DE = payload
+    LXI H, 6
+    DAD SP
+    MOV E, M
+    INX H
+    MOV D, M                        ; DE = byte index
+    XCHG                            ; HL = byte index, DE = payload
+    DAD D
+    MOV A, M
+    MOV C, A
+    MVI B, 0
+    RET
+.Lheap_string_byte:
+    LXI H, 2
+    DAD SP
+    MOV E, M
+    INX H
+    MOV D, M                        ; DE = heap ref
+    MOV H, D
+    MOV L, E
+    LXI B, 4
+    DAD B                           ; HL = payload base
+    XCHG                            ; DE = payload base
+    LXI H, 6
+    DAD SP
+    MOV C, M
+    INX H
+    MOV B, M                        ; BC = byte index
+    XCHG                            ; HL = payload base, DE = stack scratch
+    DAD B
+    MOV A, M
+    MOV C, A
+    MVI B, 0
+    RET
+#endif
 
 /* ====================================================================== */
 /*  lload(uint8_t slot) — load local onto operand stack                   */

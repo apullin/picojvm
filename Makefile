@@ -24,7 +24,7 @@ CRT      = $(ROOT)/sysroot/crt/crt0.S
 LIBGCC   = $(ROOT)/sysroot/lib/libgcc.a
 LIBC     = $(ROOT)/sysroot/lib/libc.a
 LDSCRIPT = $(ROOT)/sysroot/ldscripts/i8085-32kram-32krom.ld
-TARGET_OPT = Os
+TARGET_OPT = Oz
 BUILDDIR = build
 
 PICOJVM_PAGED = ./picojvm-paged

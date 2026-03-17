@@ -12,7 +12,7 @@ class E {
 	static final int IINC=0x84;
 	static final int I2B=0x91, I2C=0x92, I2S=0x93;
 	static final int IFEQ=0x99, IFNE=0x9A, GOTO=0xA7;
-	static final int LOOKUPSWITCH=0xAB;
+	static final int TABLESWITCH=0xAA, LOOKUPSWITCH=0xAB;
 	static final int IRETURN=0xAC, ARETURN=0xB0, RETURN=0xB1;
 	static final int GETSTATIC=0xB2, PUTSTATIC=0xB3;
 	static final int GETFIELD=0xB4, PUTFIELD=0xB5;
@@ -71,7 +71,7 @@ class E {
 			int loc = C.patLoc[i];
 			int lbl = C.patLbl[i];
 			int target = C.lblAddr[lbl];
-			int offset = target - (loc - 1);
+			int offset = target - C.patBase[i];
 			C.mcode[loc] = (byte)((offset >> 8) & 0xFF);
 			C.mcode[loc + 1] = (byte)(offset & 0xFF);
 		}
@@ -364,7 +364,6 @@ class E {
 		}
 
 		patchBranches();
-
 		commitMC(mi);
 		C.mMaxLoc[mi] = (byte)(C.locNext > 0 ? C.locNext : 1);
 		C.mMaxStk[mi] = (byte)(C.maxStk > 0 ? C.maxStk : 1);
@@ -549,6 +548,11 @@ class E {
 		C.mcode[C.mcLen++] = (byte)(v & 0xFF);
 	}
 
+	// tableswitch/lookupswitch align their payload to the next 4-byte boundary.
+	static void eAlign4() {
+		while ((C.mcLen & 3) != 0) eb(0);
+	}
+
 	static int eBrPH() {
 		int loc = C.mcLen;
 		eb(0);
@@ -569,10 +573,23 @@ class E {
 		int branchPC = C.mcLen;
 		eb(opcode);
 		int loc = eBrPH();
+		ePat(loc, branchPC, label);
+	}
+
+	// Shared offset patch record used by both 2-byte branches and switch tables.
+	static void ePat(int loc, int basePc, int label) {
 		C.chk(C.patC, 320, 262);
 		C.patLoc[C.patC] = (short)loc;
 		C.patLbl[C.patC] = (short)label;
+		C.patBase[C.patC] = (short)basePc;
 		C.patC++;
+	}
+
+	// Switch offset slots are 4 bytes wide, but picoJVM only reads the low 16 bits.
+	static void eSwitchOff(int basePc, int label) {
+		int loc = C.mcLen;
+		eIBE(0);
+		ePat(loc + 2, basePc, label);
 	}
 
 	static void push() {

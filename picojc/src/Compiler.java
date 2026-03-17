@@ -3,7 +3,7 @@ class C {
 	// Limits — sized to fit in picoJVM 64KB heap
 	static final int MAX_CLASSES  = 32;
 	// Leave headroom for self-hosting feature work until method storage is dynamic.
-	static final int MAX_METHODS  = 240;
+	static final int MAX_METHODS  = 256;
 	static final int MAX_FIELDS   = 416;
 	static final int MAX_NAMES    = 896;
 	static final int MAX_CP       = 2560;
@@ -149,6 +149,7 @@ class C {
 	// --- Backpatch / Labels ---
 	static short[] patLoc   = new short[320]; // offset in mcode of branch operand
 	static short[] patLbl = new short[320]; // which label
+	static short[] patBase = new short[320]; // pc base used to compute relative offset
 	static int patC;
 	static short[] lblAddr  = new short[320]; // address for each label
 	static int lblCount;

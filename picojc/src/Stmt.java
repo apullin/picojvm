@@ -418,6 +418,107 @@ public class Stmt {
 		return swSlot;
 	}
 
+	static final int SW_LINEAR = 0;
+	static final int SW_LOOKUP = 1;
+	static final int SW_TABLE  = 2;
+
+	static int switchLoadBytes(int slot) {
+		return slot <= 3 ? 1 : 2;
+	}
+
+	static int switchConstBytes(int val) {
+		if (val >= -1 && val <= 5) return 1;
+		if (val >= -128 && val <= 127) return 2;
+		return 3;
+	}
+
+	// Choose the smallest dispatch encoding that preserves int-switch semantics.
+	static int pickIntSwitchMode(int swSlot, int caseCount) {
+		if (caseCount <= 1) return SW_LINEAR;
+
+		int linear = 3;
+		int minVal = C.caseVals[0], maxVal = C.caseVals[0];
+		boolean fit16 = true;
+		for (int i = 0; i < caseCount; i++) {
+			int v = C.caseVals[i];
+			linear += switchLoadBytes(swSlot) + switchConstBytes(v) + 3;
+			if (v < minVal) minVal = v;
+			if (v > maxVal) maxVal = v;
+			if (v < -32768 || v > 32767) fit16 = false;
+		}
+
+		int switchPc = C.mcLen + switchLoadBytes(swSlot);
+		int pad = (4 - ((switchPc + 1) & 3)) & 3;
+		int lookup = switchLoadBytes(swSlot) + 1 + pad + 8 + caseCount * 8;
+		int mode = SW_LINEAR;
+
+		if (fit16) {
+			int range = maxVal - minVal + 1;
+			if (range > 0 && range <= 255) {
+				int table = switchLoadBytes(swSlot) + 1 + pad + 12 + range * 4;
+				if (table < linear && table <= lookup) return SW_TABLE;
+			}
+		}
+
+		// lookupswitch does not usually beat the linear chain on bytes alone here,
+		// but once the sparse case list is long enough it is still a better runtime
+		// trade than reloading and comparing through a long branch chain.
+		if (caseCount >= 6) mode = SW_LOOKUP;
+		return mode;
+	}
+
+	static void emitLinearSwitch(int swSlot, int caseCount, int defaultLabel) {
+		for (int i = 0; i < caseCount; i++) {
+			E.eLd(swSlot, 0); E.push();
+			E.eIC(C.caseVals[i]); E.push();
+			E.eBr(0x9F, C.caseLbls[i]); // IF_ICMPEQ
+			E.pop(); E.pop();
+		}
+		E.eBr(E.GOTO, defaultLabel);
+	}
+
+	static void emitLookupSwitch(int swSlot, int caseCount, int defaultLabel) {
+		E.eLd(swSlot, 0); E.push();
+		int switchPc = C.mcLen;
+		E.eb(E.LOOKUPSWITCH);
+		E.eAlign4();
+		E.eSwitchOff(switchPc, defaultLabel);
+		E.eIBE(caseCount);
+		for (int i = 0; i < caseCount; i++) {
+			E.eIBE(C.caseVals[i]);
+			E.eSwitchOff(switchPc, C.caseLbls[i]);
+		}
+		E.pop();
+	}
+
+	static void emitTableSwitch(int swSlot, int caseCount, int defaultLabel) {
+		int minVal = C.caseVals[0], maxVal = C.caseVals[0];
+		for (int i = 1; i < caseCount; i++) {
+			int v = C.caseVals[i];
+			if (v < minVal) minVal = v;
+			if (v > maxVal) maxVal = v;
+		}
+
+		E.eLd(swSlot, 0); E.push();
+		int switchPc = C.mcLen;
+		E.eb(E.TABLESWITCH);
+		E.eAlign4();
+		E.eSwitchOff(switchPc, defaultLabel);
+		E.eIBE(minVal);
+		E.eIBE(maxVal);
+		for (int val = minVal; val <= maxVal; val++) {
+			int target = defaultLabel;
+			for (int i = 0; i < caseCount; i++) {
+				if (C.caseVals[i] == val) {
+					target = C.caseLbls[i];
+					break;
+				}
+			}
+			E.eSwitchOff(switchPc, target);
+		}
+		E.pop();
+	}
+
 	static void pSwitch() {
 		Lexer.nextToken(); // skip 'switch'
 		Lexer.expect(Tk.LPAREN);
@@ -476,13 +577,15 @@ public class Stmt {
 		E.popLp();
 		E.eBr(E.GOTO, lblEnd);
 		E.mark(lblDispatch);
-		for (int i = 0; i < caseCount; i++) {
-			E.eLd(swSlot, 0); E.push();
-			E.eIC(C.caseVals[i]); E.push();
-			E.eBr(0x9F, C.caseLbls[i]); // IF_ICMPEQ
-			E.pop(); E.pop();
+		int dispatchDefault = defaultLabel >= 0 ? defaultLabel : lblEnd;
+		if (caseCount == 0) {
+			E.eBr(E.GOTO, dispatchDefault);
+		} else {
+			int mode = pickIntSwitchMode(swSlot, caseCount);
+			if (mode == SW_TABLE) emitTableSwitch(swSlot, caseCount, dispatchDefault);
+			else if (mode == SW_LOOKUP) emitLookupSwitch(swSlot, caseCount, dispatchDefault);
+			else emitLinearSwitch(swSlot, caseCount, dispatchDefault);
 		}
-		E.eBr(E.GOTO, defaultLabel >= 0 ? defaultLabel : lblEnd);
 		E.mark(lblEnd);
 
 		Lexer.expect(Tk.RBRACE);

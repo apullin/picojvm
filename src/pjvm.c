@@ -105,7 +105,6 @@ static uint16_t m_cb[PJVM_METHOD_CAP];
 static uint8_t  cls_pid[PJVM_CLASS_CAP], cls_nf[PJVM_CLASS_CAP];
 static uint8_t  cls_vb[PJVM_CLASS_CAP], cls_vs[PJVM_CLASS_CAP], cls_ci[PJVM_CLASS_CAP];
 static uint8_t  vt[PJVM_VTABLE_CAP];
-static uint16_t str_refs[128];
 
 /* --- program image access macro --------------------------------------- */
 #ifdef PJVM_PAGED
@@ -272,6 +271,39 @@ static uint16_t pjvm_make_string(PJVMCtx *j, const uint8_t *buf, uint16_t len) {
     return a;
 }
 
+/* String literals stay in the program image and are addressed by index. */
+static uint8_t pjvm_is_rom_string(uint16_t hi) {
+    return hi == PJVM_REF_ROM_STRING;
+}
+
+static uint32_t pjvm_rom_string_data(uint16_t idx, uint16_t *len_out) {
+    uint32_t off = sc_off;
+    for (uint16_t i = 0; i < idx; i++) {
+        off += 2 + PROG16(off);
+    }
+    *len_out = PROG16(off);
+    return off + 2;
+}
+
+static uint16_t pjvm_string_len(uint16_t lo, uint16_t hi) {
+    if (pjvm_is_rom_string(hi)) {
+        uint16_t len = 0;
+        pjvm_rom_string_data(lo, &len);
+        return len;
+    }
+    return r16(lo);
+}
+
+static uint8_t pjvm_string_byte(uint16_t lo, uint16_t hi, uint16_t idx) {
+    if (pjvm_is_rom_string(hi)) {
+        uint16_t len = 0;
+        uint32_t data = pjvm_rom_string_data(lo, &len);
+        (void)len;
+        return PROG(data + idx);
+    }
+    return r8((uint16_t)(lo + PJVM_OBJ_HEADER + idx));
+}
+
 static uint16_t pjvm_make_main_args(PJVMCtx *j) {
     uint16_t argc = j->prog_argc;
     uint16_t a = heap_alloc(j, (uint16_t)(PJVM_OBJ_HEADER + argc * 4));
@@ -366,7 +398,7 @@ void pjvm_parse(uint8_t *data) {
 static void pjvm_exec(void);
 
 static void pjvm_inv(uint8_t mi) {
-    uint16_t alo, ahi, blo;
+    uint16_t alo, ahi, blo, bhi;
 
     if (m_fl[mi] & 1) {
         uint8_t nid = m_fl[mi] >> 1;
@@ -401,41 +433,41 @@ static void pjvm_inv(uint8_t mi) {
             g_pjvm->sp--;
             break;
         case NATIVE_STR_LENGTH:
-            alo = spop_lo();
-            spush(r16(alo), r16((uint16_t)(alo + 2)));
+            alo = spop_lo(); ahi = spop_hi();
+            spush(pjvm_string_len(alo, ahi), 0);
             break;
         case NATIVE_STR_CHARAT:
             blo = spop_lo(); spop_hi();
-            alo = spop_lo();
-            spush(r8(alo + PJVM_OBJ_HEADER + blo), 0);
+            alo = spop_lo(); ahi = spop_hi();
+            spush(pjvm_string_byte(alo, ahi, blo), 0);
             break;
         case NATIVE_STR_EQUALS: {
-            blo = spop_lo(); spop_hi();
-            alo = spop_lo();
-            if (alo == blo) { spush(1, 0); break; }
-            if (blo == 0) { spush(0, 0); break; }
-            uint16_t la = r16(alo), lb = r16(blo);
+            blo = spop_lo(); bhi = spop_hi();
+            alo = spop_lo(); ahi = spop_hi();
+            if (alo == blo && ahi == bhi) { spush(1, 0); break; }
+            if (blo == 0 && bhi == 0) { spush(0, 0); break; }
+            uint16_t la = pjvm_string_len(alo, ahi), lb = pjvm_string_len(blo, bhi);
             uint8_t eq = (la == lb) ? 1 : 0;
             for (uint16_t i = 0; eq && i < la; i++)
-                if (r8(alo + PJVM_OBJ_HEADER + i) != r8(blo + PJVM_OBJ_HEADER + i)) eq = 0;
+                if (pjvm_string_byte(alo, ahi, i) != pjvm_string_byte(blo, bhi, i)) eq = 0;
             spush(eq, 0);
             break;
         }
         case NATIVE_STR_TOSTRING:
             break;
         case NATIVE_PRINT: {
-            alo = spop_lo();
-            uint16_t slen = r16(alo);
+            alo = spop_lo(); ahi = spop_hi();
+            uint16_t slen = pjvm_string_len(alo, ahi);
             for (uint16_t i = 0; i < slen; i++)
-                pjvm_platform_putchar(r8(alo + PJVM_OBJ_HEADER + i));
+                pjvm_platform_putchar(pjvm_string_byte(alo, ahi, i));
             break;
         }
         case NATIVE_STR_HASHCODE: {
-            alo = spop_lo();
-            uint16_t slen = r16(alo);
+            alo = spop_lo(); ahi = spop_hi();
+            uint16_t slen = pjvm_string_len(alo, ahi);
             uint32_t h = 0;
             for (uint16_t i = 0; i < slen; i++)
-                h = h * 31 + (uint32_t)r8(alo + PJVM_OBJ_HEADER + i);
+                h = h * 31 + (uint32_t)pjvm_string_byte(alo, ahi, i);
             pjvm_push32((int32_t)h);
             break;
         }
@@ -690,20 +722,6 @@ static uint16_t pjvm_multi_alloc(uint16_t *sizes, uint8_t depth, uint8_t dims) {
 void pjvm_run(PJVMCtx *j) {
     g_pjvm = j;
 
-    /* Pre-allocate interned string constants into heap */
-    {
-        uint32_t soff = sc_off;
-        for (uint8_t i = 0; i < n_string_constants; i++) {
-            uint16_t slen = PROG16(soff);
-            soff += 2;
-            uint16_t a = heap_alloc(j, (uint16_t)(PJVM_OBJ_HEADER + slen));
-            w16(a, slen); w16((uint16_t)(a + 2), 0);
-            for (uint16_t k = 0; k < slen; k++) w8(a + PJVM_OBJ_HEADER + k, PROG(soff + k));
-            soff += slen;
-            str_refs[i] = a;
-        }
-    }
-
     /* Pre-initialize static fields from const_data init table (ROM refs) */
     if (cd_off) {
         uint32_t p_cd = cd_off;
@@ -855,7 +873,7 @@ static void pjvm_exec(void) {
             uint32_t off = cpr_off + (uint32_t)g_pjvm->cur_cb + (uint32_t)raw * 2;
             uint16_t ci = PROG16(off);
             if (ci & PJVM_CP_STR_FLAG_16) {
-                spush(str_refs[ci & PJVM_CP_STR_MASK_16], 0);
+                spush(ci & PJVM_CP_STR_MASK_16, PJVM_REF_ROM_STRING);
             } else {
                 uint32_t base = ic_off + (uint32_t)ci * 4;
                 spush(PROG16(base), PROG16(base + 2));
@@ -865,7 +883,7 @@ static void pjvm_exec(void) {
         case OP_LDC_W: {
             uint16_t ci = cpread();
             if (ci & PJVM_CP_STR_FLAG_16) {
-                spush(str_refs[ci & PJVM_CP_STR_MASK_16], 0);
+                spush(ci & PJVM_CP_STR_MASK_16, PJVM_REF_ROM_STRING);
             } else {
                 uint32_t base = ic_off + (uint32_t)ci * 4;
                 spush(PROG16(base), PROG16(base + 2));
@@ -1107,13 +1125,15 @@ static void pjvm_exec(void) {
 
         case OP_IF_ACMPEQ: {
             int16_t o = bread();
-            blo = spop_lo(); alo = spop_lo();
-            if (alo == blo) g_pjvm->pc = opc + o; break;
+            blo = spop_lo(); bhi = spop_hi();
+            alo = spop_lo(); ahi = spop_hi();
+            if (alo == blo && ahi == bhi) g_pjvm->pc = opc + o; break;
         }
         case OP_IF_ACMPNE: {
             int16_t o = bread();
-            blo = spop_lo(); alo = spop_lo();
-            if (alo != blo) g_pjvm->pc = opc + o; break;
+            blo = spop_lo(); bhi = spop_hi();
+            alo = spop_lo(); ahi = spop_hi();
+            if (alo != blo || ahi != bhi) g_pjvm->pc = opc + o; break;
         }
         case OP_GOTO: {
             int16_t o = bread();

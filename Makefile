@@ -7,7 +7,7 @@ PICOJVM = ./picojvm
 EXPDIR  = expected
 
 # Single-class tests
-TESTS_SINGLE = Fib HelloWorld BubbleSort Counter StringTest StaticInitTest MultiArrayTest StringSwitchTest ConstTest
+TESTS_SINGLE = Fib HelloWorld BubbleSort Counter StringTest RomStringTest StaticInitTest MultiArrayTest StringSwitchTest ConstTest
 TESTS_MULTI  = Shapes Features InterfaceTest ExceptionTest
 TESTS_PAGER  = BigSwitch BigLUT
 ALL_TESTS    = $(TESTS_SINGLE) $(TESTS_MULTI)

@@ -60,6 +60,11 @@
 #define PJVM_CP_STR_FLAG_16  0x8000
 #define PJVM_CP_STR_MASK_16  0x7FFF
 
+/* Tagged 32-bit refs stored in VM slots.
+ * Heap refs use hi=0 and lo=heap address.
+ * ROM string refs use hi=0x8000 and lo=string constant index. */
+#define PJVM_REF_ROM_STRING  0x8000
+
 /* sentinel values */
 #define PJVM_NO_CLASS     0xFF   /* parent_class_id / class_id = none */
 #define PJVM_NO_VTABLE    0xFF   /* vtable_slot = not virtual */

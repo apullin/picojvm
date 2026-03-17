@@ -82,6 +82,8 @@ class E {
 		C.cpSz = 0;
 		C.excC = 0;
 		autoCtorsEmitted = false;
+		Linker.constC = 0;
+		Linker.constBL = 0;
 		Catalog.resetUnitScope();
 
 		// Skip to class bodies and emit methods
@@ -234,6 +236,13 @@ class E {
 			// Skip the initializer expression tokens
 			while (Tk.type != Tk.SEMI && Tk.type != Tk.COMMA && Tk.type != Tk.EOF)
 				Lexer.nextToken();
+			return;
+		}
+
+		// @Const ROM array — parse initializer into const_data buffer
+		if (fi0 >= 0 && C.fIsConst[fi0]) {
+			Lexer.nextToken(); // skip '='
+			eConstArray(fi0);
 			return;
 		}
 
@@ -730,5 +739,59 @@ class E {
 		C.mcode[loc + 1] = (byte)((v >> 16) & 0xFF);
 		C.mcode[loc + 2] = (byte)((v >> 8) & 0xFF);
 		C.mcode[loc + 3] = (byte)(v & 0xFF);
+	}
+
+	// @Const: parse array initializer into Linker's const_data buffer
+	static void eConstArray(int fi) {
+		Lexer.expect(Tk.LBRACE);
+		int arrKind = C.fArrKind[fi]; // 0/3=int[], 4=byte[], 5=char[], 8=short[]
+		int elemType, elemSize;
+		if (arrKind == 4) { elemType = 0; elemSize = 1; }       // byte
+		else if (arrKind == 5) { elemType = 1; elemSize = 2; }   // char
+		else if (arrKind == 8) { elemType = 2; elemSize = 2; }   // short
+		else { elemType = 3; elemSize = 4; }                      // int
+
+		int idx = Linker.constC++;
+		Linker.constSlot[idx] = C.fSlot[fi];
+		Linker.constET[idx] = (byte)elemType;
+		Linker.constOff[idx] = Linker.constBL;
+
+		int count = 0;
+		while (Tk.type != Tk.RBRACE && Tk.type != Tk.EOF) {
+			int val = parseConstVal();
+			if (elemSize == 1) {
+				Linker.constBuf[Linker.constBL++] = (byte)(val & 0xFF);
+			} else if (elemSize == 2) {
+				Linker.constBuf[Linker.constBL++] = (byte)(val & 0xFF);
+				Linker.constBuf[Linker.constBL++] = (byte)((val >> 8) & 0xFF);
+			} else {
+				Linker.constBuf[Linker.constBL++] = (byte)(val & 0xFF);
+				Linker.constBuf[Linker.constBL++] = (byte)((val >> 8) & 0xFF);
+				Linker.constBuf[Linker.constBL++] = (byte)((val >> 16) & 0xFF);
+				Linker.constBuf[Linker.constBL++] = (byte)((val >> 24) & 0xFF);
+			}
+			count++;
+			if (Tk.type == Tk.COMMA) Lexer.nextToken();
+		}
+		Lexer.expect(Tk.RBRACE);
+		Linker.constEC[idx] = (short)count;
+	}
+
+	static int parseConstVal() {
+		boolean neg = false;
+		if (Tk.type == Tk.MINUS) { neg = true; Lexer.nextToken(); }
+		int val;
+		if (Tk.type == Tk.INT_LIT || Tk.type == Tk.CHAR_LIT) {
+			val = Tk.intValue;
+		} else if (Tk.type == Tk.TRUE) {
+			val = 1;
+		} else if (Tk.type == Tk.FALSE) {
+			val = 0;
+		} else {
+			Lexer.error(209);
+			return 0;
+		}
+		Lexer.nextToken();
+		return neg ? -val : val;
 	}
 }

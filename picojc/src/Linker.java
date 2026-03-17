@@ -1,4 +1,15 @@
 public class Linker {
+	// @Const ROM array accumulation (filled by Emit, written by writeOut)
+	static final int MAX_CONST = 16;
+	static int constC;
+	static short[] constSlot = new short[MAX_CONST];
+	static byte[] constET = new byte[MAX_CONST];     // elem type (0=byte,1=char,2=short,3=int)
+	static short[] constEC = new short[MAX_CONST];    // elem count
+	static byte[] constBuf = new byte[1024];          // flat binary data
+	static int constBL;                               // buf write pos
+	static int[] constOff = new int[MAX_CONST];       // per-entry offset into constBuf
+	static int[] constFO = new int[MAX_CONST];        // per-entry file offset (computed during link)
+
 	static void writeOut() {
 		C.outLen = 0;
 		int userClassCount = C.cCount - C.uClsStart;
@@ -15,7 +26,7 @@ public class Linker {
 		wB(C.intCC); // n_int_constants
 		wB(pjvmClassCount); // n_classes
 		wB(C.strCC); // n_string_constants
-		wB(0); // region_flags (reserved)
+		wB(constC > 0 ? 0x04 : 0); // region_flags (bit 2 = const_data)
 		wILE(C.cdLen); // bytecodes_size (32-bit LE)
 		wSLE(0); // reserved
 
@@ -101,6 +112,31 @@ public class Linker {
 			wSLE(C.excEPc[i]);
 			wSLE(C.excHPc[i]);
 			wB(C.excCCls[i]);
+		}
+
+		// const_data section (@Const ROM arrays)
+		if (constC > 0) {
+			wSLE(constC); // n_const_arrays
+			// Write entries and record file offsets
+			for (int i = 0; i < constC; i++) {
+				constFO[i] = C.outLen;
+				wSLE(constEC[i]);        // n_elements
+				wB(constET[i] & 0xFF);   // elem_type
+				wB(0);                   // reserved
+				int dStart = constOff[i];
+				int dEnd = (i + 1 < constC) ? constOff[i + 1] : constBL;
+				for (int j = dStart; j < dEnd; j++) {
+					wB(constBuf[j] & 0xFF);
+				}
+			}
+			// Init table: (slot, lo, hi) triples
+			wSLE(constC); // n_init
+			for (int i = 0; i < constC; i++) {
+				wSLE(constSlot[i]);
+				int off = constFO[i];
+				wSLE(off & 0xFFFF);          // lo
+				wSLE((off >> 16) + 1);       // hi
+			}
 		}
 	}
 

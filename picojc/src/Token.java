@@ -18,6 +18,7 @@ class Tk {
 	static final int PLUS_EQ=106, MINUS_EQ=107, STAR_EQ=108, SLASH_EQ=109;
 	static final int PERCENT_EQ=110, AMP_EQ=111, PIPE_EQ=112, CARET_EQ=113;
 	static final int SHL_EQ=114, SHR_EQ=115, USHR_EQ=116;
+	static final int AT=117;
 	static int type, intValue, line;
 	static byte[] strBuf = new byte[256];
 	static int strLen;

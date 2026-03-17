@@ -499,6 +499,7 @@ public class Lexer {
 			else Tk.type = Tk.PIPE;
 		}
 		else if (c == '^') { Tk.type = matchChar('=') ? Tk.CARET_EQ : Tk.CARET; }
+		else if (c == '@') { Tk.type = Tk.AT; }
 		else {
 			error(c);
 		}

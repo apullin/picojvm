@@ -72,6 +72,16 @@ public class Catalog {
 	}
 
 	static void catClass() {
+		// Skip class-level annotations
+		while (Tk.type == Tk.AT) {
+			Lexer.nextToken(); // skip @
+			Lexer.nextToken(); // skip name
+			if (Tk.type == Tk.LPAREN) {
+				Lexer.nextToken();
+				while (Tk.type != Tk.RPAREN && Tk.type != Tk.EOF) Lexer.nextToken();
+				Lexer.expect(Tk.RPAREN);
+			}
+		}
 		// Skip modifiers: public, abstract, final
 		while (Tk.type == Tk.PUBLIC || Tk.type == Tk.ABSTRACT ||
 			   Tk.type == Tk.FINAL) {
@@ -150,11 +160,23 @@ public class Catalog {
 	}
 
 	// Shared member-head parsing state (used by Catalog and Emit)
-	static boolean mStat, mNat, mAbst, mFinal;
+	static boolean mStat, mNat, mAbst, mFinal, mConst;
 
 	// Parse member modifiers. Returns true if this is a static block.
 	static boolean parseMods() {
-		mStat = false; mNat = false; mAbst = false; mFinal = false;
+		mStat = false; mNat = false; mAbst = false; mFinal = false; mConst = false;
+		// Annotations: @Name or @Name(...)
+		while (Tk.type == Tk.AT) {
+			Lexer.nextToken(); // skip @
+			int annNm = C.intern(Tk.strBuf, Tk.strLen);
+			Lexer.nextToken(); // skip annotation name
+			if (annNm == C.N_CONST) mConst = true;
+			if (Tk.type == Tk.LPAREN) {
+				Lexer.nextToken();
+				while (Tk.type != Tk.RPAREN && Tk.type != Tk.EOF) Lexer.nextToken();
+				Lexer.expect(Tk.RPAREN);
+			}
+		}
 		while (Tk.type == Tk.PUBLIC || Tk.type == Tk.PRIVATE ||
 			   Tk.type == Tk.PROTECTED || Tk.type == Tk.STATIC ||
 			   Tk.type == Tk.FINAL || Tk.type == Tk.NATIVE ||
@@ -337,7 +359,7 @@ public class Catalog {
 		C.fArrKind[fi] = (byte)arrKind; C.fSlot[fi] = (short)-1;
 		C.fRefNm[fi] = (short)refNm;
 		C.fInitPos[fi] = -1; C.fInitLn[fi] = (short)0;
-		C.fFinal[fi] = isFinal; C.fHasConst[fi] = false;
+		C.fFinal[fi] = isFinal; C.fHasConst[fi] = false; C.fIsConst[fi] = false;
 		if (!isStat) C.cOwnF[ci]++;
 		return fi;
 	}
@@ -353,6 +375,7 @@ public class Catalog {
 	static void catField(int ci, int nm, boolean isStat, boolean isFinal,
 						   int fieldType, int arrKind, int refNm, int narrowKind) {
 		int fi = initField(ci, nm, isStat, isFinal, fieldType, arrKind, refNm, narrowKind);
+		if (mConst) C.fIsConst[fi] = true;
 
 		if (Tk.type == Tk.ASSIGN && isStat) {
 			C.fInitPos[fi] = Lexer.pos;

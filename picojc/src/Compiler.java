@@ -32,6 +32,7 @@ class C {
 	static final int N_FILE_READ = 23, N_FILE_WRITE = 24, N_FILE_CLOSE = 25, N_FILE_DELETE = 26;
 	static final int N_LENGTH = 27, N_CHARAT = 28, N_EQUALS = 29, N_TOSTRING = 30, N_HASHCODE = 31;
 	static final int N_ARGS = 32;
+	static final int N_CONST = 33;
 
 	// --- Class table ---
 	static int cCount;
@@ -69,6 +70,7 @@ class C {
 	static boolean[] fFinal = new boolean[MAX_FIELDS];
 	static boolean[] fHasConst = new boolean[MAX_FIELDS]; // compile-time constant?
 	static int[] fConstVal = new int[MAX_FIELDS]; // constant value (if fHasConst)
+	static boolean[] fIsConst = new boolean[MAX_FIELDS]; // @Const ROM array
 
 	// --- Method table ---
 	static int mCount;
@@ -224,7 +226,8 @@ class C {
 			"arraycopy", "memcmp", "writeBytes", "stringFromBytes",
 			"fileOpen", "fileReadByte", "fileWriteByte", "fileRead",
 			"fileWrite", "fileClose", "fileDelete",
-			"length", "charAt", "equals", "toString", "hashCode", "args"
+			"length", "charAt", "equals", "toString", "hashCode", "args",
+			"Const"
 		};
 		for (int i = 0; i < seeds.length; i++) iStr(seeds[i]);
 	}

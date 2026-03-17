@@ -180,7 +180,57 @@ bread:
     MOV C, M                        ; C = bc[pc+1] (low byte)
     RET
 
-/* cpread is now always compiled in C (v3 cp16 branching needed) */
+/* ====================================================================== */
+/*  cpread(void) -> uint16_t in BC                                        */
+/*  Reads a big-endian CP index from bc[pc], advances pc by 2, then       */
+/*  resolves cpr[cur_cb + idx*2] as a little-endian uint16_t.            */
+/* ====================================================================== */
+    .globl  cpread
+    .type   cpread, @function
+cpread:
+    LHLD g_pjvm
+    LXI D, OFF_PC
+    DAD D                           ; HL = &pc
+    MOV E, M
+    INX H
+    MOV D, M                        ; DE = pc
+    INX D
+    INX D                           ; DE = pc+2
+    MOV M, D
+    DCX H
+    MOV M, E                        ; store pc+2
+    DCX D
+    DCX D                           ; DE = old pc
+    LHLD (bc)
+    DAD D                           ; HL = &bc[old pc]
+    MOV B, M
+    INX H
+    MOV C, M                        ; BC = idx
+
+    MOV A, C
+    ADD A
+    MOV C, A
+    MOV A, B
+    ADC A
+    MOV B, A                        ; BC = idx * 2
+
+    LHLD g_pjvm
+    LXI D, OFF_CUR_CB
+    DAD D                           ; HL = &cur_cb
+    MOV E, M
+    INX H
+    MOV D, M                        ; DE = cur_cb
+
+    MOV H, B
+    MOV L, C                        ; HL = idx * 2
+    DAD D                           ; HL = cur_cb + idx * 2
+    XCHG                            ; DE = cur_cb + idx * 2
+    LHLD (cpr)
+    DAD D                           ; HL = &cpr[cur_cb + idx * 2]
+    MOV C, M
+    INX H
+    MOV B, M                        ; BC = resolved CP entry
+    RET
 
 /* ====================================================================== */
 /*  lload(uint8_t slot) — load local onto operand stack                   */

@@ -200,7 +200,7 @@ extern void     lload(uint8_t slot);
 extern void     lstore(uint8_t slot);
 extern uint8_t  bcread(void);
 extern int16_t  bread(void);
-/* cpread is NOT in ASM — v3 format needs cp16 branching (see below) */
+extern uint16_t cpread(void);
 /* Native handler ASM implementations */
 extern void     pjvm_native_arraycopy(void);
 extern void     pjvm_native_memcmp(void);
@@ -248,12 +248,23 @@ NI static int16_t bread(void) {
 #endif /* !PJVM_ASM_HELPERS */
 
 /* cpread: resolve 16-bit CP index to global index via per-method CP table */
+#if 0
 NI static uint16_t cpread(void) {
     uint16_t idx = (BC(g_pjvm->pc) << 8) | BC(g_pjvm->pc + 1);
     g_pjvm->pc += 2;
     uint32_t off = cpr_off + (uint32_t)g_pjvm->cur_cb + (uint32_t)idx * 2;
     return PROG16(off);
 }
+#endif
+
+#ifndef PJVM_ASM_HELPERS
+NI static uint16_t cpread(void) {
+    uint16_t idx = (BC(g_pjvm->pc) << 8) | BC(g_pjvm->pc + 1);
+    g_pjvm->pc += 2;
+    uint32_t off = cpr_off + (uint32_t)g_pjvm->cur_cb + (uint32_t)idx * 2;
+    return PROG16(off);
+}
+#endif
 
 static int32_t pjvm_to32(uint16_t lo, uint16_t hi) {
     return (int32_t)((uint32_t)lo | ((uint32_t)hi << 16));

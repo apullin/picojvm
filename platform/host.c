@@ -171,6 +171,7 @@ static void pjvm_host_read(uint32_t file_offset, uint8_t *buf, uint16_t len, voi
 #endif
 
 void pjvm_platform_trap(uint8_t op, uint16_t pc) {
+#ifdef PJVM_DEBUG_TOOLS
     if (op == 0xFE) {
         extern uint8_t pjvm_trace_enabled;
         extern uint32_t trace_idx;
@@ -190,7 +191,9 @@ void pjvm_platform_trap(uint8_t op, uint16_t pc) {
                     (unsigned)trace_sp[ti], (unsigned)trace_stk0[ti]);
         }
         exit(2);
-    } else if (op == 0xFF) {
+    } else
+#endif
+    if (op == 0xFF) {
         fprintf(stderr, "Unknown native method at bytecode offset %u\n",
                 (unsigned)pc);
     } else {
@@ -308,12 +311,14 @@ int main(int argc, char **argv) {
             save_spec = argv[++i];
         } else if (strncmp(argv[i], "--save-raw=", 11) == 0) {
             save_spec = argv[i] + 11;
+#ifdef PJVM_DEBUG_TOOLS
         } else if (strncmp(argv[i], "--step-limit=", 13) == 0) {
             extern uint32_t pjvm_step_limit;
             pjvm_step_limit = (uint32_t)strtoul(argv[i] + 13, NULL, 0);
         } else if (strcmp(argv[i], "--trace") == 0) {
             extern uint8_t pjvm_trace_enabled;
             pjvm_trace_enabled = 1;
+#endif
         } else if (strncmp(argv[i], "--watch=", 8) == 0) {
             watch_addr = (uint16_t)strtoul(argv[i] + 8, NULL, 0);
         }

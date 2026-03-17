@@ -758,6 +758,8 @@ void pjvm_run(PJVMCtx *j) {
     pjvm_exec();
 }
 
+#ifdef PJVM_DEBUG_TOOLS
+/* Host-only execution tracing and step limiting. */
 uint32_t pjvm_step_limit;
 uint8_t  pjvm_trace_enabled;
 #define TRACE_BUF_SIZE 32
@@ -767,6 +769,7 @@ uint8_t  trace_mi[TRACE_BUF_SIZE];
 uint8_t  trace_sp[TRACE_BUF_SIZE];
 uint16_t trace_stk0[TRACE_BUF_SIZE];
 uint32_t trace_idx;
+#endif
 
 /* --- opcode helper macros --------------------------------------------- */
 /* Binary 32-bit op: pop b, pop a, push expr(a, b) */
@@ -799,14 +802,19 @@ uint32_t trace_idx;
     break; }
 
 static void pjvm_exec(void) {
+#ifdef PJVM_DEBUG_TOOLS
     uint32_t steps = 0;
+#endif
     while (g_pjvm->pc != PJVM_PC_HALT) {
+#ifdef PJVM_DEBUG_TOOLS
         if (pjvm_step_limit && ++steps > pjvm_step_limit) {
             pjvm_platform_trap(PJVM_TRAP_STEP_LIMIT, g_pjvm->pc);
             return;
         }
+#endif
         uint32_t opc = g_pjvm->pc;
         uint8_t op = BC(g_pjvm->pc++);
+#ifdef PJVM_DEBUG_TOOLS
         if (pjvm_trace_enabled) {
             uint32_t ti = trace_idx % TRACE_BUF_SIZE;
             trace_pc[ti] = opc;
@@ -816,6 +824,7 @@ static void pjvm_exec(void) {
             trace_stk0[ti] = (g_pjvm->sp > 0) ? g_pjvm->stk_lo[g_pjvm->sp - 1] : 0xFFFF;
             trace_idx++;
         }
+#endif
         uint16_t alo, ahi, blo, bhi;
 
         switch (op) {

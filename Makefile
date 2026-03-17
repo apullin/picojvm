@@ -1,5 +1,6 @@
 CC      = cc
 CFLAGS  = -Wall -Wextra -O2
+HOST_VM_DEBUG = -DPJVM_DEBUG_TOOLS
 JAVAC   = javac
 PYTHON  = python3
 PICOJVM = ./picojvm
@@ -36,10 +37,10 @@ SIM_CAPS = -DPJVM_METHOD_CAP=64 -DPJVM_CLASS_CAP=16 -DPJVM_VTABLE_CAP=128 \
 all: $(PICOJVM)
 
 $(PICOJVM): src/pjvm.c platform/host.c src/pjvm.h
-	$(CC) $(CFLAGS) -DPJVM_MAX_FRAMES=128 -o $@ src/pjvm.c platform/host.c
+	$(CC) $(CFLAGS) $(HOST_VM_DEBUG) -DPJVM_MAX_FRAMES=128 -o $@ src/pjvm.c platform/host.c
 
 $(PICOJVM_PAGED): src/pjvm.c platform/host.c src/pjvm.h
-	$(CC) $(CFLAGS) -DPJVM_PAGED -o $@ src/pjvm.c platform/host.c
+	$(CC) $(CFLAGS) $(HOST_VM_DEBUG) -DPJVM_PAGED -o $@ src/pjvm.c platform/host.c
 
 # Compile all test .java files
 tests/%.class: tests/%.java tests/Native.java

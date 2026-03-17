@@ -26,6 +26,7 @@ LIBC     = $(ROOT)/sysroot/lib/libc.a
 LDSCRIPT = $(ROOT)/sysroot/ldscripts/i8085-32kram-32krom.ld
 TARGET_OPT = Oz
 BUILDDIR = build
+TARGET_VM_OPTS ?=
 
 PICOJVM_PAGED = ./picojvm-paged
 
@@ -178,7 +179,7 @@ $(BUILDDIR)/crt0.o: $(CRT) | $(BUILDDIR)
 	$(CLANG) --target=i8085-unknown-elf -ffreestanding -fno-builtin -$(TARGET_OPT) -c $< -o $@
 
 $(BUILDDIR)/pjvm.o: src/pjvm.c src/pjvm.h | $(BUILDDIR)
-	$(CLANG) --target=i8085-unknown-elf -ffreestanding -fno-builtin -$(TARGET_OPT) $(SIM_CAPS) -DPJVM_ASM_HELPERS -c $< -o $@
+	$(CLANG) --target=i8085-unknown-elf -ffreestanding -fno-builtin -$(TARGET_OPT) $(SIM_CAPS) $(TARGET_VM_OPTS) -DPJVM_ASM_HELPERS -c $< -o $@
 
 $(BUILDDIR)/i8085_sim.o: platform/i8085_sim.c src/pjvm.h | $(BUILDDIR)
 	$(CLANG) --target=i8085-unknown-elf -ffreestanding -fno-builtin -$(TARGET_OPT) $(SIM_CAPS) -DPJVM_ASM_HELPERS -c $< -o $@

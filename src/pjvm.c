@@ -1032,12 +1032,15 @@ static void pjvm_exec(void) {
 
         /* --- stack manipulation ------------------------------------------- */
         case OP_POP: g_pjvm->sp--; break;
+#if PJVM_USE_OP_POP2
         case OP_POP2: g_pjvm->sp -= 2; break;
+#endif
         case OP_DUP: {
             uint16_t t = g_pjvm->sp - 1;
             spush(g_pjvm->stk_lo[t], g_pjvm->stk_hi[t]);
             break;
         }
+#if PJVM_USE_OP_DUP_X1
         case OP_DUP_X1: {
             uint16_t s1 = g_pjvm->sp - 1, s2 = g_pjvm->sp - 2;
             uint16_t v1l = g_pjvm->stk_lo[s1], v1h = g_pjvm->stk_hi[s1];
@@ -1046,6 +1049,7 @@ static void pjvm_exec(void) {
             spush(v1l, v1h);
             break;
         }
+#endif
         case OP_DUP_X2: {
             uint16_t s1 = g_pjvm->sp - 1, s2 = g_pjvm->sp - 2, s3 = g_pjvm->sp - 3;
             uint16_t v1l = g_pjvm->stk_lo[s1], v1h = g_pjvm->stk_hi[s1];
@@ -1061,6 +1065,7 @@ static void pjvm_exec(void) {
             spush(g_pjvm->stk_lo[s1], g_pjvm->stk_hi[s1]);
             break;
         }
+#if PJVM_USE_OP_SWAP
         case OP_SWAP: {
             uint16_t t = g_pjvm->sp - 1, u = g_pjvm->sp - 2;
             alo = g_pjvm->stk_lo[t]; ahi = g_pjvm->stk_hi[t];
@@ -1068,6 +1073,7 @@ static void pjvm_exec(void) {
             g_pjvm->stk_lo[u] = alo; g_pjvm->stk_hi[u] = ahi;
             break;
         }
+#endif
 
         /* --- arithmetic --------------------------------------------------- */
         case OP_IADD: {
@@ -1139,12 +1145,24 @@ static void pjvm_exec(void) {
         /* --- branches ----------------------------------------------------- */
         case OP_IFEQ:      BRANCH1(alo == 0 && ahi == 0)
         case OP_IFNE:      BRANCH1(alo != 0 || ahi != 0)
+#if PJVM_USE_OP_IFLT
         case OP_IFLT:      BRANCH1(ahi & 0x8000)
+#endif
+#if PJVM_USE_OP_IFGE
         case OP_IFGE:      BRANCH1(!(ahi & 0x8000))
+#endif
+#if PJVM_USE_OP_IFGT
         case OP_IFGT:      BRANCH1(!(ahi & 0x8000) && (alo | ahi))
+#endif
+#if PJVM_USE_OP_IFLE
         case OP_IFLE:      BRANCH1((ahi & 0x8000) || (alo == 0 && ahi == 0))
+#endif
+#if PJVM_USE_OP_IFNULL
         case OP_IFNULL:    BRANCH1(alo == 0 && ahi == 0)
+#endif
+#if PJVM_USE_OP_IFNONNULL
         case OP_IFNONNULL: BRANCH1(alo != 0 || ahi != 0)
+#endif
 
         case OP_IF_ICMPEQ: BRANCH2(alo == blo && ahi == bhi)
         case OP_IF_ICMPNE: BRANCH2(alo != blo || ahi != bhi)

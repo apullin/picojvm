@@ -8,6 +8,93 @@
 #ifndef PJVM_OPTS_H
 #define PJVM_OPTS_H
 
+/* Reduced-opcode profile for the current selfhost/disk corpus.
+ * This intentionally drops standard handlers that the present selfhosted
+ * compiler and its generated test corpus do not emit. It is not suitable for
+ * arbitrary javac-packed programs.
+ *
+ * PJVM_PROFILE_PICOJC_ONLY is kept as a compatibility alias for older local
+ * builds that used the earlier name. */
+#ifndef PJVM_PROFILE_SELFHOST_SET
+#ifdef PJVM_PROFILE_PICOJC_ONLY
+#define PJVM_PROFILE_SELFHOST_SET PJVM_PROFILE_PICOJC_ONLY
+#else
+#define PJVM_PROFILE_SELFHOST_SET 0
+#endif
+#endif
+
+#ifndef PJVM_USE_OP_POP2
+#if PJVM_PROFILE_SELFHOST_SET
+#define PJVM_USE_OP_POP2      0
+#else
+#define PJVM_USE_OP_POP2      1
+#endif
+#endif
+
+#ifndef PJVM_USE_OP_DUP_X1
+#if PJVM_PROFILE_SELFHOST_SET
+#define PJVM_USE_OP_DUP_X1    0
+#else
+#define PJVM_USE_OP_DUP_X1    1
+#endif
+#endif
+
+#ifndef PJVM_USE_OP_SWAP
+#if PJVM_PROFILE_SELFHOST_SET
+#define PJVM_USE_OP_SWAP      0
+#else
+#define PJVM_USE_OP_SWAP      1
+#endif
+#endif
+
+#ifndef PJVM_USE_OP_IFLT
+#if PJVM_PROFILE_SELFHOST_SET
+#define PJVM_USE_OP_IFLT      0
+#else
+#define PJVM_USE_OP_IFLT      1
+#endif
+#endif
+
+#ifndef PJVM_USE_OP_IFGE
+#if PJVM_PROFILE_SELFHOST_SET
+#define PJVM_USE_OP_IFGE      0
+#else
+#define PJVM_USE_OP_IFGE      1
+#endif
+#endif
+
+#ifndef PJVM_USE_OP_IFGT
+#if PJVM_PROFILE_SELFHOST_SET
+#define PJVM_USE_OP_IFGT      0
+#else
+#define PJVM_USE_OP_IFGT      1
+#endif
+#endif
+
+#ifndef PJVM_USE_OP_IFLE
+#if PJVM_PROFILE_SELFHOST_SET
+#define PJVM_USE_OP_IFLE      0
+#else
+#define PJVM_USE_OP_IFLE      1
+#endif
+#endif
+
+#ifndef PJVM_USE_OP_IFNULL
+#if PJVM_PROFILE_SELFHOST_SET
+#define PJVM_USE_OP_IFNULL    0
+#else
+#define PJVM_USE_OP_IFNULL    1
+#endif
+#endif
+
+#ifndef PJVM_USE_OP_IFNONNULL
+#if PJVM_PROFILE_SELFHOST_SET
+#define PJVM_USE_OP_IFNONNULL 0
+#else
+#define PJVM_USE_OP_IFNONNULL 1
+#endif
+#endif
+
 #if defined(PJVM_ASM_HELPERS) && !defined(PJVM_PAGED)
 #define PJVM_USE_ASM_CPREAD           1
 #define PJVM_USE_ASM_ROM_STRING_DATA  1

@@ -259,6 +259,21 @@ NI static int16_t bread(void) {
 
 #endif /* !PJVM_ASM_HELPERS */
 
+/* Common JVM stack pop shapes: one full 32-bit slot or one low-half value. */
+#define SPOP32(lo, hi) do { \
+    (lo) = spop_lo(); \
+    (hi) = spop_hi(); \
+} while (0)
+
+#define SPOP_U16(lo) do { \
+    (lo) = spop_lo(); \
+    (void)spop_hi(); \
+} while (0)
+
+/* High half of a sign-extended 8/16-bit JVM int value. */
+#define SIGN8_HI(v)  ((v) < 0 ? 0xFFFFu : 0u)
+#define SIGN16_HI(v) ((int16_t)(v) < 0 ? 0xFFFFu : 0u)
+
 /* cpread: resolve 16-bit CP index to global index via per-method CP table */
 #if 0
 NI static uint16_t cpread(void) {
@@ -442,18 +457,19 @@ static void pjvm_inv(uint8_t mi) {
             spush(0, 0);
             break;
         case NATIVE_OUT: {
-            uint16_t ov = spop_lo(); spop_hi();
-            uint16_t op = spop_lo(); spop_hi();
+            uint16_t ov, op;
+            SPOP_U16(ov);
+            SPOP_U16(op);
             pjvm_platform_out(op, ov);
             break;
         }
         case NATIVE_PEEK:
-            alo = spop_lo(); ahi = spop_hi();
+            SPOP32(alo, ahi);
             spush(pjvm_platform_peek8((uint32_t)alo | ((uint32_t)ahi << 16)), 0);
             break;
         case NATIVE_POKE:
             blo = spop_lo();
-            alo = spop_lo(); ahi = spop_hi();
+            SPOP32(alo, ahi);
             pjvm_platform_poke8((uint32_t)alo | ((uint32_t)ahi << 16), (uint8_t)blo);
             break;
         case NATIVE_HALT:
@@ -463,17 +479,17 @@ static void pjvm_inv(uint8_t mi) {
             g_pjvm->sp--;
             break;
         case NATIVE_STR_LENGTH:
-            alo = spop_lo(); ahi = spop_hi();
+            SPOP32(alo, ahi);
             spush(pjvm_string_len(alo, ahi), 0);
             break;
         case NATIVE_STR_CHARAT:
-            blo = spop_lo(); spop_hi();
-            alo = spop_lo(); ahi = spop_hi();
+            SPOP_U16(blo);
+            SPOP32(alo, ahi);
             spush(pjvm_string_byte(alo, ahi, blo), 0);
             break;
         case NATIVE_STR_EQUALS: {
-            blo = spop_lo(); bhi = spop_hi();
-            alo = spop_lo(); ahi = spop_hi();
+            SPOP32(blo, bhi);
+            SPOP32(alo, ahi);
             if (alo == blo && ahi == bhi) { spush(1, 0); break; }
             if (blo == 0 && bhi == 0) { spush(0, 0); break; }
             uint16_t la = pjvm_string_len(alo, ahi), lb = pjvm_string_len(blo, bhi);
@@ -486,14 +502,14 @@ static void pjvm_inv(uint8_t mi) {
         case NATIVE_STR_TOSTRING:
             break;
         case NATIVE_PRINT: {
-            alo = spop_lo(); ahi = spop_hi();
+            SPOP32(alo, ahi);
             uint16_t slen = pjvm_string_len(alo, ahi);
             for (uint16_t i = 0; i < slen; i++)
                 pjvm_platform_putchar(pjvm_string_byte(alo, ahi, i));
             break;
         }
         case NATIVE_STR_HASHCODE: {
-            alo = spop_lo(); ahi = spop_hi();
+            SPOP32(alo, ahi);
             uint16_t slen = pjvm_string_len(alo, ahi);
             uint32_t h = 0;
             for (uint16_t i = 0; i < slen; i++)
@@ -508,11 +524,12 @@ static void pjvm_inv(uint8_t mi) {
         {
             /* arraycopy(byte[] src, int srcOff, byte[] dst, int dstOff, int len)
              * Copies forward only — src and dst must not overlap with dst > src. */
-            uint16_t len    = spop_lo(); spop_hi();
-            uint16_t dstOff = spop_lo(); spop_hi();
-            uint16_t dst    = spop_lo();
-            uint16_t srcOff = spop_lo(); spop_hi();
-            uint16_t src    = spop_lo();
+            uint16_t len, dstOff, dst, srcOff, src;
+            SPOP_U16(len);
+            SPOP_U16(dstOff);
+            dst = spop_lo();
+            SPOP_U16(srcOff);
+            src = spop_lo();
             for (uint16_t i = 0; i < len; i++)
                 w8(dst + PJVM_OBJ_HEADER + dstOff + i, r8(src + PJVM_OBJ_HEADER + srcOff + i));
         }
@@ -525,11 +542,12 @@ static void pjvm_inv(uint8_t mi) {
         {
             /* memcmp(byte[] a, int aOff, byte[] b, int bOff, int len)
              * Returns <0, 0, or >0 (signed difference of first mismatch). */
-            uint16_t len  = spop_lo(); spop_hi();
-            uint16_t bOff = spop_lo(); spop_hi();
-            uint16_t bref = spop_lo();
-            uint16_t aOff = spop_lo(); spop_hi();
-            uint16_t aref = spop_lo();
+            uint16_t len, bOff, bref, aOff, aref;
+            SPOP_U16(len);
+            SPOP_U16(bOff);
+            bref = spop_lo();
+            SPOP_U16(aOff);
+            aref = spop_lo();
             int32_t result = 0;
             for (uint16_t i = 0; i < len; i++) {
                 uint8_t av = r8(aref + PJVM_OBJ_HEADER + aOff + i);
@@ -546,9 +564,10 @@ static void pjvm_inv(uint8_t mi) {
 #else
         {
             /* writeBytes(byte[] buf, int off, int len) */
-            uint16_t len = spop_lo(); spop_hi();
-            uint16_t off = spop_lo(); spop_hi();
-            uint16_t ref = spop_lo();
+            uint16_t len, off, ref;
+            SPOP_U16(len);
+            SPOP_U16(off);
+            ref = spop_lo();
             for (uint16_t i = 0; i < len; i++)
                 pjvm_platform_putchar(r8(ref + PJVM_OBJ_HEADER + off + i));
         }
@@ -560,9 +579,10 @@ static void pjvm_inv(uint8_t mi) {
 #else
         {
             /* new String(byte[] src, int off, int len) → String ref */
-            uint16_t len = spop_lo(); spop_hi();
-            uint16_t off = spop_lo(); spop_hi();
-            uint16_t src = spop_lo();
+            uint16_t len, off, src;
+            SPOP_U16(len);
+            SPOP_U16(off);
+            src = spop_lo();
             uint16_t a = heap_alloc(g_pjvm, (uint16_t)(PJVM_OBJ_HEADER + len));
             w16(a, len); w16((uint16_t)(a + 2), 0);
             for (uint16_t i = 0; i < len; i++)
@@ -573,9 +593,10 @@ static void pjvm_inv(uint8_t mi) {
             break;
         case NATIVE_FILE_OPEN: {
             /* fileOpen(byte[] name, int nameLen, int mode) → int status */
-            uint16_t mode    = spop_lo(); spop_hi();
-            uint16_t nameLen = spop_lo(); spop_hi();
-            uint16_t nameRef = spop_lo();
+            uint16_t mode, nameLen, nameRef;
+            SPOP_U16(mode);
+            SPOP_U16(nameLen);
+            nameRef = spop_lo();
             uint8_t nameBuf[64];
             uint16_t nl = nameLen > 63 ? 63 : nameLen;
             for (uint16_t i = 0; i < nl; i++)
@@ -599,9 +620,10 @@ static void pjvm_inv(uint8_t mi) {
         }
         case NATIVE_FILE_READ: {
             /* fileRead(byte[] buf, int off, int len) → int bytesRead */
-            uint16_t len = spop_lo(); spop_hi();
-            uint16_t off = spop_lo(); spop_hi();
-            uint16_t ref = spop_lo();
+            uint16_t len, off, ref;
+            SPOP_U16(len);
+            SPOP_U16(off);
+            ref = spop_lo();
             int32_t total = 0;
             for (uint16_t i = 0; i < len; i++) {
                 int32_t ch = pjvm_platform_file_read_byte();
@@ -614,23 +636,26 @@ static void pjvm_inv(uint8_t mi) {
         }
         case NATIVE_FILE_WRITE: {
             /* fileWrite(byte[] buf, int off, int len) */
-            uint16_t len = spop_lo(); spop_hi();
-            uint16_t off = spop_lo(); spop_hi();
-            uint16_t ref = spop_lo();
+            uint16_t len, off, ref;
+            SPOP_U16(len);
+            SPOP_U16(off);
+            ref = spop_lo();
             for (uint16_t i = 0; i < len; i++)
                 pjvm_platform_file_write_byte(r8(ref + PJVM_OBJ_HEADER + off + i));
             break;
         }
         case NATIVE_FILE_CLOSE: {
             /* fileClose(int mode) — 0=both, 1=read, 2=write */
-            uint16_t cmode = spop_lo(); spop_hi();
+            uint16_t cmode;
+            SPOP_U16(cmode);
             pjvm_platform_file_close((uint8_t)cmode);
             break;
         }
         case NATIVE_FILE_DELETE: {
             /* fileDelete(byte[] name, int nameLen) → int status */
-            uint16_t nameLen = spop_lo(); spop_hi();
-            uint16_t nameRef = spop_lo();
+            uint16_t nameLen, nameRef;
+            SPOP_U16(nameLen);
+            nameRef = spop_lo();
             uint8_t nameBuf[64];
             uint16_t nl = nameLen > 63 ? 63 : nameLen;
             for (uint16_t i = 0; i < nl; i++)
@@ -668,7 +693,7 @@ static void pjvm_inv(uint8_t mi) {
 static void pjvm_ret(uint8_t has_val) {
     uint16_t rlo = 0, rhi = 0;
     if (has_val) {
-        rlo = spop_lo(); rhi = spop_hi();
+        SPOP32(rlo, rhi);
     }
     g_pjvm->lt = g_pjvm->cur_lb;
     g_pjvm->fdepth--;
@@ -822,30 +847,30 @@ uint32_t trace_idx;
 /* --- opcode helper macros --------------------------------------------- */
 /* Binary 32-bit op: pop b, pop a, push expr(a, b) */
 #define BINOP32(expr) { \
-    blo = spop_lo(); bhi = spop_hi(); \
-    alo = spop_lo(); ahi = spop_hi(); \
+    SPOP32(blo, bhi); \
+    SPOP32(alo, ahi); \
     int32_t a = pjvm_to32(alo, ahi), b = pjvm_to32(blo, bhi); \
     pjvm_push32(expr); break; }
 
 /* Shift op: pop shift amount (lo only), pop a, push expr(a, s) */
 #define SHIFTOP(expr) { \
     blo = spop_lo(); \
-    alo = spop_lo(); ahi = spop_hi(); \
+    SPOP32(alo, ahi); \
     int32_t a = pjvm_to32(alo, ahi); uint8_t s = blo & 0x1F; \
     pjvm_push32(expr); break; }
 
 /* Single-operand: pop one value, branch if cond(alo,ahi) is true */
 #define BRANCH1(cond) { \
     int16_t o = bread(); \
-    alo = spop_lo(); ahi = spop_hi(); \
+    SPOP32(alo, ahi); \
     if (cond) g_pjvm->pc = opc + o; \
     break; }
 
 /* Two-operand: pop b then a, branch if cond(alo,ahi,blo,bhi) is true */
 #define BRANCH2(cond) { \
     int16_t o = bread(); \
-    blo = spop_lo(); bhi = spop_hi(); \
-    alo = spop_lo(); ahi = spop_hi(); \
+    SPOP32(blo, bhi); \
+    SPOP32(alo, ahi); \
     if (cond) g_pjvm->pc = opc + o; \
     break; }
 
@@ -890,12 +915,12 @@ static void pjvm_exec(void) {
 
         case OP_BIPUSH: {
             int8_t v = (int8_t)bcread();
-            spush((uint16_t)(int16_t)v, v < 0 ? 0xFFFF : 0);
+            spush((uint16_t)(int16_t)v, SIGN8_HI(v));
             break;
         }
         case OP_SIPUSH: {
             int16_t v = bread();
-            spush((uint16_t)v, v < 0 ? 0xFFFF : 0);
+            spush((uint16_t)v, SIGN16_HI(v));
             break;
         }
         case OP_LDC: {
@@ -931,7 +956,7 @@ static void pjvm_exec(void) {
         /* --- array loads (heap + ROM) ------------------------------------- */
         case OP_IALOAD: case OP_AALOAD: {
             alo = spop_lo();
-            blo = spop_lo(); bhi = spop_hi();
+            SPOP32(blo, bhi);
             if (bhi) {
                 /* ROM array: decode 32-bit offset, read via PROG() */
                 uint32_t off = ROM_OFF(bhi, blo) + PJVM_OBJ_HEADER + (uint32_t)alo * 4;
@@ -944,19 +969,19 @@ static void pjvm_exec(void) {
         }
         case OP_BALOAD: {
             alo = spop_lo();
-            blo = spop_lo(); bhi = spop_hi();
+            SPOP32(blo, bhi);
             if (bhi) {
                 int8_t bv = (int8_t)PROG(ROM_OFF(bhi, blo) + PJVM_OBJ_HEADER + alo);
-                spush((uint16_t)(int16_t)bv, bv < 0 ? 0xFFFF : 0);
+                spush((uint16_t)(int16_t)bv, SIGN8_HI(bv));
             } else {
                 int8_t bv = (int8_t)r8(blo + PJVM_OBJ_HEADER + alo);
-                spush((uint16_t)(int16_t)bv, bv < 0 ? 0xFFFF : 0);
+                spush((uint16_t)(int16_t)bv, SIGN8_HI(bv));
             }
             break;
         }
         case OP_CALOAD: {
             alo = spop_lo();
-            blo = spop_lo(); bhi = spop_hi();
+            SPOP32(blo, bhi);
             if (bhi) {
                 uint32_t off = ROM_OFF(bhi, blo) + PJVM_OBJ_HEADER + (uint32_t)alo * 2;
                 spush(PROG16(off), 0);
@@ -967,14 +992,14 @@ static void pjvm_exec(void) {
         }
         case OP_SALOAD: {
             alo = spop_lo();
-            blo = spop_lo(); bhi = spop_hi();
+            SPOP32(blo, bhi);
             if (bhi) {
                 uint32_t off = ROM_OFF(bhi, blo) + PJVM_OBJ_HEADER + (uint32_t)alo * 2;
                 uint16_t sv = PROG16(off);
-                spush(sv, (int16_t)sv < 0 ? 0xFFFF : 0);
+                spush(sv, SIGN16_HI(sv));
             } else {
                 uint16_t sv = r16(blo + PJVM_OBJ_HEADER + alo * 2);
-                spush(sv, (int16_t)sv < 0 ? 0xFFFF : 0);
+                spush(sv, SIGN16_HI(sv));
             }
             break;
         }
@@ -987,9 +1012,10 @@ static void pjvm_exec(void) {
 
         /* --- array stores ------------------------------------------------- */
         case OP_IASTORE: case OP_AASTORE: {
-            alo = spop_lo(); ahi = spop_hi();
+            SPOP32(alo, ahi);
             blo = spop_lo();
-            uint16_t aref = spop_lo(); uint16_t aref_hi = spop_hi();
+            uint16_t aref, aref_hi;
+            SPOP32(aref, aref_hi);
             if (aref_hi) { pjvm_platform_trap(op, (uint16_t)g_pjvm->pc); break; }
             #ifdef PJVM_BOUNDS_CHECK
             { uint16_t alen = r16(aref);
@@ -1005,9 +1031,10 @@ static void pjvm_exec(void) {
             break;
         }
         case OP_BASTORE: {
-            alo = spop_lo(); spop_hi();
+            SPOP_U16(alo);
             blo = spop_lo();
-            uint16_t aref = spop_lo(); uint16_t aref_hi = spop_hi();
+            uint16_t aref, aref_hi;
+            SPOP32(aref, aref_hi);
             if (aref_hi) { pjvm_platform_trap(op, (uint16_t)g_pjvm->pc); break; }
             #ifdef PJVM_BOUNDS_CHECK
             { uint16_t alen = r16(aref);
@@ -1022,9 +1049,10 @@ static void pjvm_exec(void) {
             break;
         }
         case OP_CASTORE: case OP_SASTORE: {
-            alo = spop_lo(); spop_hi();
+            SPOP_U16(alo);
             blo = spop_lo();
-            uint16_t aref = spop_lo(); uint16_t aref_hi = spop_hi();
+            uint16_t aref, aref_hi;
+            SPOP32(aref, aref_hi);
             if (aref_hi) { pjvm_platform_trap(op, (uint16_t)g_pjvm->pc); break; }
             w16(aref + PJVM_OBJ_HEADER + blo * 2, alo);
             break;
@@ -1077,36 +1105,36 @@ static void pjvm_exec(void) {
 
         /* --- arithmetic --------------------------------------------------- */
         case OP_IADD: {
-            blo = spop_lo(); bhi = spop_hi();
-            alo = spop_lo(); ahi = spop_hi();
+            SPOP32(blo, bhi);
+            SPOP32(alo, ahi);
             uint16_t rlo = alo + blo;
             spush(rlo, ahi + bhi + (rlo < alo ? 1 : 0));
             break;
         }
         case OP_ISUB: {
-            blo = spop_lo(); bhi = spop_hi();
-            alo = spop_lo(); ahi = spop_hi();
+            SPOP32(blo, bhi);
+            SPOP32(alo, ahi);
             uint16_t rlo = alo - blo;
             spush(rlo, ahi - bhi - (alo < blo ? 1 : 0));
             break;
         }
         case OP_INEG: {
-            alo = spop_lo(); ahi = spop_hi();
+            SPOP32(alo, ahi);
             uint16_t rlo = ~alo + 1;
             spush(rlo, ~ahi + (rlo == 0 ? 1 : 0));
             break;
         }
         case OP_IAND:
-            blo = spop_lo(); bhi = spop_hi();
-            alo = spop_lo(); ahi = spop_hi();
+            SPOP32(blo, bhi);
+            SPOP32(alo, ahi);
             spush(alo & blo, ahi & bhi); break;
         case OP_IOR:
-            blo = spop_lo(); bhi = spop_hi();
-            alo = spop_lo(); ahi = spop_hi();
+            SPOP32(blo, bhi);
+            SPOP32(alo, ahi);
             spush(alo | blo, ahi | bhi); break;
         case OP_IXOR:
-            blo = spop_lo(); bhi = spop_hi();
-            alo = spop_lo(); ahi = spop_hi();
+            SPOP32(blo, bhi);
+            SPOP32(alo, ahi);
             spush(alo ^ blo, ahi ^ bhi); break;
 
         case OP_IINC: {
@@ -1118,7 +1146,7 @@ static void pjvm_exec(void) {
             uint16_t nlo = old + inc;
             uint16_t carry = (nlo < old) ? 1 : 0;
             g_pjvm->loc_lo[i] = nlo;
-            g_pjvm->loc_hi[i] += (v < 0 ? 0xFFFF : 0) + carry;
+            g_pjvm->loc_hi[i] += SIGN8_HI(v) + carry;
             break;
         }
 
@@ -1133,14 +1161,14 @@ static void pjvm_exec(void) {
         case OP_I2B: {
             alo = spop_lo();
             int8_t v = (int8_t)alo;
-            spush((uint16_t)(int16_t)v, v < 0 ? 0xFFFF : 0); break;
+            spush((uint16_t)(int16_t)v, SIGN8_HI(v)); break;
         }
         case OP_I2C:
             alo = spop_lo();
             spush(alo, 0); break;
         case OP_I2S:
             alo = spop_lo();
-            spush(alo, (int16_t)alo < 0 ? 0xFFFF : 0); break;
+            spush(alo, SIGN16_HI(alo)); break;
 
         /* --- branches ----------------------------------------------------- */
         case OP_IFEQ:      BRANCH1(alo == 0 && ahi == 0)
@@ -1173,14 +1201,14 @@ static void pjvm_exec(void) {
 
         case OP_IF_ACMPEQ: {
             int16_t o = bread();
-            blo = spop_lo(); bhi = spop_hi();
-            alo = spop_lo(); ahi = spop_hi();
+            SPOP32(blo, bhi);
+            SPOP32(alo, ahi);
             if (alo == blo && ahi == bhi) g_pjvm->pc = opc + o; break;
         }
         case OP_IF_ACMPNE: {
             int16_t o = bread();
-            blo = spop_lo(); bhi = spop_hi();
-            alo = spop_lo(); ahi = spop_hi();
+            SPOP32(blo, bhi);
+            SPOP32(alo, ahi);
             if (alo != blo || ahi != bhi) g_pjvm->pc = opc + o; break;
         }
         case OP_GOTO: {
@@ -1195,7 +1223,7 @@ static void pjvm_exec(void) {
             g_pjvm->pc += 2; int16_t def_off = bread();
             g_pjvm->pc += 2; int16_t low_lo = bread();
             g_pjvm->pc += 2; int16_t high_lo = bread();
-            alo = spop_lo(); spop_hi();
+            SPOP_U16(alo);
             int16_t val = (int16_t)alo;
             if (val >= low_lo && val <= high_lo) {
                 uint16_t idx = (uint16_t)(val - low_lo);
@@ -1212,7 +1240,7 @@ static void pjvm_exec(void) {
             g_pjvm->pc = base + (((g_pjvm->pc - base) + 3) & ~3u);
             g_pjvm->pc += 2; int16_t def_off = bread();
             g_pjvm->pc += 2; int16_t npairs = bread();
-            alo = spop_lo(); ahi = spop_hi();
+            SPOP32(alo, ahi);
             uint8_t v0 = (uint8_t)(ahi >> 8), v1 = (uint8_t)ahi,
                     v2 = (uint8_t)(alo >> 8), v3 = (uint8_t)alo;
             uint8_t found = 0;
@@ -1242,7 +1270,7 @@ static void pjvm_exec(void) {
         }
         case OP_PUTSTATIC: {
             uint16_t s = cpread();
-            alo = spop_lo(); ahi = spop_hi();
+            SPOP32(alo, ahi);
 #ifdef PJVM_TRACE_STATIC
             if (s == PJVM_TRACE_STATIC) {
                 fprintf(stderr, "PUTSTATIC sf[%u] = %u (hi=%u) mi=%u pc=%u\n",
@@ -1261,7 +1289,7 @@ static void pjvm_exec(void) {
         }
         case OP_PUTFIELD: {
             uint16_t s = cpread();
-            alo = spop_lo(); ahi = spop_hi();
+            SPOP32(alo, ahi);
             blo = spop_lo();
             uint16_t addr = blo + PJVM_OBJ_HEADER + s * 4;
             w16(addr, alo); w16((uint16_t)(addr + 2), ahi); break;
@@ -1326,7 +1354,7 @@ static void pjvm_exec(void) {
             spush(a, 0); break;
         }
         case OP_ARRAYLENGTH:
-            alo = spop_lo(); ahi = spop_hi();
+            SPOP32(alo, ahi);
             if (ahi) {
                 spush(PROG16(ROM_OFF(ahi, alo)), 0);
             } else {
@@ -1360,7 +1388,7 @@ static void pjvm_exec(void) {
         }
         case OP_INSTANCEOF: {
             uint16_t tci = cpread();
-            alo = spop_lo(); spop_hi();
+            SPOP_U16(alo);
             if (alo == 0) { spush(0, 0); }
             else {
                 uint8_t ci = (uint8_t)r16(alo);
@@ -1376,7 +1404,8 @@ static void pjvm_exec(void) {
 
         /* --- exceptions --------------------------------------------------- */
         case OP_ATHROW: {
-            uint16_t exc_ref = spop_lo(); spop_hi();
+            uint16_t exc_ref;
+            SPOP_U16(exc_ref);
             if (exc_ref == 0) {
                 pjvm_platform_trap(0xBF, opc);
                 return;

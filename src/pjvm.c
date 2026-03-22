@@ -1420,9 +1420,3 @@ static void pjvm_exec(void) {
         }
     }
 }
-
-#undef BINOP32
-#undef SHIFTOP
-#undef BRANCH1
-#undef BRANCH2
-#undef NI

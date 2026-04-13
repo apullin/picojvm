@@ -9,6 +9,7 @@
 #define PJVM_OPTS_H
 
 #define PJVM_HEAP_BUMP      0
+#define PJVM_HEAP_FREELIST  1
 
 #ifndef PJVM_HEAP_MODE
 #define PJVM_HEAP_MODE PJVM_HEAP_BUMP

@@ -128,6 +128,7 @@ typedef struct {
     uint16_t heap_ptr;
     uint16_t heap_base;
     uint16_t heap_limit;      /* exclusive end; 0 means 0x10000 */
+    uint16_t heap_free_head;  /* allocator-private; free-list head */
     uint16_t heap_used;       /* allocator-private; estimated live bytes */
     uint16_t sp_max, lt_max;
     uint8_t  fdepth_max;

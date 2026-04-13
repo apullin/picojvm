@@ -13,6 +13,7 @@
 #define RAW_MEM_SIZE 262144u  /* 256KB — supports source files > 64K for self-hosting */
 #define HEAP_MEM_SIZE 524288u
 #define HEAP_BASE 1u
+#define HEAP_LIMIT 0u         /* 0 means 0x10000 exclusive */
 
 static uint8_t raw_mem[RAW_MEM_SIZE];
 static uint8_t heap_mem[HEAP_MEM_SIZE];
@@ -24,32 +25,20 @@ static uint32_t heap_bytes_used;
 #include "../src/pjvm.h"
 
 uint16_t heap_alloc(PJVMCtx *j, uint16_t size) {
-    uint16_t a = j->heap_ptr;
-    uint32_t end = (uint32_t)a + size;
-
-    if (end > HEAP_MEM_SIZE) {
-        fprintf(stderr, "JVM heap overflow (%u + %u > %u)\n",
-                (unsigned)a, (unsigned)size, (unsigned)HEAP_MEM_SIZE);
+    uint16_t a = pjvm_heap_alloc(j, size);
+    if (a == 0) {
+        uint32_t end = j->heap_limit ? j->heap_limit : 65536u;
+        fprintf(stderr, "JVM heap allocation failed (%u bytes; used=%u limit=%u)\n",
+                (unsigned)size, (unsigned)j->heap_used, (unsigned)end);
         exit(1);
-    }
-    if (end > 65535u) {
-        fprintf(stderr, "JVM heap_ptr overflow! (%u + %u = %u > 65535)\n",
-                (unsigned)a, (unsigned)size, (unsigned)end);
-        exit(1);
-    }
-
-    j->heap_ptr = (uint16_t)end;
-
-    for (uint16_t i = 0; i < size; i++) {
-        heap_mem[a + i] = 0;
     }
 
     heap_alloc_count++;
     heap_bytes_used += size;
     if (getenv("PJVM_HEAP_TRACE"))
-        fprintf(stderr, "HEAP | alloc #%u: %u bytes at %u (heap_ptr=%u, mi=%u)\n",
+        fprintf(stderr, "HEAP | alloc #%u: %u bytes at %u (heap_used=%u, mi=%u)\n",
                 (unsigned)heap_alloc_count, (unsigned)size, (unsigned)a,
-                (unsigned)end, (unsigned)g_pjvm->cur_mi);
+                (unsigned)j->heap_used, (unsigned)g_pjvm->cur_mi);
     return a;
 }
 
@@ -397,7 +386,7 @@ int main(int argc, char **argv) {
             (unsigned)((uint32_t)n_pages * page_size));
 #endif
 
-    ctx.heap_ptr = HEAP_BASE;
+    pjvm_heap_init(&ctx, HEAP_BASE, HEAP_LIMIT);
     ctx.prog_argc = (uint8_t)(argc - prog_argi);
     ctx.prog_argv = (const char **)(argv + prog_argi);
     pjvm_run(&ctx);

@@ -8,6 +8,12 @@
 #ifndef PJVM_OPTS_H
 #define PJVM_OPTS_H
 
+#define PJVM_HEAP_BUMP      0
+
+#ifndef PJVM_HEAP_MODE
+#define PJVM_HEAP_MODE PJVM_HEAP_BUMP
+#endif
+
 /* Reduced-opcode profile for the current selfhost/disk corpus.
  * This intentionally drops standard handlers that the present selfhosted
  * compiler and its generated test corpus do not emit. It is not suitable for

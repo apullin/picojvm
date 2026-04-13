@@ -9,7 +9,6 @@
  */
 
 #include <stdint.h>
-#include <string.h>
 #include "../src/pjvm.h"
 
 #ifndef PJVM_HEAP_SIZE
@@ -23,16 +22,11 @@ static uint8_t heap_mem[PJVM_HEAP_SIZE];
 /* --- Platform callbacks ----------------------------------------------- */
 
 uint16_t heap_alloc(PJVMCtx *j, uint16_t size) {
-    uint16_t a = j->heap_ptr;
-    uint32_t end = (uint32_t)a + size;
-
-    if (end > PJVM_HEAP_SIZE) {
+    uint16_t a = pjvm_heap_alloc(j, size);
+    if (a == 0) {
         pjvm_platform_trap(0xFE, 0);  /* heap overflow */
         return 0;
     }
-
-    j->heap_ptr = (uint16_t)end;
-    memset(&heap_mem[a], 0, size);
     return a;
 }
 
@@ -99,6 +93,6 @@ void pjvm_generic_run(uint8_t *program_data) {
 
     pjvm_prog = program_data;
     pjvm_parse(program_data);
-    ctx.heap_ptr = PJVM_HEAP_BASE;
+    pjvm_heap_init(&ctx, PJVM_HEAP_BASE, (uint16_t)(PJVM_HEAP_BASE + PJVM_HEAP_SIZE));
     pjvm_run(&ctx);
 }

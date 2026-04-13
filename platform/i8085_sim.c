@@ -11,6 +11,7 @@
 /* Output buffer: putchar writes sequentially into free RAM above BSS.
  * BSS ends at ~0x0AE8, stack is near 0x7FB0. 0x7000 is safely between. */
 static uint16_t output_ptr = 0x7000;
+#define HEAP_END 0x7000
 
 /* Embedded .pjvm program data (provided by pjvm_data.c) */
 extern const uint8_t pjvm_program[];
@@ -21,15 +22,8 @@ extern uint8_t _end[];
 #include "../src/pjvm.h"
 
 uint16_t heap_alloc(PJVMCtx *j, uint16_t size) {
-    uint16_t a = j->heap_ptr;
-    uint8_t *p = (uint8_t *)(uintptr_t)a;
-
-    j->heap_ptr = (uint16_t)(j->heap_ptr + size);
-
-    for (uint16_t i = 0; i < size; i++) {
-        p[i] = 0;
-    }
-
+    uint16_t a = pjvm_heap_alloc(j, size);
+    if (a == 0) pjvm_platform_trap(0xFE, 0);
     return a;
 }
 
@@ -152,7 +146,7 @@ int main(void) {
 
     pjvm_prog = (uint8_t *)pjvm_program;
     pjvm_parse(pjvm_prog);
-    ctx.heap_ptr = (uint16_t)(uintptr_t)_end;
+    pjvm_heap_init(&ctx, (uint16_t)(uintptr_t)_end, HEAP_END);
     pjvm_run(&ctx);
     return 0;
 }

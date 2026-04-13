@@ -126,6 +126,9 @@ typedef struct {
     uint8_t  cur_mi;
     int8_t   fdepth;
     uint16_t heap_ptr;
+    uint16_t heap_base;
+    uint16_t heap_limit;      /* exclusive end; 0 means 0x10000 */
+    uint16_t heap_used;       /* allocator-private; estimated live bytes */
     uint16_t sp_max, lt_max;
     uint8_t  fdepth_max;
     const char **prog_argv;
@@ -153,6 +156,9 @@ extern uint8_t *sc;
 /* --- core API (implemented in core.c) --------------------------------- */
 void pjvm_parse(uint8_t *data);
 void pjvm_run(PJVMCtx *j);
+void pjvm_heap_init(PJVMCtx *j, uint16_t start, uint16_t limit);
+uint16_t pjvm_heap_alloc(PJVMCtx *j, uint16_t size);
+void pjvm_heap_free(PJVMCtx *j, uint16_t a);
 
 #ifdef PJVM_PAGED
 void pjvm_pager_init(PJVMPager *p);

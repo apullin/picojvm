@@ -9,19 +9,13 @@
 #define OUTPUT_PORT (*(volatile uint8_t *)0x0200)
 #define PJVM_DATA    ((uint8_t *)0x1000)
 #define HEAP_START  0x4000
+#define HEAP_END    0x7E00
 
 #include "../src/pjvm.h"
 
 uint16_t heap_alloc(PJVMCtx *j, uint16_t size) {
-    uint16_t a = j->heap_ptr;
-    uint8_t *p = (uint8_t *)a;
-
-    j->heap_ptr = (uint16_t)(j->heap_ptr + size);
-
-    for (uint16_t i = 0; i < size; i++) {
-        p[i] = 0;
-    }
-
+    uint16_t a = pjvm_heap_alloc(j, size);
+    if (a == 0) pjvm_platform_trap(0xFE, 0);
     return a;
 }
 
@@ -84,7 +78,7 @@ void pjvm_main(void) {
     static PJVMCtx ctx;  /* BSS — auto-zeroed by CRT */
 
     pjvm_load();
-    ctx.heap_ptr = HEAP_START;
+    pjvm_heap_init(&ctx, HEAP_START, HEAP_END);
     pjvm_run(&ctx);
     __asm__ volatile("hlt");
 }

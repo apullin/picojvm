@@ -125,24 +125,84 @@
 #endif
 #endif
 
+#ifndef PJVM_USE_ASM_CPREAD
 #if defined(PJVM_ASM_HELPERS) && !defined(PJVM_PAGED)
-#define PJVM_USE_ASM_CPREAD           1
-#define PJVM_USE_ASM_ROM_STRING_DATA  1
-#define PJVM_USE_ASM_STRING_LEN       1
-#define PJVM_USE_ASM_STRING_BYTE      1
-#define PJVM_USE_ASM_ARRAYCOPY        1
-#define PJVM_USE_ASM_MEMCMP           1
-#define PJVM_USE_ASM_WRITE_BYTES      1
+#define PJVM_USE_ASM_CPREAD 0
+#else
+#define PJVM_USE_ASM_CPREAD 0
+#endif
+#endif
+
+#ifndef PJVM_USE_ASM_STACK_HELPERS
+#if defined(PJVM_ASM_HELPERS) && !defined(PJVM_PAGED)
+#define PJVM_USE_ASM_STACK_HELPERS 1
+#else
+#define PJVM_USE_ASM_STACK_HELPERS 0
+#endif
+#endif
+
+#ifndef PJVM_USE_ASM_FETCH_HELPERS
+#if defined(PJVM_ASM_HELPERS) && !defined(PJVM_PAGED)
+#define PJVM_USE_ASM_FETCH_HELPERS 0
+#else
+#define PJVM_USE_ASM_FETCH_HELPERS 0
+#endif
+#endif
+
+#ifndef PJVM_USE_ASM_ROM_STRING_DATA
+#if defined(PJVM_ASM_HELPERS) && !defined(PJVM_PAGED)
+#define PJVM_USE_ASM_ROM_STRING_DATA 0
+#else
+#define PJVM_USE_ASM_ROM_STRING_DATA 0
+#endif
+#endif
+
+#ifndef PJVM_USE_ASM_STRING_LEN
+#if defined(PJVM_ASM_HELPERS) && !defined(PJVM_PAGED)
+#define PJVM_USE_ASM_STRING_LEN 0
+#else
+#define PJVM_USE_ASM_STRING_LEN 0
+#endif
+#endif
+
+#ifndef PJVM_USE_ASM_STRING_BYTE
+#if defined(PJVM_ASM_HELPERS) && !defined(PJVM_PAGED)
+#define PJVM_USE_ASM_STRING_BYTE 0
+#else
+#define PJVM_USE_ASM_STRING_BYTE 0
+#endif
+#endif
+
+#ifndef PJVM_USE_ASM_ARRAYCOPY
+#if defined(PJVM_ASM_HELPERS) && !defined(PJVM_PAGED)
+#define PJVM_USE_ASM_ARRAYCOPY 1
+#else
+#define PJVM_USE_ASM_ARRAYCOPY 0
+#endif
+#endif
+
+#ifndef PJVM_USE_ASM_MEMCMP
+#if defined(PJVM_ASM_HELPERS) && !defined(PJVM_PAGED)
+#define PJVM_USE_ASM_MEMCMP 1
+#else
+#define PJVM_USE_ASM_MEMCMP 0
+#endif
+#endif
+
+#ifndef PJVM_USE_ASM_WRITE_BYTES
+#if defined(PJVM_ASM_HELPERS) && !defined(PJVM_PAGED)
+#define PJVM_USE_ASM_WRITE_BYTES 1
+#else
+#define PJVM_USE_ASM_WRITE_BYTES 0
+#endif
+#endif
+
+#ifndef PJVM_USE_ASM_STRING_FROM_BYTES
+#if defined(PJVM_ASM_HELPERS) && !defined(PJVM_PAGED)
 #define PJVM_USE_ASM_STRING_FROM_BYTES 1
 #else
-#define PJVM_USE_ASM_CPREAD           0
-#define PJVM_USE_ASM_ROM_STRING_DATA  0
-#define PJVM_USE_ASM_STRING_LEN       0
-#define PJVM_USE_ASM_STRING_BYTE      0
-#define PJVM_USE_ASM_ARRAYCOPY        0
-#define PJVM_USE_ASM_MEMCMP           0
-#define PJVM_USE_ASM_WRITE_BYTES      0
 #define PJVM_USE_ASM_STRING_FROM_BYTES 0
+#endif
 #endif
 
 #endif /* PJVM_OPTS_H */

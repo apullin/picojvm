@@ -8,10 +8,20 @@
 
 #include <stdint.h>
 
-/* Output buffer: putchar writes sequentially into free RAM above BSS.
- * BSS ends at ~0x0AE8, stack is near 0x7FB0. 0x7000 is safely between. */
-static uint16_t output_ptr = 0x7000;
-#define HEAP_END 0x7000
+/* Output buffer: putchar writes sequentially into a configured RAM window.
+ * The simulator path sometimes needs a smaller heap or a flatter linker map
+ * than the default 32K/32K split, so keep both addresses overrideable. */
+#ifndef PJVM_SIM_OUTPUT_BASE
+#define PJVM_SIM_OUTPUT_BASE 0x7000
+#endif
+#ifndef PJVM_SIM_HEAP_END
+#define PJVM_SIM_HEAP_END 0x7000
+#endif
+#ifndef PJVM_SIM_TRAP_BASE
+#define PJVM_SIM_TRAP_BASE 0x7080
+#endif
+static uint16_t output_ptr;
+#define HEAP_END PJVM_SIM_HEAP_END
 
 /* Embedded .pjvm program data (provided by pjvm_data.c) */
 extern const uint8_t pjvm_program[];
@@ -65,8 +75,9 @@ void pjvm_platform_out(uint16_t port, uint16_t val) {
 }
 
 void pjvm_platform_trap(uint8_t op, uint16_t pc) {
-    (void)op;
-    (void)pc;
+    *(volatile uint8_t *)(uintptr_t)PJVM_SIM_TRAP_BASE = op;
+    *(volatile uint8_t *)(uintptr_t)(PJVM_SIM_TRAP_BASE + 1u) = (uint8_t)pc;
+    *(volatile uint8_t *)(uintptr_t)(PJVM_SIM_TRAP_BASE + 2u) = (uint8_t)(pc >> 8);
     __asm__ volatile("hlt");
 }
 
@@ -144,6 +155,7 @@ int32_t pjvm_platform_file_delete(const uint8_t *name, uint8_t nameLen) {
 int main(void) {
     static PJVMCtx ctx;  /* BSS — auto-zeroed by CRT */
 
+    output_ptr = PJVM_SIM_OUTPUT_BASE;
     pjvm_prog = (uint8_t *)pjvm_program;
     pjvm_parse(pjvm_prog);
     pjvm_heap_init(&ctx, (uint16_t)(uintptr_t)_end, HEAP_END);

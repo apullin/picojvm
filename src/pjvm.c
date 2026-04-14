@@ -88,9 +88,13 @@ uint32_t bytecodes_size;
 uint32_t bc_off, cpr_off, ic_off, sc_off, et_off, cd_off;
 PJVMCtx *g_pjvm;
 
-#ifdef PJVM_ASM_HELPERS
+#if PJVM_USE_ASM_CPREAD
 uint8_t *cpr;
+#endif
+#if PJVM_USE_ASM_FETCH_HELPERS || PJVM_USE_ASM_CPREAD
 uint8_t *bc;
+#endif
+#if PJVM_USE_ASM_ROM_STRING_DATA || PJVM_USE_ASM_STRING_LEN || PJVM_USE_ASM_STRING_BYTE
 uint8_t *sc;
 #endif
 
@@ -192,32 +196,13 @@ void pjvm_pin_chunk(PJVMPager *p, uint16_t chunk) {
 
 /* --- noinline helpers for code size ----------------------------------- */
 
-#ifdef PJVM_ASM_HELPERS
+#if PJVM_USE_ASM_STACK_HELPERS
 /* Provided by i8085_helpers.S */
 extern void     spush(uint16_t lo, uint16_t hi);
 extern uint16_t spop_lo(void);
 extern uint16_t spop_hi(void);
 extern void     lload(uint8_t slot);
 extern void     lstore(uint8_t slot);
-extern uint8_t  bcread(void);
-extern int16_t  bread(void);
-#if PJVM_USE_ASM_CPREAD
-extern uint16_t cpread(void);
-#endif
-#if PJVM_USE_ASM_ROM_STRING_DATA
-extern uint32_t pjvm_rom_string_data(uint16_t idx, uint16_t *len_out);
-#endif
-#if PJVM_USE_ASM_STRING_LEN
-extern uint16_t pjvm_string_len(uint16_t lo, uint16_t hi);
-#endif
-#if PJVM_USE_ASM_STRING_BYTE
-extern uint8_t  pjvm_string_byte(uint16_t lo, uint16_t hi, uint16_t idx);
-#endif
-/* Native handler ASM implementations */
-extern void     pjvm_native_arraycopy(void);
-extern void     pjvm_native_memcmp(void);
-extern void     pjvm_native_write_bytes(void);
-extern void     pjvm_native_string_from_bytes(void);
 #else
 NI static void spush(uint16_t lo, uint16_t hi) {
     g_pjvm->stk_lo[g_pjvm->sp] = lo;
@@ -246,7 +231,12 @@ NI static void lstore(uint8_t slot) {
     g_pjvm->loc_lo[i] = g_pjvm->stk_lo[g_pjvm->sp];
     g_pjvm->loc_hi[i] = g_pjvm->stk_hi[g_pjvm->sp];
 }
+#endif
 
+#if PJVM_USE_ASM_FETCH_HELPERS
+extern uint8_t  bcread(void);
+extern int16_t  bread(void);
+#else
 NI static uint8_t bcread(void) {
     return BC(g_pjvm->pc++);
 }
@@ -256,8 +246,25 @@ NI static int16_t bread(void) {
     g_pjvm->pc += 2;
     return o;
 }
+#endif
 
-#endif /* !PJVM_ASM_HELPERS */
+#if PJVM_USE_ASM_CPREAD
+extern uint16_t cpread(void);
+#endif
+#if PJVM_USE_ASM_ROM_STRING_DATA
+extern uint32_t pjvm_rom_string_data(uint16_t idx, uint16_t *len_out);
+#endif
+#if PJVM_USE_ASM_STRING_LEN
+extern uint16_t pjvm_string_len(uint16_t lo, uint16_t hi);
+#endif
+#if PJVM_USE_ASM_STRING_BYTE
+extern uint8_t  pjvm_string_byte(uint16_t lo, uint16_t hi, uint16_t idx);
+#endif
+/* Native handler ASM implementations */
+extern void     pjvm_native_arraycopy(void);
+extern void     pjvm_native_memcmp(void);
+extern void     pjvm_native_write_bytes(void);
+extern void     pjvm_native_string_from_bytes(void);
 
 /* Common JVM stack pop shapes: one full 32-bit slot or one low-half value. */
 #define SPOP32(lo, hi) do { \
@@ -433,10 +440,14 @@ void pjvm_parse(uint8_t *data) {
             cd_off = 0;
     }
 
-#ifdef PJVM_ASM_HELPERS
+#if PJVM_USE_ASM_CPREAD
     cpr = data + cpr_off;
-    sc  = data + sc_off;
+#endif
+#if PJVM_USE_ASM_FETCH_HELPERS || PJVM_USE_ASM_CPREAD
     bc  = data + bc_off;
+#endif
+#if PJVM_USE_ASM_ROM_STRING_DATA || PJVM_USE_ASM_STRING_LEN || PJVM_USE_ASM_STRING_BYTE
+    sc  = data + sc_off;
 #endif
 }
 

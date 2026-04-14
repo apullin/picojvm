@@ -73,6 +73,7 @@ _spush_bcde:
 /*  spush(uint16_t lo, uint16_t hi) — C-callable operand stack push       */
 /*  Args: lo=[SP+2], hi=[SP+4]                                           */
 /* ====================================================================== */
+#if PJVM_USE_ASM_STACK_HELPERS
     .globl  spush
     .type   spush, @function
 spush:
@@ -86,11 +87,13 @@ spush:
     INX H
     MOV D, M                        ; DE = hi
     JMP _spush_bcde
+#endif
 
 /* ====================================================================== */
 /*  spop_lo(void) → uint16_t in BC                                       */
 /*  Decrements sp, returns stk_lo[sp].                                   */
 /* ====================================================================== */
+#if PJVM_USE_ASM_STACK_HELPERS
     .globl  spop_lo
     .type   spop_lo, @function
 spop_lo:
@@ -108,11 +111,13 @@ spop_lo:
     INX H
     MOV B, M                        ; BC = stk_lo[sp]
     RET
+#endif
 
 /* ====================================================================== */
 /*  spop_hi(void) → uint16_t in BC                                       */
 /*  Returns stk_hi[sp] (call after spop_lo; sp already decremented).     */
 /* ====================================================================== */
+#if PJVM_USE_ASM_STACK_HELPERS
     .globl  spop_hi
     .type   spop_hi, @function
 spop_hi:
@@ -131,11 +136,13 @@ spop_hi:
     INX H
     MOV B, M                        ; BC = stk_hi[sp]
     RET
+#endif
 
 /* ====================================================================== */
 /*  bcread(void) → uint8_t in A                                          */
 /*  Returns bc[pc++].                                                     */
 /* ====================================================================== */
+#if PJVM_USE_ASM_FETCH_HELPERS
     .globl  bcread
     .type   bcread, @function
 bcread:
@@ -154,11 +161,13 @@ bcread:
     DAD D                           ; HL = &bc[old pc]
     MOV A, M                        ; A = byte
     RET
+#endif
 
 /* ====================================================================== */
 /*  bread(void) → int16_t in BC                                          */
 /*  Reads big-endian 2-byte branch offset, advances pc by 2.             */
 /* ====================================================================== */
+#if PJVM_USE_ASM_FETCH_HELPERS
     .globl  bread
     .type   bread, @function
 bread:
@@ -181,6 +190,7 @@ bread:
     INX H
     MOV C, M                        ; C = bc[pc+1] (low byte)
     RET
+#endif
 
 #if PJVM_USE_ASM_CPREAD
 /* ====================================================================== */
@@ -397,6 +407,7 @@ pjvm_string_byte:
 /*  lload(uint8_t slot) — load local onto operand stack                   */
 /*  Args: slot=[SP+2] (low byte)                                         */
 /* ====================================================================== */
+#if PJVM_USE_ASM_STACK_HELPERS
     .globl  lload
     .type   lload, @function
 lload:
@@ -431,11 +442,13 @@ lload:
     POP B                           ; BC = lo
 
     JMP _spush_bcde
+#endif
 
 /* ====================================================================== */
 /*  lstore(uint8_t slot) — pop operand stack into local                   */
 /*  Args: slot=[SP+2] (low byte)                                         */
 /* ====================================================================== */
+#if PJVM_USE_ASM_STACK_HELPERS
     .globl  lstore
     .type   lstore, @function
 lstore:
@@ -500,6 +513,7 @@ lstore:
     INX H
     MOV M, D                        ; loc_hi[i] = stk_hi[sp]
     RET
+#endif
 
 /* ====================================================================== */
 /*  Native handler ASM implementations                                    */
@@ -515,6 +529,7 @@ lstore:
 /*  JVM args: src(ref), srcOff(int), dst(ref), dstOff(int), len(int)      */
 /*  Pops in reverse: len, dstOff, dst, srcOff, src                        */
 /* ====================================================================== */
+#if PJVM_USE_ASM_ARRAYCOPY
     .globl  pjvm_native_arraycopy
     .type   pjvm_native_arraycopy, @function
 pjvm_native_arraycopy:
@@ -559,6 +574,7 @@ pjvm_native_arraycopy:
     ORA C
     JNZ .Lac_loop
     RET
+#endif
 
 /* ====================================================================== */
 /*  pjvm_native_memcmp(void)                                              */
@@ -566,6 +582,7 @@ pjvm_native_arraycopy:
 /*  Pops in reverse: len, bOff, bref, aOff, aref                         */
 /*  Pushes int32_t result (sign of first difference) via _spush_bcde.     */
 /* ====================================================================== */
+#if PJVM_USE_ASM_MEMCMP
     .globl  pjvm_native_memcmp
     .type   pjvm_native_memcmp, @function
 pjvm_native_memcmp:
@@ -635,12 +652,14 @@ pjvm_native_memcmp:
     MOV D, B
     MOV E, B
     JMP _spush_bcde
+#endif
 
 /* ====================================================================== */
 /*  pjvm_native_write_bytes(void)                                         */
 /*  JVM args: ref, off(int), len(int)                                     */
 /*  Pops in reverse: len, off, ref                                        */
 /* ====================================================================== */
+#if PJVM_USE_ASM_WRITE_BYTES
     .globl  pjvm_native_write_bytes
     .type   pjvm_native_write_bytes, @function
 pjvm_native_write_bytes:
@@ -680,6 +699,7 @@ pjvm_native_write_bytes:
     ORA C
     JNZ .Lwb_loop
     RET
+#endif
 
 /* ====================================================================== */
 /*  pjvm_native_string_from_bytes(void)                                   */
@@ -687,6 +707,7 @@ pjvm_native_write_bytes:
 /*  Pops in reverse: len, off, src                                        */
 /*  Allocates String object (4-byte header + data), pushes ref.           */
 /* ====================================================================== */
+#if PJVM_USE_ASM_STRING_FROM_BYTES
     .globl  pjvm_native_string_from_bytes
     .type   pjvm_native_string_from_bytes, @function
 pjvm_native_string_from_bytes:
@@ -708,17 +729,36 @@ pjvm_native_string_from_bytes:
     PUSH B                          ; save len
     PUSH H                          ; save src_addr
 
-    /* heap_alloc(g_pjvm, len + 4) */
+    /* heap_alloc(g_pjvm, len + 4, PJVM_HEAP_KIND_STRING) */
     MOV H, B
     MOV L, C
     LXI D, 4
     DAD D                           ; HL = len + 4
-    PUSH H                          ; arg: size
+    XCHG                            ; DE = size
+    LXI H, 65531
+    DAD SP
+    SPHL                            ; reserve 5-byte arg area
+    MOV C, L
+    MOV B, H                        ; BC = arg base
+    INX H
+    INX H
+    MOV M, E
+    INX H
+    MOV M, D                        ; [sp+2..3] = size
+    MVI A, 6                        ; PJVM_HEAP_KIND_STRING
+    INX H
+    MOV M, A                        ; [sp+4] = kind
     LHLD g_pjvm
-    PUSH H                          ; arg: j
+    XCHG                            ; DE = j
+    MOV H, B
+    MOV L, C                        ; HL = arg base
+    MOV M, E
+    INX H
+    MOV M, D                        ; [sp+0..1] = j
     CALL heap_alloc                 ; BC = a (allocated address)
-    POP H                           ; clean j
-    POP H                           ; clean size
+    LXI H, 5
+    DAD SP
+    SPHL                            ; release arg area
 
     POP D                           ; DE = src_addr
     POP H                           ; HL = len
@@ -761,3 +801,4 @@ pjvm_native_string_from_bytes:
     POP B                           ; BC = a
     LXI D, 0                        ; DE = 0 (hi)
     JMP _spush_bcde
+#endif

@@ -14,7 +14,7 @@ GC_DEMO_RANDOM    = $(BUILDDIR)/gc-policy-demo-random
 GC_COLLECT_TEST   = $(BUILDDIR)/gc-collect-test
 
 # Single-class tests
-TESTS_SINGLE = Fib HelloWorld BubbleSort Counter StringTest RomStringTest StaticInitTest MultiArrayTest StringSwitchTest ConstTest
+TESTS_SINGLE = Fib HelloWorld BubbleSort Counter StringTest RomStringTest NativeOpsTest StaticInitTest MultiArrayTest StringSwitchTest ConstTest
 TESTS_MULTI  = Shapes Features InterfaceTest ExceptionTest
 TESTS_PAGER  = BigSwitch BigLUT
 ALL_TESTS    = $(TESTS_SINGLE) $(TESTS_MULTI)
@@ -27,6 +27,7 @@ LLD      = $(ROOT)/llvm-project/build-clang-8085/bin/ld.lld
 OBJCOPY  = $(ROOT)/llvm-project/build-clang-8085/bin/llvm-objcopy
 SIZE     = $(ROOT)/llvm-project/build-clang-8085/bin/llvm-size
 TRACE    = $(ROOT)/i8085-trace/build/i8085-trace
+SIM_VERIFY = $(ROOT)/tooling/examples/verify_dump.py
 CRT      = $(ROOT)/sysroot/crt/crt0.S
 LIBGCC   = $(ROOT)/sysroot/lib/libgcc.a
 LIBC     = $(ROOT)/sysroot/lib/libc.a
@@ -34,6 +35,20 @@ LDSCRIPT = $(ROOT)/sysroot/ldscripts/i8085-32kram-32krom.ld
 TARGET_OPT = Oz
 BUILDDIR = build
 TARGET_VM_OPTS ?=
+TARGET_ASM_HELPERS ?= 1
+SIM_DUMP_ADDR ?= 0x7000
+PJVM_TAG = $(if $(PJVM_FILE),$(basename $(notdir $(PJVM_FILE))),pjvm)
+PJVM_DATA_C = $(BUILDDIR)/$(PJVM_TAG)_data.c
+PJVM_DATA_O = $(BUILDDIR)/$(PJVM_TAG)_data.o
+TARGET_ELF = $(BUILDDIR)/$(PJVM_TAG).elf
+TARGET_BIN = $(BUILDDIR)/$(PJVM_TAG).bin
+ifeq ($(TARGET_ASM_HELPERS),1)
+TARGET_ASM_HELPERS_DEF = -DPJVM_ASM_HELPERS
+TARGET_HELPER_OBJS = $(BUILDDIR)/i8085_helpers.o
+else
+TARGET_ASM_HELPERS_DEF =
+TARGET_HELPER_OBJS =
+endif
 
 PICOJVM_PAGED = ./picojvm-paged
 
@@ -222,20 +237,17 @@ $(BUILDDIR):
 	mkdir -p $(BUILDDIR)
 
 # Convert .pjvm binary to C source with const array
-$(BUILDDIR)/pjvm_data.c: | $(BUILDDIR)
-	@echo "// Auto-generated — .pjvm program data" > $@
-	@echo "#include <stdint.h>" >> $@
-	@echo "const uint8_t pjvm_program[] = {" >> $@
-	@$(PYTHON) -c "import sys; d=open(sys.argv[1],'rb').read(); \
-		lines=['    '+', '.join(f'0x{b:02x}' for b in d[i:i+16]) for i in range(0,len(d),16)]; \
-		print(',\n'.join(lines))" $(PJVM_FILE) >> $@
-	@echo "};" >> $@
+$(PJVM_DATA_C): FORCE $(PJVM_FILE) | $(BUILDDIR)
+	@$(PYTHON) -c "import pathlib, sys; d = pathlib.Path(sys.argv[1]).read_bytes(); \
+lines = ',\\n'.join('    ' + ', '.join(f'0x{b:02x}' for b in d[i:i+16]) for i in range(0, len(d), 16)); \
+pathlib.Path(sys.argv[2]).write_text('// Auto-generated — .pjvm program data\\n#include <stdint.h>\\nconst uint8_t pjvm_program[] = {\\n' + lines + '\\n};\\n')" \
+		$(PJVM_FILE) $@
 
 $(BUILDDIR)/crt0.o: $(CRT) | $(BUILDDIR)
 	$(CLANG) --target=i8085-unknown-elf -ffreestanding -fno-builtin -$(TARGET_OPT) -c $< -o $@
 
 $(BUILDDIR)/pjvm.o: src/pjvm.c src/pjvm.h | $(BUILDDIR)
-	$(CLANG) --target=i8085-unknown-elf -ffreestanding -fno-builtin -$(TARGET_OPT) $(SIM_CAPS) $(TARGET_VM_OPTS) -DPJVM_ASM_HELPERS -c $< -o $@
+	$(CLANG) --target=i8085-unknown-elf -ffreestanding -fno-builtin -$(TARGET_OPT) $(SIM_CAPS) $(TARGET_VM_OPTS) $(TARGET_ASM_HELPERS_DEF) -c $< -o $@
 
 $(BUILDDIR)/pjvm_heap.o: src/pjvm_heap.c src/pjvm.h | $(BUILDDIR)
 	$(CLANG) --target=i8085-unknown-elf -ffreestanding -fno-builtin -ffunction-sections -$(TARGET_OPT) $(SIM_CAPS) $(TARGET_VM_OPTS) -c $< -o $@
@@ -244,34 +256,47 @@ $(BUILDDIR)/pjvm_gc.o: src/pjvm_gc.c src/pjvm.h | $(BUILDDIR)
 	$(CLANG) --target=i8085-unknown-elf -ffreestanding -fno-builtin -ffunction-sections -$(TARGET_OPT) $(SIM_CAPS) $(TARGET_VM_OPTS) -c $< -o $@
 
 $(BUILDDIR)/i8085_sim.o: platform/i8085_sim.c src/pjvm.h | $(BUILDDIR)
-	$(CLANG) --target=i8085-unknown-elf -ffreestanding -fno-builtin -$(TARGET_OPT) $(SIM_CAPS) -DPJVM_ASM_HELPERS -c $< -o $@
+	$(CLANG) --target=i8085-unknown-elf -ffreestanding -fno-builtin -$(TARGET_OPT) $(SIM_CAPS) $(TARGET_VM_OPTS) $(TARGET_ASM_HELPERS_DEF) -c $< -o $@
 
 $(BUILDDIR)/i8085_helpers.o: platform/i8085_helpers.S | $(BUILDDIR)
-	$(CLANG) --target=i8085-unknown-elf -DPJVM_ASM_HELPERS -c $< -o $@
+	$(CLANG) --target=i8085-unknown-elf $(TARGET_VM_OPTS) -DPJVM_ASM_HELPERS -c $< -o $@
 
-$(BUILDDIR)/pjvm_data.o: $(BUILDDIR)/pjvm_data.c | $(BUILDDIR)
+$(PJVM_DATA_O): $(PJVM_DATA_C) | $(BUILDDIR)
 	$(CLANG) --target=i8085-unknown-elf -ffreestanding -fno-builtin -$(TARGET_OPT) -c $< -o $@
 
-$(BUILDDIR)/picojvm.elf: $(BUILDDIR)/crt0.o $(BUILDDIR)/pjvm.o $(BUILDDIR)/pjvm_heap.o $(BUILDDIR)/pjvm_gc.o $(BUILDDIR)/i8085_sim.o $(BUILDDIR)/i8085_helpers.o $(BUILDDIR)/pjvm_data.o $(LIBGCC) $(LIBC)
+$(BUILDDIR)/%.sim.dump: tests/%.pjvm | $(BUILDDIR)
+	@$(MAKE) --no-print-directory sim-$* TARGET_VM_OPTS="$(TARGET_VM_OPTS)" TARGET_ASM_HELPERS="$(TARGET_ASM_HELPERS)" SIM_DUMP_ADDR="$(SIM_DUMP_ADDR)" > $@ 2>&1
+
+$(TARGET_ELF): $(BUILDDIR)/crt0.o $(BUILDDIR)/pjvm.o $(BUILDDIR)/pjvm_heap.o $(BUILDDIR)/pjvm_gc.o $(BUILDDIR)/i8085_sim.o $(TARGET_HELPER_OBJS) $(PJVM_DATA_O) $(LIBGCC) $(LIBC)
 	$(LLD) -m i8085elf --gc-sections -T $(LDSCRIPT) -o $@ $^ $(LIBGCC)
 
-$(BUILDDIR)/picojvm.bin: $(BUILDDIR)/picojvm.elf
+$(TARGET_BIN): $(TARGET_ELF)
 	$(OBJCOPY) -O binary $< $@
 
 # Build for 8085 simulator: make sim PJVM_FILE=tests/Fib.pjvm
-sim: $(BUILDDIR)/picojvm.bin
-	@$(SIZE) $(BUILDDIR)/picojvm.elf
+sim: $(TARGET_BIN)
+	@$(SIZE) $(TARGET_ELF)
 	@echo "--- Running on 8085 simulator ---"
-	$(TRACE) -e 0x0000 -l 0x0000 -n 50000000 -S -q -d 0x7000:128 $(BUILDDIR)/picojvm.bin
+	$(TRACE) -e 0x0000 -l 0x0000 -n 50000000 -S -q -d $(SIM_DUMP_ADDR):128 $(TARGET_BIN)
 
 # Build + run a specific test: make sim-Fib
 sim-%: tests/%.pjvm
-	$(MAKE) sim PJVM_FILE=tests/$*.pjvm TARGET_VM_OPTS="$(TARGET_VM_OPTS)"
+	$(MAKE) sim PJVM_FILE=tests/$*.pjvm TARGET_VM_OPTS="$(TARGET_VM_OPTS)" TARGET_ASM_HELPERS="$(TARGET_ASM_HELPERS)"
+
+test-sim-%: $(BUILDDIR)/%.sim.dump $(EXPDIR)/%.hex
+	@$(PYTHON) $(SIM_VERIFY) --dump $< --expected $(EXPDIR)/$*.hex >/dev/null
+	@echo "PASS: $* [sim]"
+
+test-sim-smoke:
+	@for t in Fib RomStringTest NativeOpsTest; do \
+		$(MAKE) --no-print-directory test-sim-$$t; \
+	done
 
 clean:
 	rm -f $(PICOJVM) $(PICOJVM_PAGED) tests/*.class tests/*.pjvm tests/*.pjvmmap
 	rm -rf $(BUILDDIR)
 
+.PHONY: FORCE
 .PHONY: all test test-paged test-paged-stress clean sim
 .PHONY: gc-demo-manual gc-demo-allocfail gc-demo-watermark75 gc-demo-return gc-demo-random
-.PHONY: gc-policy-test test-gc-collect test-alloc-heavy test-paged-alloc-heavy test-gc-alloc-heavy
+.PHONY: gc-policy-test test-gc-collect test-alloc-heavy test-paged-alloc-heavy test-gc-alloc-heavy test-sim-smoke

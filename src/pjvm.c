@@ -101,14 +101,16 @@ uint8_t *sc;
 /* --- internal globals (file-scope) ------------------------------------ */
 static uint16_t n_static_fields;
 static uint8_t  n_int_constants, n_string_constants;
-static uint8_t  region_flags;  /* byte 9: bit0=pin_hints, bit2=const_data */
+uint8_t  region_flags;  /* byte 9: bit0=pin_hints, bit1=ref bitmaps, bit2=const_data */
 static uint8_t  m_ml[PJVM_METHOD_CAP], m_ac[PJVM_METHOD_CAP];
 static uint8_t  m_fl[PJVM_METHOD_CAP], m_vs[PJVM_METHOD_CAP], m_vmid[PJVM_METHOD_CAP];
 static uint8_t  m_ec[PJVM_METHOD_CAP], m_eo[PJVM_METHOD_CAP];
 static uint32_t m_co[PJVM_METHOD_CAP];
 static uint16_t m_cb[PJVM_METHOD_CAP];
-static uint8_t  cls_pid[PJVM_CLASS_CAP], cls_nf[PJVM_CLASS_CAP];
+static uint8_t  cls_pid[PJVM_CLASS_CAP];
+uint8_t  cls_nf[PJVM_CLASS_CAP];
 static uint8_t  cls_vb[PJVM_CLASS_CAP], cls_vs[PJVM_CLASS_CAP], cls_ci[PJVM_CLASS_CAP];
+uint16_t cls_rbo[PJVM_CLASS_CAP];
 static uint8_t  vt[PJVM_VTABLE_CAP];
 
 /* --- program image access macro --------------------------------------- */
@@ -193,6 +195,10 @@ void pjvm_pin_chunk(PJVMPager *p, uint16_t chunk) {
 }
 
 #endif /* PJVM_PAGED */
+
+uint8_t pjvm_prog_read(uint32_t off) {
+    return PROG(off);
+}
 
 /* --- noinline helpers for code size ----------------------------------- */
 
@@ -400,6 +406,12 @@ void pjvm_parse(uint8_t *data) {
         cls_vb[i] = vo;
         for (uint8_t jj = 0; jj < cls_vs[i]; jj++)
             vt[vo++] = *p++;
+        if (region_flags & PJVM_RF_REF_BITMAPS) {
+            cls_rbo[i] = (uint16_t)(p - data);
+            p += (uint8_t)((cls_nf[i] + 7u) >> 3);
+        } else {
+            cls_rbo[i] = 0;
+        }
     }
 
     for (uint8_t i = 0; i < n_methods; i++) {

@@ -28,6 +28,7 @@ PJVM_ET_ENTRY     = 7       # exception table entry size
 
 # region_flags (header byte 9)
 PJVM_RF_PIN_HINTS  = 0x01   # bit 0: pin hints present
+PJVM_RF_REF_BITMAPS = 0x02  # bit 1: per-class ref bitmaps present
 PJVM_RF_CONST_DATA = 0x04   # bit 2: const_data section present
 
 # CP resolution flags
@@ -154,6 +155,10 @@ def count_args(descriptor):
         else:
             raise ValueError(f"Unknown descriptor char: {c}")
     return count
+
+
+def is_ref_descriptor(descriptor):
+    return descriptor.startswith("L") or descriptor.startswith("[")
 
 
 def _skip_annotation_value(r):
@@ -526,6 +531,7 @@ class ClassInfo:
         self.const_fields = set()    # names of @Const static final array fields
         self.own_instance_fields = [] # (name, global_slot_index) pairs
         self.all_instance_fields = [] # names, including inherited
+        self.all_instance_field_is_ref = [] # bools, including inherited
         self.vtable = []             # list of global method indices
         self.method_vtable_slots = {}  # (name, desc) -> vtable_slot
         self.global_methods = {}     # (name, desc) -> global method index
@@ -683,11 +689,14 @@ def pack_pjvm(class_data_list, verbose=False, v2=False, pin_hints=None):  # v2 i
 
         if parent:
             cls.all_instance_fields = list(parent.all_instance_fields)
+            cls.all_instance_field_is_ref = list(parent.all_instance_field_is_ref)
         else:
             cls.all_instance_fields = []
+            cls.all_instance_field_is_ref = []
 
         for f_access, f_name_idx, f_desc_idx, f_is_const in cls.fields_raw:
             field_name = cls.cp[f_name_idx][1]
+            field_desc = cls.cp[f_desc_idx][1]
             if f_access & ACC_STATIC:  # ACC_STATIC
                 cls.static_fields.append(field_name)
                 if f_is_const:
@@ -696,6 +705,7 @@ def pack_pjvm(class_data_list, verbose=False, v2=False, pin_hints=None):  # v2 i
                 slot = len(cls.all_instance_fields)
                 cls.own_instance_fields.append((field_name, slot))
                 cls.all_instance_fields.append(field_name)
+                cls.all_instance_field_is_ref.append(is_ref_descriptor(field_desc))
 
         if verbose and cls.all_instance_fields:
             print(f"    Instance fields: {cls.all_instance_fields}")
@@ -1177,6 +1187,7 @@ def pack_pjvm(class_data_list, verbose=False, v2=False, pin_hints=None):  # v2 i
     region_flags = 0
     if pin_hints:
         region_flags |= PJVM_RF_PIN_HINTS
+    region_flags |= PJVM_RF_REF_BITMAPS
     if const_arrays:
         region_flags |= PJVM_RF_CONST_DATA
     out.append(PJVM_MAGIC)     # [0] magic
@@ -1200,6 +1211,14 @@ def pack_pjvm(class_data_list, verbose=False, v2=False, pin_hints=None):  # v2 i
         out.append(cls.clinit_mi)
         for vt_entry in cls.vtable:
             out.append(vt_entry)
+        n_bitmap = (len(cls.all_instance_field_is_ref) + 7) // 8
+        for byte_idx in range(n_bitmap):
+            bits = 0
+            for bit in range(8):
+                slot = byte_idx * 8 + bit
+                if slot < len(cls.all_instance_field_is_ref) and cls.all_instance_field_is_ref[slot]:
+                    bits |= 1 << bit
+            out.append(bits)
 
     # Method table
     for mt in method_table:
@@ -1300,7 +1319,9 @@ def pack_pjvm(class_data_list, verbose=False, v2=False, pin_hints=None):  # v2 i
     if verbose:
         print(f"\n.pjvm output (v3): {len(out)} bytes")
         print(f"  Header: {hdr_size} bytes")
-        ct_size = sum(4 + len(classes[n].vtable) for n in class_order)
+        ct_size = sum(4 + len(classes[n].vtable) +
+                      ((len(classes[n].all_instance_field_is_ref) + 7) // 8)
+                      for n in class_order)
         print(f"  Class table: {len(class_order)} classes, {ct_size} bytes")
         print(f"  Method table: {len(method_table)} × {mt_entry_size} = "
               f"{len(method_table) * mt_entry_size} bytes")

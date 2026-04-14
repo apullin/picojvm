@@ -12,6 +12,14 @@ uint8_t n_methods, main_mi, n_classes;
 uint32_t bytecodes_size;
 uint32_t bc_off, cpr_off, ic_off, sc_off, et_off, cd_off;
 PJVMCtx *g_pjvm;
+uint8_t region_flags;
+uint8_t cls_nf[PJVM_CLASS_CAP];
+uint16_t cls_rbo[PJVM_CLASS_CAP];
+
+uint8_t pjvm_prog_read(uint32_t off) {
+    (void)off;
+    return 0;
+}
 
 uint16_t heap_alloc(PJVMCtx *j, uint16_t size, uint8_t kind) {
     return pjvm_heap_alloc(j, size, kind);

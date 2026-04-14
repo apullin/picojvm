@@ -18,7 +18,7 @@ picoJVM itself.
 - **Program-space paging** — LRU page cache allows programs larger than
   available RAM; only active code pages reside in memory
 - **Configurable heap backends** — tiny bump allocator by default, optional
-  coalescing free-list backend, and an experimental non-moving mark-sweep GC
+  coalescing free-list backend, and an optional non-moving mark-sweep GC
 - **Execution context struct** — stack, locals, frames, and heap live in
   a `PJVMCtx` struct passed to all API calls
 - **File I/O** — native file operations for disk-backed compilation on
@@ -119,7 +119,7 @@ make test-all
 3. Link with `src/pjvm.c`
 4. Override capacity macros with `-D` flags as needed for your RAM budget
 
-### Heap Backends and Experimental GC
+### Heap Backends and GC
 
 The default build uses a simple bump allocator for minimum size.
 
@@ -128,12 +128,16 @@ Optional heap backends are selected with `PJVM_HEAP_MODE`:
 - `PJVM_HEAP_BUMP` — default, smallest code size
 - `PJVM_HEAP_FREELIST` — coalescing free-list allocator
 
-On the `gc-experiment` branch, the free-list backend also supports an
-experimental non-moving mark-sweep collector. The current collector uses:
+The free-list backend also supports a non-moving mark-sweep collector. The
+current collector uses:
 
 - exact roots from operand stack, locals, and statics
 - a non-moving sweep over the free-list heap
-- conservative scanning of object/ref-array 4-byte slots
+- exact ref-array element scanning
+- exact object-field scanning when `.pjvm` class metadata includes per-class
+  reference bitmaps
+- conservative object fallback for older/self-hosted `.pjvm` binaries that do
+  not yet emit that metadata
 
 GC trigger policy is controlled by `PJVM_GC_TRIGGERS`, combining any of:
 
@@ -150,6 +154,12 @@ Current recommended GC configuration:
 
 This is the configuration exercised by the current host compatibility suite,
 direct collector tests, and 8085 simulator GC smoke/stress runs.
+
+The 8085 simulator uses two GC configs:
+
+- smoke runs use a roomier simulated heap to validate semantics on the larger
+  GC-enabled runtime image
+- `AllocHeavyTest` keeps a tighter heap cap to force real collection pressure
 
 Host examples:
 

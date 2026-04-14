@@ -1,11 +1,10 @@
 /*
  * pjvm_gc.c -- GC trigger policy and optional mark/sweep collector.
  *
- * The first real collector is intentionally conservative inside heap objects:
- * roots are exact (stack/locals/statics), while object instance fields are
- * scanned as 4-byte slots and treated as refs only if they exactly match the
- * payload start of an allocated heap block. That keeps the initial design
- * non-moving and avoids a .pjvm metadata format change.
+ * Roots are exact. Heap scanning is exact for ref arrays and for object
+ * instances when the optional per-class ref bitmaps are present in the .pjvm
+ * image. Older binaries without bitmap metadata fall back to conservative
+ * object-slot scanning so GC remains backward-compatible.
  */
 
 #define PJVM_GC_IMPL 1
@@ -108,6 +107,41 @@ static void pjvm_gc_scan_words(PJVMCtx *j, uint16_t start, uint16_t size) {
     }
 }
 
+static void pjvm_gc_scan_object(PJVMCtx *j, uint16_t payload, uint16_t payload_size) {
+    uint8_t ci;
+    uint8_t nf;
+    uint16_t bitmap_off;
+
+    if (payload_size <= PJVM_OBJ_HEADER) return;
+
+    ci = (uint8_t)r16(payload);
+    if (ci >= n_classes) {
+        pjvm_gc_scan_words(j,
+                           (uint16_t)(payload + PJVM_OBJ_HEADER),
+                           (uint16_t)(payload_size - PJVM_OBJ_HEADER));
+        return;
+    }
+
+    nf = cls_nf[ci];
+    bitmap_off = cls_rbo[ci];
+    if ((region_flags & PJVM_RF_REF_BITMAPS) == 0 || bitmap_off == 0) {
+        pjvm_gc_scan_words(j,
+                           (uint16_t)(payload + PJVM_OBJ_HEADER),
+                           (uint16_t)(payload_size - PJVM_OBJ_HEADER));
+        return;
+    }
+
+    for (uint8_t slot = 0; slot < nf; slot++) {
+        uint8_t bits = pjvm_prog_read((uint32_t)bitmap_off + (uint32_t)(slot >> 3));
+        if ((bits & (uint8_t)(1u << (slot & 7u))) != 0) {
+            uint16_t addr = (uint16_t)(payload + PJVM_OBJ_HEADER + (uint16_t)slot * 4u);
+            uint16_t lo = r16(addr);
+            uint16_t hi = r16((uint16_t)(addr + 2u));
+            (void)pjvm_gc_mark_ref(j, lo, hi);
+        }
+    }
+}
+
 static void pjvm_gc_scan_block(PJVMCtx *j, uint16_t blk) {
     uint16_t meta = pjvm_gc_blk_meta(blk);
     uint8_t kind = (uint8_t)(meta & PJVM_HEAP_META_KIND_MASK);
@@ -118,7 +152,9 @@ static void pjvm_gc_scan_block(PJVMCtx *j, uint16_t blk) {
 
     if (payload_size <= PJVM_OBJ_HEADER) return;
 
-    if (kind == PJVM_HEAP_KIND_OBJECT || kind == PJVM_HEAP_KIND_REF_ARRAY) {
+    if (kind == PJVM_HEAP_KIND_OBJECT) {
+        pjvm_gc_scan_object(j, payload, payload_size);
+    } else if (kind == PJVM_HEAP_KIND_REF_ARRAY) {
         pjvm_gc_scan_words(j,
                            (uint16_t)(payload + PJVM_OBJ_HEADER),
                            (uint16_t)(payload_size - PJVM_OBJ_HEADER));

@@ -13,6 +13,7 @@ GC_DEMO_RETURN    = $(BUILDDIR)/gc-policy-demo-return
 GC_DEMO_RANDOM    = $(BUILDDIR)/gc-policy-demo-random
 GC_COLLECT_TEST   = $(BUILDDIR)/gc-collect-test
 GC_FRAGMENT_TEST  = $(BUILDDIR)/gc-fragment-test
+GC_EXACT_TEST     = $(BUILDDIR)/gc-exact-test
 
 # Single-class tests
 TESTS_SINGLE = Fib HelloWorld BubbleSort Counter StringTest RomStringTest NativeOpsTest StaticInitTest MultiArrayTest StringSwitchTest ConstTest
@@ -26,9 +27,11 @@ ROOT     = $(shell cd ../.. && pwd)
 GC_DEFAULT_OPTS = -DPJVM_HEAP_MODE=PJVM_HEAP_FREELIST -DPJVM_GC_TRIGGERS=3 -DPJVM_GC_WATERMARK_PCT=75
 GC_HOST_PRESSURE_LIMIT ?= 2049
 GC_SIM_OUTPUT_BASE ?= 0xE000
-GC_SIM_HEAP_END ?= 0x9E00
+GC_SIM_SMOKE_HEAP_END ?= 0xA000
+GC_SIM_HEAP_END ?= 0xA000
 GC_SIM_TRAP_BASE ?= 0xE080
 GC_SIM_FLAT_LDSCRIPT = $(ROOT)/sysroot/ldscripts/i8085-64k-flat.ld
+GC_SIM_SMOKE_OPTS = $(GC_DEFAULT_OPTS) -DPJVM_SIM_HEAP_END=$(GC_SIM_SMOKE_HEAP_END) -DPJVM_SIM_OUTPUT_BASE=$(GC_SIM_OUTPUT_BASE) -DPJVM_SIM_TRAP_BASE=$(GC_SIM_TRAP_BASE)
 GC_SIM_STRESS_OPTS = $(GC_DEFAULT_OPTS) -DPJVM_SIM_HEAP_END=$(GC_SIM_HEAP_END) -DPJVM_SIM_OUTPUT_BASE=$(GC_SIM_OUTPUT_BASE) -DPJVM_SIM_TRAP_BASE=$(GC_SIM_TRAP_BASE)
 CLANG    = $(ROOT)/llvm-project/build-clang-8085/bin/clang
 LLD      = $(ROOT)/llvm-project/build-clang-8085/bin/ld.lld
@@ -218,6 +221,9 @@ $(GC_COLLECT_TEST): tests/gc_collect_test.c src/pjvm_heap.c src/pjvm_gc.c src/pj
 $(GC_FRAGMENT_TEST): tests/gc_fragment_test.c src/pjvm_heap.c src/pjvm_gc.c src/pjvm.h | $(BUILDDIR)
 	$(CC) $(CFLAGS) -DPJVM_HEAP_MODE=PJVM_HEAP_FREELIST -DPJVM_GC_TRIGGERS=PJVM_GC_TRIG_ALLOC_FAIL -o $@ tests/gc_fragment_test.c src/pjvm_heap.c src/pjvm_gc.c
 
+$(GC_EXACT_TEST): tests/gc_exact_test.c src/pjvm.c src/pjvm_heap.c src/pjvm_gc.c src/pjvm.h | $(BUILDDIR)
+	$(CC) $(CFLAGS) -DPJVM_HEAP_MODE=PJVM_HEAP_FREELIST -DPJVM_GC_TRIGGERS=PJVM_GC_TRIG_ALLOC_FAIL -o $@ tests/gc_exact_test.c src/pjvm.c src/pjvm_heap.c src/pjvm_gc.c
+
 gc-demo-manual: $(GC_DEMO_MANUAL)
 	$(GC_DEMO_MANUAL)
 
@@ -240,6 +246,9 @@ test-gc-collect: $(GC_COLLECT_TEST)
 
 test-gc-fragment: $(GC_FRAGMENT_TEST)
 	$(GC_FRAGMENT_TEST)
+
+test-gc-exact: $(GC_EXACT_TEST)
+	$(GC_EXACT_TEST)
 
 test-alloc-heavy: $(PICOJVM) tests/AllocHeavyTest.pjvm
 	$(MAKE) --no-print-directory test-AllocHeavyTest
@@ -265,6 +274,7 @@ test-gc-host-suite:
 	$(MAKE) --no-print-directory gc-policy-test
 	$(MAKE) --no-print-directory test-gc-collect
 	$(MAKE) --no-print-directory test-gc-fragment
+	$(MAKE) --no-print-directory test-gc-exact
 	$(MAKE) --no-print-directory test-gc-host-compat
 	$(MAKE) --no-print-directory test-gc-alloc-heavy
 	$(MAKE) --no-print-directory test-gc-graph
@@ -332,17 +342,23 @@ test-sim-%: $(BUILDDIR)/%.sim.dump $(EXPDIR)/%.hex
 	@echo "PASS: $* [sim]"
 
 test-sim-smoke:
-	@for t in Fib RomStringTest NativeOpsTest; do \
-		$(MAKE) --no-print-directory test-sim-$$t; \
-	done
+	$(MAKE) --no-print-directory test-sim-Fib
+	$(MAKE) --no-print-directory test-sim-RomStringTest
+	$(MAKE) --no-print-directory test-sim-NativeOpsTest
 
 test-sim-gc-smoke:
-	@for t in Fib RomStringTest NativeOpsTest; do \
-		$(MAKE) --no-print-directory test-sim-$$t \
-			LDSCRIPT='$(GC_SIM_FLAT_LDSCRIPT)' \
-			SIM_DUMP_ADDR='$(GC_SIM_OUTPUT_BASE)' \
-			TARGET_VM_OPTS='$(GC_SIM_STRESS_OPTS)'; \
-	done
+	$(MAKE) --no-print-directory test-sim-Fib \
+		LDSCRIPT='$(GC_SIM_FLAT_LDSCRIPT)' \
+		SIM_DUMP_ADDR='$(GC_SIM_OUTPUT_BASE)' \
+		TARGET_VM_OPTS='$(GC_SIM_SMOKE_OPTS)'
+	$(MAKE) --no-print-directory test-sim-RomStringTest \
+		LDSCRIPT='$(GC_SIM_FLAT_LDSCRIPT)' \
+		SIM_DUMP_ADDR='$(GC_SIM_OUTPUT_BASE)' \
+		TARGET_VM_OPTS='$(GC_SIM_SMOKE_OPTS)'
+	$(MAKE) --no-print-directory test-sim-NativeOpsTest \
+		LDSCRIPT='$(GC_SIM_FLAT_LDSCRIPT)' \
+		SIM_DUMP_ADDR='$(GC_SIM_OUTPUT_BASE)' \
+		TARGET_VM_OPTS='$(GC_SIM_SMOKE_OPTS)'
 
 test-sim-gc-alloc-heavy: $(BUILDDIR)/AllocHeavyTest.gc-sim.dump $(EXPDIR)/AllocHeavyTest.hex
 	@$(PYTHON) $(SIM_VERIFY) --dump $< --expected $(EXPDIR)/AllocHeavyTest.hex >/dev/null
@@ -364,6 +380,6 @@ clean:
 .PHONY: FORCE
 .PHONY: all test test-paged test-paged-stress clean sim
 .PHONY: gc-demo-manual gc-demo-allocfail gc-demo-watermark75 gc-demo-return gc-demo-random
-.PHONY: gc-policy-test test-gc-collect test-gc-fragment test-alloc-heavy test-paged-alloc-heavy test-gc-alloc-heavy
+.PHONY: gc-policy-test test-gc-collect test-gc-fragment test-gc-exact test-alloc-heavy test-paged-alloc-heavy test-gc-alloc-heavy
 .PHONY: test-gc-graph test-gc-host-compat test-gc-host-suite test-sim-smoke test-sim-gc-smoke
 .PHONY: test-sim-gc-alloc-heavy test-gc-sim-suite test-gc-suite

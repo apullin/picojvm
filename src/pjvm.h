@@ -55,6 +55,7 @@
 
 /* region_flags (header byte 9) */
 #define PJVM_RF_PIN_HINTS  0x01   /* bit 0: pin hints present */
+#define PJVM_RF_REF_BITMAPS 0x02  /* bit 1: per-class ref bitmaps present */
 #define PJVM_RF_CONST_DATA 0x04   /* bit 2: const_data section present */
 
 /* CP resolution string flag / mask (16-bit) */
@@ -166,6 +167,9 @@ extern uint8_t  n_methods, main_mi, n_classes;
 extern uint32_t bytecodes_size;
 extern uint32_t bc_off, cpr_off, ic_off, sc_off, et_off, cd_off;
 extern PJVMCtx *g_pjvm;
+extern uint8_t  region_flags;
+extern uint8_t  cls_nf[PJVM_CLASS_CAP];
+extern uint16_t cls_rbo[PJVM_CLASS_CAP];
 
 #ifdef PJVM_ASM_HELPERS
 /* 8085 ASM helpers need direct pointers (non-paged target only) */
@@ -177,6 +181,7 @@ extern uint8_t *sc;
 /* --- core API (implemented in core.c) --------------------------------- */
 void pjvm_parse(uint8_t *data);
 void pjvm_run(PJVMCtx *j);
+uint8_t pjvm_prog_read(uint32_t off);
 void pjvm_heap_init(PJVMCtx *j, uint16_t start, uint16_t limit);
 uint16_t pjvm_heap_alloc(PJVMCtx *j, uint16_t size, uint8_t kind);
 void pjvm_heap_free(PJVMCtx *j, uint16_t a);

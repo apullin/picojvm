@@ -17,6 +17,8 @@ picoJVM itself.
 - **~24KB on Intel 8085** (including runtime), ~10KB estimated on TMS9900
 - **Program-space paging** — LRU page cache allows programs larger than
   available RAM; only active code pages reside in memory
+- **Configurable heap backends** — tiny bump allocator by default, optional
+  coalescing free-list backend, and an experimental non-moving mark-sweep GC
 - **Execution context struct** — stack, locals, frames, and heap live in
   a `PJVMCtx` struct passed to all API calls
 - **File I/O** — native file operations for disk-backed compilation on
@@ -116,6 +118,42 @@ make test-all
      `pjvm_platform_file_delete`
 3. Link with `src/pjvm.c`
 4. Override capacity macros with `-D` flags as needed for your RAM budget
+
+### Heap Backends and Experimental GC
+
+The default build uses a simple bump allocator for minimum size.
+
+Optional heap backends are selected with `PJVM_HEAP_MODE`:
+
+- `PJVM_HEAP_BUMP` — default, smallest code size
+- `PJVM_HEAP_FREELIST` — coalescing free-list allocator
+
+On the `gc-experiment` branch, the free-list backend also supports an
+experimental non-moving mark-sweep collector. The current collector uses:
+
+- exact roots from operand stack, locals, and statics
+- a non-moving sweep over the free-list heap
+- conservative scanning of object/ref-array 4-byte slots
+
+GC trigger policy is controlled by `PJVM_GC_TRIGGERS`, combining any of:
+
+- `PJVM_GC_TRIG_ALLOC_FAIL`
+- `PJVM_GC_TRIG_WATERMARK`
+- `PJVM_GC_TRIG_RETURN`
+- `PJVM_GC_TRIG_RANDOM_ABOVE_WATERMARK`
+
+Host examples:
+
+```bash
+# Free-list allocator only
+make clean test HOST_VM_OPTS=-DPJVM_HEAP_MODE=PJVM_HEAP_FREELIST
+
+# Experimental GC policy demos and direct collector test
+make clean gc-policy-test test-gc-collect
+
+# Force GC on the alloc-heavy integration test with a small host heap
+make test-gc-alloc-heavy
+```
 
 ### Capacity Defaults
 

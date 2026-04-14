@@ -12,8 +12,14 @@
 
 #define RAW_MEM_SIZE 262144u  /* 256KB — supports source files > 64K for self-hosting */
 #define HEAP_MEM_SIZE 524288u
-#define HEAP_BASE 1u
-#define HEAP_LIMIT 0u         /* 0 means 0x10000 exclusive */
+#ifndef PJVM_HOST_HEAP_BASE
+#define PJVM_HOST_HEAP_BASE 1u
+#endif
+#ifndef PJVM_HOST_HEAP_LIMIT
+#define PJVM_HOST_HEAP_LIMIT 0u   /* 0 means 0x10000 exclusive */
+#endif
+#define HEAP_BASE PJVM_HOST_HEAP_BASE
+#define HEAP_LIMIT PJVM_HOST_HEAP_LIMIT
 
 static uint8_t raw_mem[RAW_MEM_SIZE];
 static uint8_t heap_mem[HEAP_MEM_SIZE];
@@ -24,8 +30,8 @@ static uint32_t heap_bytes_used;
 
 #include "../src/pjvm.h"
 
-uint16_t heap_alloc(PJVMCtx *j, uint16_t size) {
-    uint16_t a = pjvm_heap_alloc(j, size);
+uint16_t heap_alloc(PJVMCtx *j, uint16_t size, uint8_t kind) {
+    uint16_t a = pjvm_heap_alloc(j, size, kind);
     if (a == 0) {
         uint32_t end = j->heap_limit ? j->heap_limit : 65536u;
         fprintf(stderr, "JVM heap allocation failed (%u bytes; used=%u limit=%u)\n",

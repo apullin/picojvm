@@ -21,8 +21,8 @@ static uint8_t heap_mem[PJVM_HEAP_SIZE];
 
 /* --- Platform callbacks ----------------------------------------------- */
 
-uint16_t heap_alloc(PJVMCtx *j, uint16_t size) {
-    uint16_t a = pjvm_heap_alloc(j, size);
+uint16_t heap_alloc(PJVMCtx *j, uint16_t size, uint8_t kind) {
+    uint16_t a = pjvm_heap_alloc(j, size, kind);
     if (a == 0) {
         pjvm_platform_trap(0xFE, 0);  /* heap overflow */
         return 0;

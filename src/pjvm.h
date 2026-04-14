@@ -80,6 +80,24 @@
 /* object/array memory layout */
 #define PJVM_OBJ_HEADER   4     /* bytes before element data in arrays */
 
+/* heap allocation kinds for GC metadata */
+#define PJVM_HEAP_KIND_OBJECT      1u
+#define PJVM_HEAP_KIND_BYTE_ARRAY  2u
+#define PJVM_HEAP_KIND_SHORT_ARRAY 3u
+#define PJVM_HEAP_KIND_INT_ARRAY   4u
+#define PJVM_HEAP_KIND_REF_ARRAY   5u
+#define PJVM_HEAP_KIND_STRING      6u
+
+#if PJVM_HEAP_MODE == PJVM_HEAP_FREELIST
+#define PJVM_HEAP_ALLOC_FLAG  0x0001u
+#define PJVM_HEAP_ALLOC_HDR   4u
+#define PJVM_HEAP_FREE_HDR    4u
+#define PJVM_HEAP_MIN_SPLIT   8u
+#define PJVM_HEAP_META_KIND_MASK 0x000Fu
+#define PJVM_HEAP_META_MARK      0x0010u
+#define PJVM_HEAP_META_PENDING   0x0020u
+#endif
+
 /* --- per-execution context -------------------------------------------- */
 typedef struct {
     uint32_t pc;
@@ -160,7 +178,7 @@ extern uint8_t *sc;
 void pjvm_parse(uint8_t *data);
 void pjvm_run(PJVMCtx *j);
 void pjvm_heap_init(PJVMCtx *j, uint16_t start, uint16_t limit);
-uint16_t pjvm_heap_alloc(PJVMCtx *j, uint16_t size);
+uint16_t pjvm_heap_alloc(PJVMCtx *j, uint16_t size, uint8_t kind);
 void pjvm_heap_free(PJVMCtx *j, uint16_t a);
 #if PJVM_GC_ENABLED || defined(PJVM_GC_IMPL)
 void pjvm_gc_init(PJVMCtx *j);
@@ -179,7 +197,7 @@ void pjvm_pin_chunk(PJVMPager *p, uint16_t chunk);
 #endif
 
 /* --- platform callbacks (implemented by each platform .c) ------------- */
-uint16_t heap_alloc(PJVMCtx *j, uint16_t size);
+uint16_t heap_alloc(PJVMCtx *j, uint16_t size, uint8_t kind);
 uint8_t  r8(uint16_t a);
 void     w8(uint16_t a, uint8_t v);
 uint16_t r16(uint16_t a);

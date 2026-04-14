@@ -11,6 +11,7 @@ GC_DEMO_ALLOCFAIL = $(BUILDDIR)/gc-policy-demo-allocfail
 GC_DEMO_WATERMARK = $(BUILDDIR)/gc-policy-demo-watermark75
 GC_DEMO_RETURN    = $(BUILDDIR)/gc-policy-demo-return
 GC_DEMO_RANDOM    = $(BUILDDIR)/gc-policy-demo-random
+GC_COLLECT_TEST   = $(BUILDDIR)/gc-collect-test
 
 # Single-class tests
 TESTS_SINGLE = Fib HelloWorld BubbleSort Counter StringTest RomStringTest StaticInitTest MultiArrayTest StringSwitchTest ConstTest
@@ -181,6 +182,9 @@ $(GC_DEMO_RETURN): tests/gc_policy_demo.c src/pjvm_gc.c src/pjvm.h | $(BUILDDIR)
 $(GC_DEMO_RANDOM): tests/gc_policy_demo.c src/pjvm_gc.c src/pjvm.h | $(BUILDDIR)
 	$(CC) $(CFLAGS) '-DPJVM_GC_TRIGGERS=(PJVM_GC_TRIG_WATERMARK|PJVM_GC_TRIG_RANDOM_ABOVE_WATERMARK)' -DPJVM_GC_WATERMARK_PCT=75 -o $@ tests/gc_policy_demo.c src/pjvm_gc.c
 
+$(GC_COLLECT_TEST): tests/gc_collect_test.c src/pjvm_heap.c src/pjvm_gc.c src/pjvm.h | $(BUILDDIR)
+	$(CC) $(CFLAGS) -DPJVM_HEAP_MODE=PJVM_HEAP_FREELIST -DPJVM_GC_TRIGGERS=PJVM_GC_TRIG_ALLOC_FAIL -o $@ tests/gc_collect_test.c src/pjvm_heap.c src/pjvm_gc.c
+
 gc-demo-manual: $(GC_DEMO_MANUAL)
 	$(GC_DEMO_MANUAL)
 
@@ -198,11 +202,19 @@ gc-demo-random: $(GC_DEMO_RANDOM)
 
 gc-policy-test: gc-demo-manual gc-demo-allocfail gc-demo-watermark75 gc-demo-return gc-demo-random
 
+test-gc-collect: $(GC_COLLECT_TEST)
+	$(GC_COLLECT_TEST)
+
 test-alloc-heavy: $(PICOJVM) tests/AllocHeavyTest.pjvm
 	$(MAKE) --no-print-directory test-AllocHeavyTest
 
 test-paged-alloc-heavy: $(PICOJVM_PAGED) tests/AllocHeavyTest.pjvm
 	$(MAKE) --no-print-directory test-paged-AllocHeavyTest
+
+test-gc-alloc-heavy:
+	$(MAKE) --no-print-directory clean
+	$(MAKE) --no-print-directory test-AllocHeavyTest \
+		HOST_VM_OPTS='-DPJVM_HEAP_MODE=PJVM_HEAP_FREELIST -DPJVM_GC_TRIGGERS=3 -DPJVM_GC_WATERMARK_PCT=75 -DPJVM_HOST_HEAP_LIMIT=2049'
 
 # --- 8085 simulator target ---
 
@@ -261,3 +273,5 @@ clean:
 	rm -rf $(BUILDDIR)
 
 .PHONY: all test test-paged test-paged-stress clean sim
+.PHONY: gc-demo-manual gc-demo-allocfail gc-demo-watermark75 gc-demo-return gc-demo-random
+.PHONY: gc-policy-test test-gc-collect test-alloc-heavy test-paged-alloc-heavy test-gc-alloc-heavy

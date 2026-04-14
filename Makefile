@@ -12,6 +12,7 @@ GC_DEMO_WATERMARK = $(BUILDDIR)/gc-policy-demo-watermark75
 GC_DEMO_RETURN    = $(BUILDDIR)/gc-policy-demo-return
 GC_DEMO_RANDOM    = $(BUILDDIR)/gc-policy-demo-random
 GC_COLLECT_TEST   = $(BUILDDIR)/gc-collect-test
+GC_FRAGMENT_TEST  = $(BUILDDIR)/gc-fragment-test
 
 # Single-class tests
 TESTS_SINGLE = Fib HelloWorld BubbleSort Counter StringTest RomStringTest NativeOpsTest StaticInitTest MultiArrayTest StringSwitchTest ConstTest
@@ -22,6 +23,13 @@ ALL_TESTS_PAGER = $(ALL_TESTS) $(TESTS_PAGER)
 
 # --- 8085 target toolchain ---
 ROOT     = $(shell cd ../.. && pwd)
+GC_DEFAULT_OPTS = -DPJVM_HEAP_MODE=PJVM_HEAP_FREELIST -DPJVM_GC_TRIGGERS=3 -DPJVM_GC_WATERMARK_PCT=75
+GC_HOST_PRESSURE_LIMIT ?= 2049
+GC_SIM_OUTPUT_BASE ?= 0xE000
+GC_SIM_HEAP_END ?= 0x9E00
+GC_SIM_TRAP_BASE ?= 0xE080
+GC_SIM_FLAT_LDSCRIPT = $(ROOT)/sysroot/ldscripts/i8085-64k-flat.ld
+GC_SIM_STRESS_OPTS = $(GC_DEFAULT_OPTS) -DPJVM_SIM_HEAP_END=$(GC_SIM_HEAP_END) -DPJVM_SIM_OUTPUT_BASE=$(GC_SIM_OUTPUT_BASE) -DPJVM_SIM_TRAP_BASE=$(GC_SIM_TRAP_BASE)
 CLANG    = $(ROOT)/llvm-project/build-clang-8085/bin/clang
 LLD      = $(ROOT)/llvm-project/build-clang-8085/bin/ld.lld
 OBJCOPY  = $(ROOT)/llvm-project/build-clang-8085/bin/llvm-objcopy
@@ -103,6 +111,13 @@ tests/ExceptionTest.pjvm: tests/MyException.class tests/ExceptionTest.class
 	$(PYTHON) pjvmpack.py $^ -o $@ -v
 
 tests/MyException.class tests/ExceptionTest.class: tests/ExceptionTest.java tests/Native.java
+	$(JAVAC) -d tests $^
+
+# Multi-class GC graph stress test
+tests/GCGraphTest.pjvm: tests/GCNode.class tests/GCGraphTest.class
+	$(PYTHON) pjvmpack.py $^ -o $@ -v
+
+tests/GCNode.class tests/GCGraphTest.class: tests/GCGraphTest.java tests/Native.java
 	$(JAVAC) -d tests $^
 
 # Pager stress tests (generated)
@@ -200,6 +215,9 @@ $(GC_DEMO_RANDOM): tests/gc_policy_demo.c src/pjvm_gc.c src/pjvm.h | $(BUILDDIR)
 $(GC_COLLECT_TEST): tests/gc_collect_test.c src/pjvm_heap.c src/pjvm_gc.c src/pjvm.h | $(BUILDDIR)
 	$(CC) $(CFLAGS) -DPJVM_HEAP_MODE=PJVM_HEAP_FREELIST -DPJVM_GC_TRIGGERS=PJVM_GC_TRIG_ALLOC_FAIL -o $@ tests/gc_collect_test.c src/pjvm_heap.c src/pjvm_gc.c
 
+$(GC_FRAGMENT_TEST): tests/gc_fragment_test.c src/pjvm_heap.c src/pjvm_gc.c src/pjvm.h | $(BUILDDIR)
+	$(CC) $(CFLAGS) -DPJVM_HEAP_MODE=PJVM_HEAP_FREELIST -DPJVM_GC_TRIGGERS=PJVM_GC_TRIG_ALLOC_FAIL -o $@ tests/gc_fragment_test.c src/pjvm_heap.c src/pjvm_gc.c
+
 gc-demo-manual: $(GC_DEMO_MANUAL)
 	$(GC_DEMO_MANUAL)
 
@@ -220,16 +238,36 @@ gc-policy-test: gc-demo-manual gc-demo-allocfail gc-demo-watermark75 gc-demo-ret
 test-gc-collect: $(GC_COLLECT_TEST)
 	$(GC_COLLECT_TEST)
 
+test-gc-fragment: $(GC_FRAGMENT_TEST)
+	$(GC_FRAGMENT_TEST)
+
 test-alloc-heavy: $(PICOJVM) tests/AllocHeavyTest.pjvm
 	$(MAKE) --no-print-directory test-AllocHeavyTest
 
 test-paged-alloc-heavy: $(PICOJVM_PAGED) tests/AllocHeavyTest.pjvm
 	$(MAKE) --no-print-directory test-paged-AllocHeavyTest
 
+test-gc-graph:
+	$(MAKE) --no-print-directory clean
+	$(MAKE) --no-print-directory test-GCGraphTest \
+		HOST_VM_OPTS='$(GC_DEFAULT_OPTS) -DPJVM_HOST_HEAP_LIMIT=$(GC_HOST_PRESSURE_LIMIT)'
+
 test-gc-alloc-heavy:
 	$(MAKE) --no-print-directory clean
 	$(MAKE) --no-print-directory test-AllocHeavyTest \
-		HOST_VM_OPTS='-DPJVM_HEAP_MODE=PJVM_HEAP_FREELIST -DPJVM_GC_TRIGGERS=3 -DPJVM_GC_WATERMARK_PCT=75 -DPJVM_HOST_HEAP_LIMIT=2049'
+		HOST_VM_OPTS='$(GC_DEFAULT_OPTS) -DPJVM_HOST_HEAP_LIMIT=$(GC_HOST_PRESSURE_LIMIT)'
+
+test-gc-host-compat:
+	$(MAKE) --no-print-directory clean
+	$(MAKE) --no-print-directory test test-paged HOST_VM_OPTS='$(GC_DEFAULT_OPTS)'
+
+test-gc-host-suite:
+	$(MAKE) --no-print-directory gc-policy-test
+	$(MAKE) --no-print-directory test-gc-collect
+	$(MAKE) --no-print-directory test-gc-fragment
+	$(MAKE) --no-print-directory test-gc-host-compat
+	$(MAKE) --no-print-directory test-gc-alloc-heavy
+	$(MAKE) --no-print-directory test-gc-graph
 
 # --- 8085 simulator target ---
 
@@ -264,8 +302,14 @@ $(BUILDDIR)/i8085_helpers.o: platform/i8085_helpers.S | $(BUILDDIR)
 $(PJVM_DATA_O): $(PJVM_DATA_C) | $(BUILDDIR)
 	$(CLANG) --target=i8085-unknown-elf -ffreestanding -fno-builtin -$(TARGET_OPT) -c $< -o $@
 
-$(BUILDDIR)/%.sim.dump: tests/%.pjvm | $(BUILDDIR)
-	@$(MAKE) --no-print-directory sim-$* TARGET_VM_OPTS="$(TARGET_VM_OPTS)" TARGET_ASM_HELPERS="$(TARGET_ASM_HELPERS)" SIM_DUMP_ADDR="$(SIM_DUMP_ADDR)" > $@ 2>&1
+$(BUILDDIR)/%.sim.dump: FORCE tests/%.pjvm | $(BUILDDIR)
+	@$(MAKE) --no-print-directory sim-$* LDSCRIPT="$(LDSCRIPT)" TARGET_VM_OPTS="$(TARGET_VM_OPTS)" TARGET_ASM_HELPERS="$(TARGET_ASM_HELPERS)" SIM_DUMP_ADDR="$(SIM_DUMP_ADDR)" > $@ 2>&1
+
+$(BUILDDIR)/AllocHeavyTest.gc-sim.dump: FORCE tests/AllocHeavyTest.pjvm | $(BUILDDIR)
+	@$(MAKE) --no-print-directory sim-AllocHeavyTest \
+		LDSCRIPT="$(GC_SIM_FLAT_LDSCRIPT)" \
+		SIM_DUMP_ADDR="$(GC_SIM_OUTPUT_BASE)" \
+		TARGET_VM_OPTS="$(GC_SIM_STRESS_OPTS)" > $@ 2>&1
 
 $(TARGET_ELF): $(BUILDDIR)/crt0.o $(BUILDDIR)/pjvm.o $(BUILDDIR)/pjvm_heap.o $(BUILDDIR)/pjvm_gc.o $(BUILDDIR)/i8085_sim.o $(TARGET_HELPER_OBJS) $(PJVM_DATA_O) $(LIBGCC) $(LIBC)
 	$(LLD) -m i8085elf --gc-sections -T $(LDSCRIPT) -o $@ $^ $(LIBGCC)
@@ -292,6 +336,27 @@ test-sim-smoke:
 		$(MAKE) --no-print-directory test-sim-$$t; \
 	done
 
+test-sim-gc-smoke:
+	@for t in Fib RomStringTest NativeOpsTest; do \
+		$(MAKE) --no-print-directory test-sim-$$t \
+			LDSCRIPT='$(GC_SIM_FLAT_LDSCRIPT)' \
+			SIM_DUMP_ADDR='$(GC_SIM_OUTPUT_BASE)' \
+			TARGET_VM_OPTS='$(GC_SIM_STRESS_OPTS)'; \
+	done
+
+test-sim-gc-alloc-heavy: $(BUILDDIR)/AllocHeavyTest.gc-sim.dump $(EXPDIR)/AllocHeavyTest.hex
+	@$(PYTHON) $(SIM_VERIFY) --dump $< --expected $(EXPDIR)/AllocHeavyTest.hex >/dev/null
+	@echo "PASS: AllocHeavyTest [sim-gc]"
+
+test-gc-sim-suite:
+	$(MAKE) --no-print-directory test-sim-gc-smoke
+	$(MAKE) --no-print-directory clean
+	$(MAKE) --no-print-directory test-sim-gc-alloc-heavy
+
+test-gc-suite:
+	$(MAKE) --no-print-directory test-gc-host-suite
+	$(MAKE) --no-print-directory test-gc-sim-suite
+
 clean:
 	rm -f $(PICOJVM) $(PICOJVM_PAGED) tests/*.class tests/*.pjvm tests/*.pjvmmap
 	rm -rf $(BUILDDIR)
@@ -299,4 +364,6 @@ clean:
 .PHONY: FORCE
 .PHONY: all test test-paged test-paged-stress clean sim
 .PHONY: gc-demo-manual gc-demo-allocfail gc-demo-watermark75 gc-demo-return gc-demo-random
-.PHONY: gc-policy-test test-gc-collect test-alloc-heavy test-paged-alloc-heavy test-gc-alloc-heavy test-sim-smoke
+.PHONY: gc-policy-test test-gc-collect test-gc-fragment test-alloc-heavy test-paged-alloc-heavy test-gc-alloc-heavy
+.PHONY: test-gc-graph test-gc-host-compat test-gc-host-suite test-sim-smoke test-sim-gc-smoke
+.PHONY: test-sim-gc-alloc-heavy test-gc-sim-suite test-gc-suite

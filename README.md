@@ -142,6 +142,15 @@ GC trigger policy is controlled by `PJVM_GC_TRIGGERS`, combining any of:
 - `PJVM_GC_TRIG_RETURN`
 - `PJVM_GC_TRIG_RANDOM_ABOVE_WATERMARK`
 
+Current recommended GC configuration:
+
+- `PJVM_HEAP_MODE=PJVM_HEAP_FREELIST`
+- `PJVM_GC_TRIGGERS=3` (`PJVM_GC_TRIG_ALLOC_FAIL | PJVM_GC_TRIG_WATERMARK`)
+- `PJVM_GC_WATERMARK_PCT=75`
+
+This is the configuration exercised by the current host compatibility suite,
+direct collector tests, and 8085 simulator GC smoke/stress runs.
+
 Host examples:
 
 ```bash
@@ -153,6 +162,15 @@ make clean gc-policy-test test-gc-collect
 
 # Force GC on the alloc-heavy integration test with a small host heap
 make test-gc-alloc-heavy
+
+# Run the broader host GC compatibility/stress matrix
+make test-gc-host-suite
+
+# Run the broader 8085 simulator GC matrix
+make test-gc-sim-suite
+
+# Everything above
+make test-gc-suite
 ```
 
 ### Capacity Defaults

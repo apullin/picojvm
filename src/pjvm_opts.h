@@ -15,6 +15,29 @@
 #define PJVM_HEAP_MODE PJVM_HEAP_BUMP
 #endif
 
+#define PJVM_GC_TRIG_ALLOC_FAIL              0x01
+#define PJVM_GC_TRIG_WATERMARK               0x02
+#define PJVM_GC_TRIG_RETURN                  0x04
+#define PJVM_GC_TRIG_RANDOM_ABOVE_WATERMARK  0x08
+
+#ifndef PJVM_GC_TRIGGERS
+#define PJVM_GC_TRIGGERS 0
+#endif
+
+#ifndef PJVM_GC_WATERMARK_PCT
+#define PJVM_GC_WATERMARK_PCT 75
+#endif
+
+#ifndef PJVM_GC_RANDOM_MASK
+#define PJVM_GC_RANDOM_MASK 0x0007u
+#endif
+
+#if PJVM_GC_TRIGGERS
+#define PJVM_GC_ENABLED 1
+#else
+#define PJVM_GC_ENABLED 0
+#endif
+
 /* Reduced-opcode profile for the current selfhost/disk corpus.
  * This intentionally drops standard handlers that the present selfhosted
  * compiler and its generated test corpus do not emit. It is not suitable for

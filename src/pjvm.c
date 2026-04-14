@@ -706,6 +706,7 @@ static void pjvm_ret(uint8_t has_val) {
     g_pjvm->pc = f->pc; g_pjvm->cur_mi = f->mi; g_pjvm->cur_lb = f->lb;
     g_pjvm->cur_cb = f->cb; g_pjvm->sp = f->so;
     if (has_val) spush(rlo, rhi);
+    pjvm_gc_maybe(g_pjvm, PJVM_GC_TRIG_RETURN, 0);
 }
 
 static void pjvm_throw(uint16_t exc_ref, uint32_t throw_pc) {

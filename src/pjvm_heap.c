@@ -50,6 +50,7 @@ void pjvm_heap_init(PJVMCtx *j, uint16_t start, uint16_t limit) {
     j->heap_limit = limit;
     j->heap_free_head = 0;
     j->heap_used = 0;
+    pjvm_gc_init(j);
 
 #if PJVM_HEAP_MODE == PJVM_HEAP_FREELIST
     uint16_t base = pjvm_heap_align2(start);
@@ -66,8 +67,21 @@ void pjvm_heap_init(PJVMCtx *j, uint16_t start, uint16_t limit) {
 
 #if PJVM_HEAP_MODE == PJVM_HEAP_BUMP
 static uint16_t pjvm_heap_alloc_bump(PJVMCtx *j, uint16_t size) {
+#if PJVM_GC_ENABLED
+    pjvm_gc_maybe(j,
+                  (uint8_t)(PJVM_GC_TRIG_WATERMARK | PJVM_GC_TRIG_RANDOM_ABOVE_WATERMARK),
+                  size);
+
+    uint32_t end = (uint32_t)j->heap_ptr + size;
+    if (end > pjvm_heap_limit_value(j)) {
+        pjvm_gc_maybe(j, PJVM_GC_TRIG_ALLOC_FAIL, size);
+        end = (uint32_t)j->heap_ptr + size;
+        if (end > pjvm_heap_limit_value(j)) return 0;
+    }
+#else
     uint32_t end = (uint32_t)j->heap_ptr + size;
     if (end > pjvm_heap_limit_value(j)) return 0;
+#endif
 
     uint16_t a = j->heap_ptr;
     j->heap_ptr = (uint16_t)end;
@@ -112,6 +126,15 @@ static uint16_t pjvm_heap_alloc_freelist(PJVMCtx *j, uint16_t size) {
     uint16_t prev = 0;
     uint16_t cur = j->heap_free_head;
 
+#if PJVM_GC_ENABLED
+    pjvm_gc_maybe(j,
+                  (uint8_t)(PJVM_GC_TRIG_WATERMARK | PJVM_GC_TRIG_RANDOM_ABOVE_WATERMARK),
+                  size);
+#endif
+
+#if PJVM_GC_ENABLED
+retry:
+#endif
     while (cur != 0) {
         uint16_t blk_size = pjvm_blk_size(cur);
         if (blk_size >= want) {
@@ -141,6 +164,12 @@ static uint16_t pjvm_heap_alloc_freelist(PJVMCtx *j, uint16_t size) {
         cur = pjvm_blk_next(cur);
     }
 
+#if PJVM_GC_ENABLED
+    pjvm_gc_maybe(j, PJVM_GC_TRIG_ALLOC_FAIL, size);
+    prev = 0;
+    cur = j->heap_free_head;
+    goto retry;
+#endif
     return 0;
 }
 

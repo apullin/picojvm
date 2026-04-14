@@ -130,6 +130,8 @@ typedef struct {
     uint16_t heap_limit;      /* exclusive end; 0 means 0x10000 */
     uint16_t heap_free_head;  /* allocator-private; free-list head */
     uint16_t heap_used;       /* allocator-private; estimated live bytes */
+    uint16_t gc_lfsr;         /* GC trigger PRNG state */
+    uint16_t gc_count;        /* number of completed collections */
     uint16_t sp_max, lt_max;
     uint8_t  fdepth_max;
     const char **prog_argv;
@@ -160,6 +162,16 @@ void pjvm_run(PJVMCtx *j);
 void pjvm_heap_init(PJVMCtx *j, uint16_t start, uint16_t limit);
 uint16_t pjvm_heap_alloc(PJVMCtx *j, uint16_t size);
 void pjvm_heap_free(PJVMCtx *j, uint16_t a);
+#if PJVM_GC_ENABLED || defined(PJVM_GC_IMPL)
+void pjvm_gc_init(PJVMCtx *j);
+uint8_t pjvm_gc_collect(PJVMCtx *j, uint8_t reason);
+void pjvm_gc_maybe(PJVMCtx *j, uint8_t reason, uint16_t alloc_size);
+#else
+#define pjvm_gc_init(j) ((void)(j))
+#define pjvm_gc_collect(j, reason) ((void)(j), (void)(reason), 0)
+#define pjvm_gc_maybe(j, reason, alloc_size) \
+    ((void)(j), (void)(reason), (void)(alloc_size))
+#endif
 
 #ifdef PJVM_PAGED
 void pjvm_pager_init(PJVMPager *p);

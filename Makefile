@@ -6,6 +6,11 @@ JAVAC   = javac
 PYTHON  = python3
 PICOJVM = ./picojvm
 EXPDIR  = expected
+GC_DEMO_MANUAL    = $(BUILDDIR)/gc-policy-demo-manual
+GC_DEMO_ALLOCFAIL = $(BUILDDIR)/gc-policy-demo-allocfail
+GC_DEMO_WATERMARK = $(BUILDDIR)/gc-policy-demo-watermark75
+GC_DEMO_RETURN    = $(BUILDDIR)/gc-policy-demo-return
+GC_DEMO_RANDOM    = $(BUILDDIR)/gc-policy-demo-random
 
 # Single-class tests
 TESTS_SINGLE = Fib HelloWorld BubbleSort Counter StringTest RomStringTest StaticInitTest MultiArrayTest StringSwitchTest ConstTest
@@ -160,6 +165,44 @@ test-paged-stress: $(PICOJVM_PAGED) $(addprefix tests/,$(addsuffix .pjvm,$(ALL_T
 	@for t in $(ALL_TESTS_PAGER); do \
 		$(MAKE) --no-print-directory test-paged-stress-$$t; \
 	done
+
+$(GC_DEMO_MANUAL): tests/gc_policy_demo.c src/pjvm_gc.c src/pjvm.h | $(BUILDDIR)
+	$(CC) $(CFLAGS) -DPJVM_GC_TRIGGERS=0 -o $@ tests/gc_policy_demo.c src/pjvm_gc.c
+
+$(GC_DEMO_ALLOCFAIL): tests/gc_policy_demo.c src/pjvm_gc.c src/pjvm.h | $(BUILDDIR)
+	$(CC) $(CFLAGS) -DPJVM_GC_TRIGGERS=PJVM_GC_TRIG_ALLOC_FAIL -o $@ tests/gc_policy_demo.c src/pjvm_gc.c
+
+$(GC_DEMO_WATERMARK): tests/gc_policy_demo.c src/pjvm_gc.c src/pjvm.h | $(BUILDDIR)
+	$(CC) $(CFLAGS) '-DPJVM_GC_TRIGGERS=PJVM_GC_TRIG_WATERMARK' -DPJVM_GC_WATERMARK_PCT=75 -o $@ tests/gc_policy_demo.c src/pjvm_gc.c
+
+$(GC_DEMO_RETURN): tests/gc_policy_demo.c src/pjvm_gc.c src/pjvm.h | $(BUILDDIR)
+	$(CC) $(CFLAGS) -DPJVM_GC_TRIGGERS=PJVM_GC_TRIG_RETURN -o $@ tests/gc_policy_demo.c src/pjvm_gc.c
+
+$(GC_DEMO_RANDOM): tests/gc_policy_demo.c src/pjvm_gc.c src/pjvm.h | $(BUILDDIR)
+	$(CC) $(CFLAGS) '-DPJVM_GC_TRIGGERS=(PJVM_GC_TRIG_WATERMARK|PJVM_GC_TRIG_RANDOM_ABOVE_WATERMARK)' -DPJVM_GC_WATERMARK_PCT=75 -o $@ tests/gc_policy_demo.c src/pjvm_gc.c
+
+gc-demo-manual: $(GC_DEMO_MANUAL)
+	$(GC_DEMO_MANUAL)
+
+gc-demo-allocfail: $(GC_DEMO_ALLOCFAIL)
+	$(GC_DEMO_ALLOCFAIL)
+
+gc-demo-watermark75: $(GC_DEMO_WATERMARK)
+	$(GC_DEMO_WATERMARK)
+
+gc-demo-return: $(GC_DEMO_RETURN)
+	$(GC_DEMO_RETURN)
+
+gc-demo-random: $(GC_DEMO_RANDOM)
+	$(GC_DEMO_RANDOM)
+
+gc-policy-test: gc-demo-manual gc-demo-allocfail gc-demo-watermark75 gc-demo-return gc-demo-random
+
+test-alloc-heavy: $(PICOJVM) tests/AllocHeavyTest.pjvm
+	$(MAKE) --no-print-directory test-AllocHeavyTest
+
+test-paged-alloc-heavy: $(PICOJVM_PAGED) tests/AllocHeavyTest.pjvm
+	$(MAKE) --no-print-directory test-paged-AllocHeavyTest
 
 # --- 8085 simulator target ---
 

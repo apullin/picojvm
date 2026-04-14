@@ -428,11 +428,14 @@ int main(int argc, char **argv) {
     }
 
     fprintf(stderr,
-            "HALT | heap: %u obj, %uB | stack: %u/%u slots | locals: %u/%u | frames: %u/%u\n",
+            "HALT | heap: %u obj, %uB | stack: %u/%u slots | locals: %u/%u | frames: %u/%u",
             (unsigned)heap_alloc_count, (unsigned)heap_bytes_used,
             (unsigned)ctx.sp_max, (unsigned)PJVM_MAX_STACK,
             (unsigned)ctx.lt_max, (unsigned)PJVM_MAX_LOCALS,
             (unsigned)ctx.fdepth_max, (unsigned)PJVM_MAX_FRAMES);
+    if (ctx.gc_count)
+        fprintf(stderr, " | gc: %u", (unsigned)ctx.gc_count);
+    fprintf(stderr, "\n");
 
 #ifdef PJVM_PAGED
     fprintf(stderr,

@@ -35,7 +35,7 @@ bytecode. It compiles itself.
   gen1, gen1 compiles itself to gen2, gen1 == gen2 (byte-identical)
 - **38KB compiled bytecode** (self-hosted binary)
 - **124KB source** across 11 Java files (~4,400 lines)
-- **64 tests + 9 negative tests**, all passing on host
+- **67 tests + 9 negative tests**, all passing on host
 - **Disk-backed compilation** — reads source and writes output through
   native file I/O; supports single-file and multi-file (sources.lst) modes
 - **Bootstrap from any modern JDK** — `javac` compiles picojc source,
@@ -95,7 +95,7 @@ make
 # Run the picoJVM test suite (12 tests, javac + pjvmpack pipeline)
 make test
 
-# Build and test picojc (64 tests, self-hosting, disk modes)
+# Build and test picojc (67 tests, self-hosting, disk modes)
 cd picojc
 make test
 
@@ -136,8 +136,8 @@ current collector uses:
 - exact ref-array element scanning
 - exact object-field scanning when `.pjvm` class metadata includes per-class
   reference bitmaps
-- conservative object fallback for older/self-hosted `.pjvm` binaries that do
-  not yet emit that metadata
+- conservative object fallback for older `.pjvm` binaries that do not yet emit
+  that metadata
 
 GC trigger policy is controlled by `PJVM_GC_TRIGGERS`, combining any of:
 

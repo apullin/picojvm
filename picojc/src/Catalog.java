@@ -141,7 +141,7 @@ public class Catalog {
 				int ordinal = 0;
 				while (Tk.type == Tk.IDENT) {
 					int cnm = C.intern(Tk.strBuf, Tk.strLen);
-					int fi = initField(ci, cnm, true, true, 0, 0, -1, C.NK_NONE);
+					int fi = initField(ci, cnm, true, true, 0, 0, -1, C.NK_NONE, false);
 					C.fHasConst[fi] = true;
 					C.fConstVal[fi] = ordinal++;
 				Lexer.nextToken();
@@ -314,6 +314,7 @@ public class Catalog {
 		int fieldNarrow = C.NK_NONE;
 		int arrayKind = 0;
 		int refNm = -1;
+		boolean fieldGcRef = false;
 
 		scanTy(true);
 		if (tyBase == 0) {
@@ -323,10 +324,12 @@ public class Catalog {
 			retNarrow = tyNarrow;
 			fieldNarrow = tyNarrow;
 			arrayKind = tyArrKind;
+			fieldGcRef = tyDims != 0;
 		} else if (tyBase == 2) {
 			retType = 2;
 			fieldType = tyDims == 1 ? 2 : 1;
 			refNm = tyRefNm;
+			fieldGcRef = true;
 		} else {
 			Native.putchar('T'); Lexer.printNum(Tk.type);
 			Native.putchar('P'); Lexer.printNum(Lexer.pos);
@@ -345,17 +348,19 @@ public class Catalog {
 		if (Tk.type == Tk.LPAREN) {
 			catMethod(ci, nm, mStat, false, mNat, mAbst, retType, fieldType == 2 ? -1 : refNm, retNarrow);
 		} else {
-			catField(ci, nm, mStat, mFinal, fieldType, arrayKind, refNm, fieldNarrow);
+			catField(ci, nm, mStat, mFinal, fieldType, arrayKind, refNm, fieldNarrow, fieldGcRef);
 		}
 	}
 
 	static int initField(int ci, int nm, boolean isStat, boolean isFinal,
-					 int fieldType, int arrKind, int refNm, int narrowKind) {
+					 int fieldType, int arrKind, int refNm, int narrowKind,
+					 boolean gcRef) {
 		C.chk(C.fCount, C.MAX_FIELDS, 254);
 		int fi = C.fCount++;
 		C.fClass[fi] = (byte)ci; C.fName[fi] = (short)nm; C.fStatic[fi] = isStat;
 		C.fType[fi] = (byte)fieldType;
 		C.fNarrow[fi] = (byte)narrowKind;
+		C.fGcRef[fi] = gcRef;
 		C.fArrKind[fi] = (byte)arrKind; C.fSlot[fi] = (short)-1;
 		C.fRefNm[fi] = (short)refNm;
 		C.fInitPos[fi] = -1; C.fInitLn[fi] = (short)0;
@@ -373,8 +378,9 @@ public class Catalog {
 	}
 
 	static void catField(int ci, int nm, boolean isStat, boolean isFinal,
-						   int fieldType, int arrKind, int refNm, int narrowKind) {
-		int fi = initField(ci, nm, isStat, isFinal, fieldType, arrKind, refNm, narrowKind);
+						   int fieldType, int arrKind, int refNm, int narrowKind,
+						   boolean gcRef) {
+		int fi = initField(ci, nm, isStat, isFinal, fieldType, arrKind, refNm, narrowKind, gcRef);
 		if (mConst) C.fIsConst[fi] = true;
 
 		if (Tk.type == Tk.ASSIGN && isStat) {
@@ -388,7 +394,7 @@ public class Catalog {
 				if (Tk.type == Tk.COMMA) {
 					Lexer.nextToken();
 					int nm2 = C.iN();
-					int fi2 = initField(ci, nm2, isStat, isFinal, fieldType, arrKind, refNm, narrowKind);
+					int fi2 = initField(ci, nm2, isStat, isFinal, fieldType, arrKind, refNm, narrowKind, gcRef);
 					// Record initializer for comma-separated fields: static int A=0, B=1;
 				if (Tk.type == Tk.ASSIGN && isStat) {
 					C.fInitPos[fi2] = Lexer.pos;

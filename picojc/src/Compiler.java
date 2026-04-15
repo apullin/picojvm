@@ -62,6 +62,7 @@ class C {
 	static byte[] fType = new byte[MAX_FIELDS]; // 0=int-like, 1=ref, 2=object[]
 	static byte[] fNarrow = new byte[MAX_FIELDS]; // 0=none/int/bool, 1=byte, 2=char, 3=short
 	static boolean[] fStatic = new boolean[MAX_FIELDS];
+	static boolean[] fGcRef = new boolean[MAX_FIELDS]; // field slot holds a heap reference
 	static short[] fSlot   = new short[MAX_FIELDS]; // assigned in resolve
 	static int[] fInitPos  = new int[MAX_FIELDS]; // source pos of initializer (must be int: >32KB sources)
 	static short[] fInitLn = new short[MAX_FIELDS]; // line of initializer

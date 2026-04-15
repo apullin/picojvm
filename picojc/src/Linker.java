@@ -1,4 +1,8 @@
 public class Linker {
+	static final int RF_REF_BITMAPS = 0x02;
+	static final int REF_BITMAP_STRIDE = (C.MAX_FIELDS + 7) >> 3;
+	static byte[] refBm = new byte[C.MAX_CLASSES * REF_BITMAP_STRIDE];
+
 	// @Const ROM array accumulation (filled by Emit, written by writeOut)
 	static final int MAX_CONST = 16;
 	static int constC;
@@ -9,6 +13,32 @@ public class Linker {
 	static int constBL;                               // buf write pos
 	static int[] constOff = new int[MAX_CONST];       // per-entry offset into constBuf
 	static int[] constFO = new int[MAX_CONST];        // per-entry file offset (computed during link)
+
+	static boolean isRefField(int fi) {
+		return C.fGcRef[fi];
+	}
+
+	static void buildRefBitmaps() {
+		for (int i = 0; i < refBm.length; i++) refBm[i] = 0;
+
+		for (int ci = C.uClsStart; ci < C.cCount; ci++) {
+			int outCi = ci - C.uClsStart;
+			int dst = outCi * REF_BITMAP_STRIDE;
+			int parent = C.cParent[ci];
+
+			if (parent >= C.uClsStart) {
+				int src = (parent - C.uClsStart) * REF_BITMAP_STRIDE;
+				int parentBytes = (C.cFieldC[parent] + 7) >> 3;
+				for (int j = 0; j < parentBytes; j++) refBm[dst + j] = refBm[src + j];
+			}
+
+			for (int fi = 0; fi < C.fCount; fi++) {
+				if (C.fClass[fi] != ci || C.fStatic[fi] || !isRefField(fi)) continue;
+				int slot = C.fSlot[fi] & 0xFFFF;
+				refBm[dst + (slot >> 3)] |= (byte)(1 << (slot & 7));
+			}
+		}
+	}
 
 	static void writeOut() {
 		C.outLen = 0;
@@ -26,12 +56,16 @@ public class Linker {
 		wB(C.intCC); // n_int_constants
 		wB(pjvmClassCount); // n_classes
 		wB(C.strCC); // n_string_constants
-		wB(constC > 0 ? 0x04 : 0); // region_flags (bit 2 = const_data)
+		buildRefBitmaps();
+		wB(RF_REF_BITMAPS | (constC > 0 ? 0x04 : 0)); // region_flags
 		wILE(C.cdLen); // bytecodes_size (32-bit LE)
 		wSLE(0); // reserved
 
 		// Class table (interfaces included as stubs for class ID mapping)
 		for (int ci = C.uClsStart; ci < C.cCount; ci++) {
+			int outCi = ci - C.uClsStart;
+			int bitmapOff = outCi * REF_BITMAP_STRIDE;
+			int bitmapLen = (C.cFieldC[ci] + 7) >> 3;
 			int parentId = 0xFF;
 			if (C.cParent[ci] >= 0) {
 				parentId = C.cParent[ci] - C.uClsStart;
@@ -46,6 +80,9 @@ public class Linker {
 			// Vtable entries
 			for (int j = 0; j < C.cVtSize[ci]; j++) {
 				wB(C.vtable[C.vtBase[ci] + j]);
+			}
+			for (int j = 0; j < bitmapLen; j++) {
+				wB(refBm[bitmapOff + j] & 0xFF);
 			}
 		}
 

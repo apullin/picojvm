@@ -5,7 +5,8 @@ class C {
 	// Leave headroom for self-hosting feature work until method storage is dynamic.
 	static final int MAX_METHODS  = 256;
 	static final int MAX_FIELDS   = 416;
-	static final int MAX_NAMES    = 896;
+	static final int MAX_NAMES    = 1024;
+	static final int MAX_NAME_POOL= 12288;
 	static final int MAX_CP       = 2560;
 	static final int MAX_CODE     = 19456;
 	static final int MAX_LOCALS   = 64;
@@ -17,7 +18,7 @@ class C {
 	static final int NK_NONE = 0, NK_BYTE = 1, NK_CHAR = 2, NK_SHORT = 3;
 
 	// --- Name pool (interning) ---
-	static byte[] nPool = new byte[7168];
+	static byte[] nPool = new byte[MAX_NAME_POOL];
 	static int npLen;
 	static int[] nOff = new int[MAX_NAMES];
 	static int[] nLen = new int[MAX_NAMES];
@@ -247,7 +248,7 @@ class C {
 			if (nLen[i] == len && Native.memcmp(nPool, nOff[i], buf, 0, len) == 0)
 				return i;
 		}
-		if (nCount >= MAX_NAMES || npLen + len > 7168) {
+		if (nCount >= MAX_NAMES || npLen + len > MAX_NAME_POOL) {
 			Lexer.error(251);
 			return 0;
 		}
@@ -291,7 +292,7 @@ class C {
 			if (nLen[i] == len && Native.memcmp(nPool, nOff[i], buf, off, len) == 0)
 				return i;
 		}
-		if (nCount >= MAX_NAMES || npLen + len > 7168) {
+		if (nCount >= MAX_NAMES || npLen + len > MAX_NAME_POOL) {
 			Lexer.error(251);
 			return 0;
 		}

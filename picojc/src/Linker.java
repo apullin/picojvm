@@ -35,7 +35,9 @@ public class Linker {
 			for (int fi = 0; fi < C.fCount; fi++) {
 				if (C.fClass[fi] != ci || C.fStatic[fi] || !isRefField(fi)) continue;
 				int slot = C.fSlot[fi] & 0xFFFF;
-				refBm[dst + (slot >> 3)] |= (byte)(1 << (slot & 7));
+				int byteIdx = dst + (slot >> 3);
+				int mask = 1 << (slot & 7);
+				refBm[byteIdx] = (byte)((refBm[byteIdx] & 0xFF) | mask);
 			}
 		}
 	}

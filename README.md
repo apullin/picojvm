@@ -82,7 +82,7 @@ picojc/
   Makefile             Build, test, selfhost, disk modes
 pjvmpack.py            .class to .pjvm packer (bootstrap tool)
 Makefile               picoJVM host build and picoJVM-level tests
-pj/                    picoJSE Java-side environment (`pj.io`, `pj.term`)
+pj/                    picoJSE Java-side environment (`pj.io`, `pj.text`, `pj.term`, `pj.util`)
 ```
 
 ## picoJSE Packages
@@ -92,8 +92,10 @@ pj/                    picoJSE Java-side environment (`pj.io`, `pj.term`)
 Current package roots:
 
 - `pj.Native` — package-visible native bridge
-- `pj.io` — small file and byte-stream helpers
-- `pj.term` — retained cell-surface / terminal abstraction
+- `pj.io` — file and byte/binary helpers
+- `pj.util` — array, byte, and integer helpers
+- `pj.text` — formatting, parsing, and small string utilities
+- `pj.term` — retained cell-surface / terminal abstraction and drawing helpers
 
 The current `pj.term` implementation is intentionally text-first:
 
@@ -105,7 +107,7 @@ Useful commands:
 
 ```bash
 # Build and run host-side package smoke tests
-make test-TermSmoke test-FilesSmoke
+make test-TermSmoke test-FilesSmoke test-PicoJseStdSmoke
 
 # Manual terminal demo (ANSI/raw-key capable host terminal)
 make run-term-demo

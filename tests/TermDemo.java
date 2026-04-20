@@ -1,5 +1,6 @@
 import pj.term.AnsiTerminal;
 import pj.term.CellSurface;
+import pj.term.Draw;
 import pj.term.Keys;
 import pj.term.Terminal;
 
@@ -8,16 +9,6 @@ public class TermDemo {
         if (v < lo) return lo;
         if (v > hi) return hi;
         return v;
-    }
-
-    private static int writeNum(CellSurface s, int x, int y, int n) {
-        if (n < 0) {
-            s.put(x, y, '-');
-            return writeNum(s, x + 1, y, -n);
-        }
-        if (n >= 10) x = writeNum(s, x, y, n / 10);
-        s.put(x, y, '0' + (n % 10));
-        return x + 1;
     }
 
     public static void main(String[] args) {
@@ -51,7 +42,7 @@ public class TermDemo {
             s.write(2, 0, " pj.term demo ");
             s.write(2, 1, "Arrows or hjkl move, q quits");
             s.write(2, h - 2, "ticks=");
-            writeNum(s, 8, h - 2, Terminal.ticks());
+            Draw.writeInt(s, 8, h - 2, Terminal.ticks());
             s.put(x, y, '@');
             t.present(s);
 

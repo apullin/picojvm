@@ -16,17 +16,24 @@ GC_FRAGMENT_TEST  = $(BUILDDIR)/gc-fragment-test
 GC_EXACT_TEST     = $(BUILDDIR)/gc-exact-test
 
 # Single-class tests
-TESTS_SINGLE = Fib HelloWorld BubbleSort Counter StringTest RomStringTest NativeOpsTest StaticInitTest MultiArrayTest StringSwitchTest ConstTest TermSmoke FilesSmoke
+TESTS_SINGLE = Fib HelloWorld BubbleSort Counter StringTest RomStringTest NativeOpsTest StaticInitTest MultiArrayTest StringSwitchTest ConstTest TermSmoke FilesSmoke PicoJseStdSmoke
 TESTS_MULTI  = Shapes Features InterfaceTest ExceptionTest
 TESTS_PAGER  = BigSwitch BigLUT
 ALL_TESTS    = $(TESTS_SINGLE) $(TESTS_MULTI)
 ALL_TESTS_PAGER = $(ALL_TESTS) $(TESTS_PAGER)
 PICOJSE_SRCS = pj/Native.java \
                pj/io/Files.java \
+               pj/io/Binary.java \
                pj/term/Keys.java \
                pj/term/Terminal.java \
                pj/term/CellSurface.java \
-               pj/term/AnsiTerminal.java
+               pj/term/AnsiTerminal.java \
+               pj/term/Draw.java \
+               pj/util/Bytes.java \
+               pj/util/Ints.java \
+               pj/text/Format.java \
+               pj/text/Parse.java \
+               pj/text/Strings.java
 PICOJSE_CLASSDIR = $(BUILDDIR)/picojse-classes
 
 # --- 8085 target toolchain ---
@@ -123,9 +130,9 @@ tests/ExceptionTest.pjvm: tests/MyException.class tests/ExceptionTest.class
 tests/MyException.class tests/ExceptionTest.class: tests/ExceptionTest.java tests/Native.java
 	$(JAVAC) -d tests $^
 
-$(BUILDDIR)/picojse.stamp: $(PICOJSE_SRCS) tests/TermSmoke.java tests/FilesSmoke.java tests/TermDemo.java | $(BUILDDIR)
+$(BUILDDIR)/picojse.stamp: $(PICOJSE_SRCS) tests/TermSmoke.java tests/FilesSmoke.java tests/TermDemo.java tests/PicoJseStdSmoke.java | $(BUILDDIR)
 	@mkdir -p $(PICOJSE_CLASSDIR)
-	$(JAVAC) -d $(PICOJSE_CLASSDIR) $(PICOJSE_SRCS) tests/TermSmoke.java tests/FilesSmoke.java tests/TermDemo.java
+	$(JAVAC) -d $(PICOJSE_CLASSDIR) $(PICOJSE_SRCS) tests/TermSmoke.java tests/FilesSmoke.java tests/TermDemo.java tests/PicoJseStdSmoke.java
 	@touch $@
 
 tests/TermSmoke.pjvm: $(BUILDDIR)/picojse.stamp
@@ -153,6 +160,19 @@ tests/TermDemo.pjvm: $(BUILDDIR)/picojse.stamp
 		$(PICOJSE_CLASSDIR)/pj/term/Terminal.class \
 		$(PICOJSE_CLASSDIR)/pj/term/CellSurface.class \
 		$(PICOJSE_CLASSDIR)/pj/term/AnsiTerminal.class \
+		$(PICOJSE_CLASSDIR)/pj/term/Draw.class \
+		-o $@ -v
+
+tests/PicoJseStdSmoke.pjvm: $(BUILDDIR)/picojse.stamp
+	$(PYTHON) pjvmpack.py \
+		$(PICOJSE_CLASSDIR)/PicoJseStdSmoke.class \
+		$(PICOJSE_CLASSDIR)/pj/Native.class \
+		$(PICOJSE_CLASSDIR)/pj/io/Binary.class \
+		$(PICOJSE_CLASSDIR)/pj/text/Format.class \
+		$(PICOJSE_CLASSDIR)/pj/text/Parse.class \
+		$(PICOJSE_CLASSDIR)/pj/text/Strings.class \
+		$(PICOJSE_CLASSDIR)/pj/util/Bytes.class \
+		$(PICOJSE_CLASSDIR)/pj/util/Ints.class \
 		-o $@ -v
 
 # Multi-class GC graph stress test

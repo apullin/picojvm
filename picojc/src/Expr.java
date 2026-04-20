@@ -626,7 +626,8 @@ public class Expr {
 				if (Tk.type == Tk.DOT) {
 					// Could be ClassName.method() or ClassName.field
 					int ci = Resolver.fClsByNm(classNm);
-					if (ci >= 0 || classNm == C.N_NATIVE || classNm == C.N_STRING) {
+					if (ci >= 0 || classNm == C.N_NATIVE || classNm == C.N_PJ_NATIVE ||
+						classNm == C.N_STRING) {
 						Lexer.nextToken();
 						int memberNm = C.iN();
 

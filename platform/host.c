@@ -9,6 +9,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <sys/ioctl.h>
+#include <termios.h>
+#include <time.h>
+#include <unistd.h>
 
 #define RAW_MEM_SIZE 262144u  /* 256KB — supports source files > 64K for self-hosting */
 #define HEAP_MEM_SIZE 524288u
@@ -27,8 +33,66 @@ static uint8_t *prog_data;
 static size_t prog_size;
 static uint16_t heap_alloc_count;
 static uint32_t heap_bytes_used;
+static int term_state_init;
+static int term_raw_active;
+static int term_stdin_tty;
+static int term_stdout_tty;
+static int term_stdin_flags;
+static struct termios term_saved;
+
+#define PJVM_TERM_INFO_COLS 0
+#define PJVM_TERM_INFO_ROWS 1
+#define PJVM_TERM_INFO_CAPS 2
+#define PJVM_TERM_CAP_ANSI  1
+#define PJVM_TERM_CAP_RAWKEY 2
+#define PJVM_KEY_UP    1001
+#define PJVM_KEY_DOWN  1002
+#define PJVM_KEY_LEFT  1003
+#define PJVM_KEY_RIGHT 1004
 
 #include "../src/pjvm.h"
+
+static void pjvm_host_term_restore(void) {
+    if (term_raw_active) {
+        tcsetattr(STDIN_FILENO, TCSANOW, &term_saved);
+        fcntl(STDIN_FILENO, F_SETFL, term_stdin_flags);
+        term_raw_active = 0;
+    }
+}
+
+static void pjvm_host_term_init(void) {
+    if (term_state_init) return;
+    term_state_init = 1;
+    term_stdin_tty = isatty(STDIN_FILENO);
+    term_stdout_tty = isatty(STDOUT_FILENO);
+    term_stdin_flags = fcntl(STDIN_FILENO, F_GETFL, 0);
+    atexit(pjvm_host_term_restore);
+}
+
+static void pjvm_host_term_enable_raw(void) {
+    struct termios raw;
+
+    pjvm_host_term_init();
+    if (!term_stdin_tty || term_raw_active) return;
+    if (tcgetattr(STDIN_FILENO, &term_saved) != 0) return;
+    raw = term_saved;
+    raw.c_iflag &= (tcflag_t)~(ICRNL | IXON);
+    raw.c_lflag &= (tcflag_t)~(ICANON | ECHO | IEXTEN);
+    raw.c_cc[VMIN] = 0;
+    raw.c_cc[VTIME] = 0;
+    if (tcsetattr(STDIN_FILENO, TCSANOW, &raw) != 0) return;
+    if (term_stdin_flags >= 0)
+        fcntl(STDIN_FILENO, F_SETFL, term_stdin_flags | O_NONBLOCK);
+    term_raw_active = 1;
+}
+
+static int32_t pjvm_host_term_read_byte(void) {
+    uint8_t ch;
+    ssize_t n = read(STDIN_FILENO, &ch, 1);
+    if (n == 1) return (int32_t)ch;
+    if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) return -1;
+    return -1;
+}
 
 uint16_t heap_alloc(PJVMCtx *j, uint16_t size, uint8_t kind) {
     uint16_t a = pjvm_heap_alloc(j, size, kind);
@@ -94,6 +158,56 @@ void pjvm_platform_out(uint16_t port, uint16_t val) {
     if (port == 0xFE) {
         fprintf(stderr, "[DBG] %c\n", (char)val);
     }
+}
+
+int32_t pjvm_platform_term_info(uint16_t code) {
+    struct winsize ws;
+    const char *env;
+
+    pjvm_host_term_init();
+    if (code == PJVM_TERM_INFO_CAPS) {
+        int32_t caps = 0;
+        if (term_stdout_tty) caps |= PJVM_TERM_CAP_ANSI;
+        if (term_stdin_tty) caps |= PJVM_TERM_CAP_RAWKEY;
+        return caps;
+    }
+
+    if (term_stdout_tty && ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == 0) {
+        if (code == PJVM_TERM_INFO_COLS && ws.ws_col > 0) return ws.ws_col;
+        if (code == PJVM_TERM_INFO_ROWS && ws.ws_row > 0) return ws.ws_row;
+    }
+
+    env = getenv(code == PJVM_TERM_INFO_COLS ? "COLUMNS" : "LINES");
+    if (env && *env) return atoi(env);
+    return code == PJVM_TERM_INFO_COLS ? 80 : 24;
+}
+
+int32_t pjvm_platform_key_read(void) {
+    int32_t ch, next, final;
+
+    pjvm_host_term_enable_raw();
+    if (!term_stdin_tty) return -1;
+    ch = pjvm_host_term_read_byte();
+    if (ch != 27) return ch;
+
+    next = pjvm_host_term_read_byte();
+    if (next < 0) return 27;
+    if (next != '[' && next != 'O') return 27;
+
+    final = pjvm_host_term_read_byte();
+    switch (final) {
+    case 'A': return PJVM_KEY_UP;
+    case 'B': return PJVM_KEY_DOWN;
+    case 'C': return PJVM_KEY_RIGHT;
+    case 'D': return PJVM_KEY_LEFT;
+    default: return 27;
+    }
+}
+
+int32_t pjvm_platform_ticks(void) {
+    struct timespec ts;
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) return 0;
+    return (int32_t)(ts.tv_sec * 1000u + (uint32_t)(ts.tv_nsec / 1000000u));
 }
 
 /* --- File I/O -------------------------------------------------------- */

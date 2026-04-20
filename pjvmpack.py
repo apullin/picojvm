@@ -86,6 +86,9 @@ NATIVE_IDS = {
     "fileWrite": 21,
     "fileClose": 22,
     "fileDelete": 23,
+    "termInfo": 24,
+    "keyRead": 25,
+    "ticks": 26,
 }
 NATIVE_OBJECT_INIT = 6
 
@@ -850,9 +853,9 @@ def pack_pjvm(class_data_list, verbose=False, v2=False, pin_hints=None):  # v2 i
             if key in native_cache:
                 continue
 
-            if ref_class == "Native":
+            if ref_class == "Native" or ref_class == "pj/Native":
                 if ref_method not in NATIVE_IDS:
-                    raise ValueError(f"Unknown native: Native.{ref_method}")
+                    raise ValueError(f"Unknown native: {ref_class}.{ref_method}")
                 nm_idx = len(method_table)
                 a_count = count_args(ref_desc)
                 method_table.append({
@@ -873,7 +876,7 @@ def pack_pjvm(class_data_list, verbose=False, v2=False, pin_hints=None):  # v2 i
                 })
                 native_cache[key] = nm_idx
                 if verbose:
-                    print(f"  Native #{nm_idx}: Native.{ref_method}{ref_desc} "
+                    print(f"  Native #{nm_idx}: {ref_class}.{ref_method}{ref_desc} "
                           f"(id={NATIVE_IDS[ref_method]})")
 
             elif ref_method == "<init>" and (

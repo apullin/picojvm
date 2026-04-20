@@ -54,6 +54,15 @@ void pjvm_platform_out(uint16_t port, uint16_t val) {
     (void)port; (void)val;
 }
 
+int32_t pjvm_platform_term_info(uint16_t code) {
+    if (code == 0) return 64;
+    if (code == 1) return 16;
+    return 0;
+}
+
+int32_t pjvm_platform_key_read(void) { return -1; }
+int32_t pjvm_platform_ticks(void) { return 0; }
+
 void pjvm_platform_trap(uint8_t op, uint16_t pc) {
     (void)op;
     (void)pc;

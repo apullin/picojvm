@@ -67,6 +67,19 @@ void pjvm_platform_poke8(uint32_t a, uint8_t v) {
     heap_mem[a] = v;
 }
 
+int32_t pjvm_platform_term_info(uint16_t code) {
+    (void)code;
+    return 0;
+}
+
+int32_t pjvm_platform_key_read(void) {
+    return -1;
+}
+
+int32_t pjvm_platform_ticks(void) {
+    return 0;
+}
+
 void pjvm_platform_trap(uint8_t op, uint16_t pc) {
     (void)op;
     (void)pc;

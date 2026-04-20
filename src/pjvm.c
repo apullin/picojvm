@@ -78,6 +78,9 @@ enum {
     NATIVE_FILE_WRITE = 21,
     NATIVE_FILE_CLOSE = 22,
     NATIVE_FILE_DELETE = 23,
+    NATIVE_TERM_INFO = 24,
+    NATIVE_KEY_READ = 25,
+    NATIVE_TICKS = 26,
 };
 
 /* --- globals (extern-declared in pjvm.h) ------------------------------ */
@@ -690,6 +693,18 @@ static void pjvm_inv(uint8_t mi) {
             pjvm_push32(result);
             break;
         }
+        case NATIVE_TERM_INFO: {
+            uint16_t code;
+            SPOP_U16(code);
+            pjvm_push32(pjvm_platform_term_info(code));
+            break;
+        }
+        case NATIVE_KEY_READ:
+            pjvm_push32(pjvm_platform_key_read());
+            break;
+        case NATIVE_TICKS:
+            pjvm_push32(pjvm_platform_ticks());
+            break;
         default:
             pjvm_platform_trap(PJVM_TRAP_BAD_NATIVE, g_pjvm->pc);
             break;

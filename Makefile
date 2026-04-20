@@ -16,11 +16,18 @@ GC_FRAGMENT_TEST  = $(BUILDDIR)/gc-fragment-test
 GC_EXACT_TEST     = $(BUILDDIR)/gc-exact-test
 
 # Single-class tests
-TESTS_SINGLE = Fib HelloWorld BubbleSort Counter StringTest RomStringTest NativeOpsTest StaticInitTest MultiArrayTest StringSwitchTest ConstTest
+TESTS_SINGLE = Fib HelloWorld BubbleSort Counter StringTest RomStringTest NativeOpsTest StaticInitTest MultiArrayTest StringSwitchTest ConstTest TermSmoke FilesSmoke
 TESTS_MULTI  = Shapes Features InterfaceTest ExceptionTest
 TESTS_PAGER  = BigSwitch BigLUT
 ALL_TESTS    = $(TESTS_SINGLE) $(TESTS_MULTI)
 ALL_TESTS_PAGER = $(ALL_TESTS) $(TESTS_PAGER)
+PICOJSE_SRCS = pj/Native.java \
+               pj/io/Files.java \
+               pj/term/Keys.java \
+               pj/term/Terminal.java \
+               pj/term/CellSurface.java \
+               pj/term/AnsiTerminal.java
+PICOJSE_CLASSDIR = $(BUILDDIR)/picojse-classes
 
 # --- 8085 target toolchain ---
 ROOT     = $(shell cd ../.. && pwd)
@@ -116,6 +123,38 @@ tests/ExceptionTest.pjvm: tests/MyException.class tests/ExceptionTest.class
 tests/MyException.class tests/ExceptionTest.class: tests/ExceptionTest.java tests/Native.java
 	$(JAVAC) -d tests $^
 
+$(BUILDDIR)/picojse.stamp: $(PICOJSE_SRCS) tests/TermSmoke.java tests/FilesSmoke.java tests/TermDemo.java | $(BUILDDIR)
+	@mkdir -p $(PICOJSE_CLASSDIR)
+	$(JAVAC) -d $(PICOJSE_CLASSDIR) $(PICOJSE_SRCS) tests/TermSmoke.java tests/FilesSmoke.java tests/TermDemo.java
+	@touch $@
+
+tests/TermSmoke.pjvm: $(BUILDDIR)/picojse.stamp
+	$(PYTHON) pjvmpack.py \
+		$(PICOJSE_CLASSDIR)/TermSmoke.class \
+		$(PICOJSE_CLASSDIR)/pj/Native.class \
+		$(PICOJSE_CLASSDIR)/pj/term/Keys.class \
+		$(PICOJSE_CLASSDIR)/pj/term/Terminal.class \
+		$(PICOJSE_CLASSDIR)/pj/term/CellSurface.class \
+		$(PICOJSE_CLASSDIR)/pj/term/AnsiTerminal.class \
+		-o $@ -v
+
+tests/FilesSmoke.pjvm: $(BUILDDIR)/picojse.stamp
+	$(PYTHON) pjvmpack.py \
+		$(PICOJSE_CLASSDIR)/FilesSmoke.class \
+		$(PICOJSE_CLASSDIR)/pj/Native.class \
+		$(PICOJSE_CLASSDIR)/pj/io/Files.class \
+		-o $@ -v
+
+tests/TermDemo.pjvm: $(BUILDDIR)/picojse.stamp
+	$(PYTHON) pjvmpack.py \
+		$(PICOJSE_CLASSDIR)/TermDemo.class \
+		$(PICOJSE_CLASSDIR)/pj/Native.class \
+		$(PICOJSE_CLASSDIR)/pj/term/Keys.class \
+		$(PICOJSE_CLASSDIR)/pj/term/Terminal.class \
+		$(PICOJSE_CLASSDIR)/pj/term/CellSurface.class \
+		$(PICOJSE_CLASSDIR)/pj/term/AnsiTerminal.class \
+		-o $@ -v
+
 # Multi-class GC graph stress test
 tests/GCGraphTest.pjvm: tests/GCNode.class tests/GCGraphTest.class
 	$(PYTHON) pjvmpack.py $^ -o $@ -v
@@ -130,6 +169,9 @@ tests/BigSwitch.java tests/BigLUT.java: tests/gen_big_tests.py
 # Run a test on host
 run-%: $(PICOJVM) tests/%.pjvm
 	$(PICOJVM) tests/$*.pjvm
+
+run-term-demo: $(PICOJVM) tests/TermDemo.pjvm
+	$(PICOJVM) tests/TermDemo.pjvm
 
 $(BUILDDIR)/%.out: $(PICOJVM) tests/%.pjvm | $(BUILDDIR)
 	$(PICOJVM) tests/$*.pjvm > $@

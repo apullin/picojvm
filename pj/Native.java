@@ -1,7 +1,11 @@
-// Native method stubs for picoJVM.
-// These are recognized by the JVM interpreter and dispatched to
-// native C handlers in core.c.
+package pj;
 
+/*
+ * Package-visible native bridge for picoJSE-style libraries.
+ *
+ * The default-package Native class remains for older programs and for the
+ * self-host compiler. New packaged libraries should depend on pj.Native.
+ */
 public class Native {
     public static native void putchar(int c);
     public static native int  in(int port);

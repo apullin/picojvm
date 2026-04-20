@@ -74,6 +74,20 @@ void pjvm_platform_out(uint16_t port, uint16_t val) {
     (void)val;
 }
 
+int32_t pjvm_platform_term_info(uint16_t code) {
+    if (code == 0) return 64;
+    if (code == 1) return 16;
+    return 0;
+}
+
+int32_t pjvm_platform_key_read(void) {
+    return -1;
+}
+
+int32_t pjvm_platform_ticks(void) {
+    return 0;
+}
+
 void pjvm_platform_trap(uint8_t op, uint16_t pc) {
     *(volatile uint8_t *)(uintptr_t)PJVM_SIM_TRAP_BASE = op;
     *(volatile uint8_t *)(uintptr_t)(PJVM_SIM_TRAP_BASE + 1u) = (uint8_t)pc;

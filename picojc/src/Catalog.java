@@ -23,6 +23,7 @@ public class Catalog {
 
 	static boolean isBuiltinType(int nm) {
 		return nm == C.N_OBJECT || nm == C.N_STRING || nm == C.N_NATIVE ||
+			   nm == C.N_PJ_NATIVE ||
 			   nm == C.N_THROWABLE || nm == C.N_EXCEPTION || nm == C.N_RUNTIME_EX;
 	}
 

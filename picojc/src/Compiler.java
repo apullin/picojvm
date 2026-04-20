@@ -13,7 +13,7 @@ class C {
 	static final int MAX_EXC      = 32;
 	static final int MAX_VTABLE   = 128;
 	static final int MAX_INT_CONST= 80;
-	static final int MAX_STR_CONST= 80;
+	static final int MAX_STR_CONST= 96;
 	static final int MAX_VA_SLOTS = 8;
 	static final int NK_NONE = 0, NK_BYTE = 1, NK_CHAR = 2, NK_SHORT = 3;
 
@@ -34,6 +34,8 @@ class C {
 	static final int N_LENGTH = 27, N_CHARAT = 28, N_EQUALS = 29, N_TOSTRING = 30, N_HASHCODE = 31;
 	static final int N_ARGS = 32;
 	static final int N_CONST = 33;
+	static final int N_PJ_NATIVE = 34;
+	static final int N_TERM_INFO = 35, N_KEY_READ = 36, N_TICKS = 37;
 
 	// --- Class table ---
 	static int cCount;
@@ -230,7 +232,7 @@ class C {
 			"fileOpen", "fileReadByte", "fileWriteByte", "fileRead",
 			"fileWrite", "fileClose", "fileDelete",
 			"length", "charAt", "equals", "toString", "hashCode", "args",
-			"Const"
+			"Const", "pj.Native", "termInfo", "keyRead", "ticks"
 		};
 		for (int i = 0; i < seeds.length; i++) iStr(seeds[i]);
 	}
@@ -362,7 +364,10 @@ class C {
 			N_FILE_READ, packNat(20, 3, 1),
 			N_FILE_WRITE, packNat(21, 3, 0),
 			N_FILE_CLOSE, packNat(22, 1, 0),
-			N_FILE_DELETE, packNat(23, 2, 1)
+			N_FILE_DELETE, packNat(23, 2, 1),
+			N_TERM_INFO, packNat(24, 1, 1),
+			N_KEY_READ, packNat(25, 0, 1),
+			N_TICKS, packNat(26, 0, 1)
 		};
 	}
 
@@ -405,7 +410,8 @@ class C {
 		int id = info >> 8, argc = (info >> 2) & 63, ret = info & 3;
 		if (classNm == N_OBJECT && methodNm == N_INIT)
 			return addNat(N_OBJECT, methodNm, argc, id, false, ret);
-		if (classNm == N_NATIVE) return addNat(N_NATIVE, methodNm, argc, id, true, ret);
+		if (classNm == N_NATIVE || classNm == N_PJ_NATIVE)
+			return addNat(classNm, methodNm, argc, id, true, ret);
 		if (classNm == N_STRING) return addNat(N_STRING, methodNm, argc, id, false, ret);
 		return -1;
 	}

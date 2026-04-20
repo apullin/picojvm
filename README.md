@@ -82,7 +82,40 @@ picojc/
   Makefile             Build, test, selfhost, disk modes
 pjvmpack.py            .class to .pjvm packer (bootstrap tool)
 Makefile               picoJVM host build and picoJVM-level tests
+pj/                    picoJSE Java-side environment (`pj.io`, `pj.term`)
 ```
+
+## picoJSE Packages
+
+`picoJSE` is the Java-side standard environment layer for `picoJVM`.
+
+Current package roots:
+
+- `pj.Native` — package-visible native bridge
+- `pj.io` — small file and byte-stream helpers
+- `pj.term` — retained cell-surface / terminal abstraction
+
+The current `pj.term` implementation is intentionally text-first:
+
+- host ANSI terminal
+- serial-terminal / TUI route
+- later direct character-display presenters such as SOL-20
+
+Useful commands:
+
+```bash
+# Build and run host-side package smoke tests
+make test-TermSmoke test-FilesSmoke
+
+# Manual terminal demo (ANSI/raw-key capable host terminal)
+make run-term-demo
+
+# Prove the self-hosted compiler can build the real pj.* package sources
+cd picojc
+make test-disk-picojse
+```
+
+See [PICOJSE.md](PICOJSE.md) for the package split and current design direction.
 
 ## Quick Start
 

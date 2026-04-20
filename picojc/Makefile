@@ -13,6 +13,8 @@ TESTDIR = tests
 EXPDIR  = expected
 NEGDIR  = tests-negative
 PKGDIR  = tests-pkg
+PICOJSE_DIR = ../pj
+PICOJSE_TESTDIR = ../tests
 
 # All compiler source files
 SRCS = $(SRCDIR)/Compiler.java $(SRCDIR)/Token.java $(SRCDIR)/Lexer.java $(SRCDIR)/Native.java \
@@ -306,6 +308,52 @@ test-disk-package: $(PICOJVM) $(BUILDDIR)/picojc-disk.pjvm
 		false; \
 	fi
 
+# Multi-file package/library tests against the real picoJSE sources.
+test-disk-picojse-term: $(PICOJVM) $(BUILDDIR)/picojc-disk.pjvm
+	@mkdir -p $(BUILDDIR)/disk_picojse_term
+	@cp $(PICOJSE_DIR)/Native.java $(BUILDDIR)/disk_picojse_term/
+	@cp $(PICOJSE_DIR)/term/Keys.java $(BUILDDIR)/disk_picojse_term/
+	@cp $(PICOJSE_DIR)/term/Terminal.java $(BUILDDIR)/disk_picojse_term/
+	@cp $(PICOJSE_DIR)/term/CellSurface.java $(BUILDDIR)/disk_picojse_term/
+	@cp $(PICOJSE_DIR)/term/AnsiTerminal.java $(BUILDDIR)/disk_picojse_term/
+	@cp $(PICOJSE_TESTDIR)/TermSmoke.java $(BUILDDIR)/disk_picojse_term/
+	@printf 'Native.java\nKeys.java\nTerminal.java\nCellSurface.java\nAnsiTerminal.java\nTermSmoke.java\n' > $(BUILDDIR)/disk_picojse_term/sources.lst
+	@echo "--- picoJSE TermSmoke (disk package) ---"
+	@cd $(BUILDDIR)/disk_picojse_term && $(DISK_PICOJVM) $(DISK_COMPILER) > TermSmoke.pjvm \
+		2> TermSmoke_compile.log
+	@$(PICOJVM) $(BUILDDIR)/disk_picojse_term/TermSmoke.pjvm > $(BUILDDIR)/disk_picojse_term/TermSmoke.out \
+		2> $(BUILDDIR)/disk_picojse_term/TermSmoke_run.log || true
+	@if diff -q $(BUILDDIR)/disk_picojse_term/TermSmoke.out $(EXPDIR)/PicoJseTerm.txt > /dev/null 2>&1; then \
+		echo "PASS: picoJSE TermSmoke (disk package)"; \
+	else \
+		echo "FAIL: picoJSE TermSmoke (disk package)"; \
+		echo "  Expected:"; cat $(EXPDIR)/PicoJseTerm.txt | head -5; \
+		echo "  Got:"; cat $(BUILDDIR)/disk_picojse_term/TermSmoke.out | head -5; \
+		false; \
+	fi
+
+test-disk-picojse-io: $(PICOJVM) $(BUILDDIR)/picojc-disk.pjvm
+	@mkdir -p $(BUILDDIR)/disk_picojse_io
+	@cp $(PICOJSE_DIR)/Native.java $(BUILDDIR)/disk_picojse_io/
+	@cp $(PICOJSE_DIR)/io/Files.java $(BUILDDIR)/disk_picojse_io/
+	@cp $(PICOJSE_TESTDIR)/FilesSmoke.java $(BUILDDIR)/disk_picojse_io/
+	@printf 'Native.java\nFiles.java\nFilesSmoke.java\n' > $(BUILDDIR)/disk_picojse_io/sources.lst
+	@echo "--- picoJSE FilesSmoke (disk package) ---"
+	@cd $(BUILDDIR)/disk_picojse_io && $(DISK_PICOJVM) $(DISK_COMPILER) > FilesSmoke.pjvm \
+		2> FilesSmoke_compile.log
+	@$(PICOJVM) $(BUILDDIR)/disk_picojse_io/FilesSmoke.pjvm > $(BUILDDIR)/disk_picojse_io/FilesSmoke.out \
+		2> $(BUILDDIR)/disk_picojse_io/FilesSmoke_run.log || true
+	@if [ "$$(cat $(BUILDDIR)/disk_picojse_io/FilesSmoke.out)" = "PJIO" ]; then \
+		echo "PASS: picoJSE FilesSmoke (disk package)"; \
+	else \
+		echo "FAIL: picoJSE FilesSmoke (disk package)"; \
+		echo "  Expected:"; cat $(EXPDIR)/PicoJseIo.txt | head -5; \
+		echo "  Got:"; cat $(BUILDDIR)/disk_picojse_io/FilesSmoke.out | head -5; \
+		false; \
+	fi
+
+test-disk-picojse: test-disk-picojse-term test-disk-picojse-io
+
 # Disk selfhost: compile compiler sources via sources.lst, verify byte-identical to memory mode
 test-disk-selfhost: $(PICOJVM) $(BUILDDIR)/picojc-disk.pjvm $(BUILDDIR)/gen1.pjvm
 	@mkdir -p $(BUILDDIR)/disk_selfhost
@@ -435,14 +483,14 @@ test-selfhost: test-selfhost-fixpoint test-binmatch test-gen1
 	@echo "=== Self-hosting regression: ALL PASSED ==="
 
 # Everything: unit tests + selfhost + disk modes
-test-all: test test-negative test-selfhost test-disk test-disk-multi test-disk-package test-disk-selfhost
+test-all: test test-negative test-selfhost test-disk test-disk-multi test-disk-package test-disk-picojse test-disk-selfhost
 	@echo ""
 	@echo "=== ALL TESTS PASSED ==="
 
 clean:
 	rm -rf $(BUILDDIR)
 
-.PHONY: all test test-negative test-all build check-javac clean test-disk test-disk-multi test-disk-package test-disk-selfhost
+.PHONY: all test test-negative test-all build check-javac clean test-disk test-disk-multi test-disk-package test-disk-picojse test-disk-picojse-term test-disk-picojse-io test-disk-selfhost
 .PHONY: test-selfhost test-selfhost-fixpoint test-binmatch test-gen1
 .PRECIOUS: $(BUILDDIR)/%.pjvm $(BUILDDIR)/%.out
 .PRECIOUS: $(BUILDDIR)/gen1_%.pjvm $(BUILDDIR)/gen1_%.out

@@ -401,7 +401,32 @@ test-disk-picojse-archive: $(PICOJVM) $(BUILDDIR)/picojc-disk.pjvm
 		false; \
 	fi
 
-test-disk-picojse: test-disk-picojse-term test-disk-picojse-io test-disk-picojse-std test-disk-picojse-archive
+test-disk-picojse-zip: $(PICOJVM) $(BUILDDIR)/picojc-disk.pjvm
+	@mkdir -p $(BUILDDIR)/disk_picojse_zip
+	@cp $(PICOJSE_DIR)/Native.java $(BUILDDIR)/disk_picojse_zip/
+	@cp $(PICOJSE_DIR)/archive/Zip.java $(BUILDDIR)/disk_picojse_zip/
+	@cp $(PICOJSE_DIR)/io/Files.java $(BUILDDIR)/disk_picojse_zip/
+	@cp $(PICOJSE_DIR)/io/Binary.java $(BUILDDIR)/disk_picojse_zip/
+	@cp $(PICOJSE_DIR)/text/Format.java $(BUILDDIR)/disk_picojse_zip/
+	@cp $(PICOJSE_DIR)/text/Strings.java $(BUILDDIR)/disk_picojse_zip/
+	@cp $(PICOJSE_DIR)/util/Bytes.java $(BUILDDIR)/disk_picojse_zip/
+	@cp $(PICOJSE_TESTDIR)/ZipSmoke.java $(BUILDDIR)/disk_picojse_zip/
+	@printf 'Native.java\nZip.java\nFiles.java\nBinary.java\nFormat.java\nStrings.java\nBytes.java\nZipSmoke.java\n' > $(BUILDDIR)/disk_picojse_zip/sources.lst
+	@echo "--- picoJSE ZipSmoke (disk package) ---"
+	@cd $(BUILDDIR)/disk_picojse_zip && $(DISK_PICOJVM) $(DISK_COMPILER) > ZipSmoke.pjvm \
+		2> ZipSmoke_compile.log
+	@$(PICOJVM) $(BUILDDIR)/disk_picojse_zip/ZipSmoke.pjvm > $(BUILDDIR)/disk_picojse_zip/ZipSmoke.out \
+		2> $(BUILDDIR)/disk_picojse_zip/ZipSmoke_run.log || true
+	@if diff -q $(BUILDDIR)/disk_picojse_zip/ZipSmoke.out $(EXPDIR)/ZipSmoke.txt > /dev/null 2>&1; then \
+		echo "PASS: picoJSE ZipSmoke (disk package)"; \
+	else \
+		echo "FAIL: picoJSE ZipSmoke (disk package)"; \
+		echo "  Expected:"; cat $(EXPDIR)/ZipSmoke.txt | head -8; \
+		echo "  Got:"; cat $(BUILDDIR)/disk_picojse_zip/ZipSmoke.out | head -8; \
+		false; \
+	fi
+
+test-disk-picojse: test-disk-picojse-term test-disk-picojse-io test-disk-picojse-std test-disk-picojse-archive test-disk-picojse-zip
 
 # Disk selfhost: compile compiler sources via sources.lst, verify byte-identical to memory mode
 test-disk-selfhost: $(PICOJVM) $(BUILDDIR)/picojc-disk.pjvm $(BUILDDIR)/gen1.pjvm
@@ -539,7 +564,7 @@ test-all: test test-negative test-selfhost test-disk test-disk-multi test-disk-p
 clean:
 	rm -rf $(BUILDDIR)
 
-.PHONY: all test test-negative test-all build check-javac clean test-disk test-disk-multi test-disk-package test-disk-picojse test-disk-picojse-term test-disk-picojse-io test-disk-picojse-std test-disk-picojse-archive test-disk-selfhost
+.PHONY: all test test-negative test-all build check-javac clean test-disk test-disk-multi test-disk-package test-disk-picojse test-disk-picojse-term test-disk-picojse-io test-disk-picojse-std test-disk-picojse-archive test-disk-picojse-zip test-disk-selfhost
 .PHONY: test-selfhost test-selfhost-fixpoint test-binmatch test-gen1
 .PRECIOUS: $(BUILDDIR)/%.pjvm $(BUILDDIR)/%.out
 .PRECIOUS: $(BUILDDIR)/gen1_%.pjvm $(BUILDDIR)/gen1_%.out

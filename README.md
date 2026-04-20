@@ -92,7 +92,7 @@ pj/                    picoJSE Java-side environment (`pj.archive`, `pj.io`, `pj
 Current package roots:
 
 - `pj.Native` — package-visible native bridge
-- `pj.archive` — archive/container helpers (`Tar` today)
+- `pj.archive` — archive/container helpers (`Tar` and stored-entry `Zip` today)
 - `pj.io` — file and byte/binary helpers
 - `pj.util` — array, byte, and integer helpers
 - `pj.text` — formatting, parsing, and small string utilities
@@ -108,7 +108,7 @@ Useful commands:
 
 ```bash
 # Build and run host-side package smoke tests
-make test-TermSmoke test-FilesSmoke test-PicoJseStdSmoke test-TarSmoke
+make test-TermSmoke test-FilesSmoke test-PicoJseStdSmoke test-TarSmoke test-ZipSmoke
 
 # Manual terminal demo (ANSI/raw-key capable host terminal)
 make run-term-demo

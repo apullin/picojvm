@@ -78,6 +78,7 @@ Implemented:
 
 - `pj.Native`
 - `pj.archive.Tar`
+- `pj.archive.Zip`
 - `pj.io.Files`
 - `pj.io.Binary`
 - `pj.util.Bytes`
@@ -94,6 +95,7 @@ Implemented:
   - `FilesSmoke`
   - `PicoJseStdSmoke`
   - `TarSmoke`
+  - `ZipSmoke`
 - manual host demo:
   - `TermDemo`
 - self-hosted `picojc` multi-file package validation:
@@ -109,13 +111,13 @@ Still missing:
 - richer terminal capabilities / attributes
 - stream-style `pj.io` readers/writers
 - collection types beyond raw arrays
-- compression formats beyond plain tar/ustar
+- compressed ZIP/DEFLATE support beyond stored entries
 
 ## Near-term next steps
 
 1. Add a SOL-20 presenter backend using the same `CellSurface`.
 2. Add stream-style `pj.io` helpers and enough binary/text support for archive
-   tools (`pjtar`, later `pjzip` / `pjunzip`).
+   tools (`pjtar`, `pjunzip`, later full `pjzip` with compression).
 3. Add a simple grid widget in `pj.ui`.
 4. Build a spreadsheet-shell prototype on top of `pj.term` + `pj.io`.
 5. Add a cleaner app/library build flow so `picojc` package builds do not rely

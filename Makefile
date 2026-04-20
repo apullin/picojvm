@@ -16,13 +16,14 @@ GC_FRAGMENT_TEST  = $(BUILDDIR)/gc-fragment-test
 GC_EXACT_TEST     = $(BUILDDIR)/gc-exact-test
 
 # Single-class tests
-TESTS_SINGLE = Fib HelloWorld BubbleSort Counter StringTest RomStringTest NativeOpsTest StaticInitTest MultiArrayTest StringSwitchTest ConstTest TermSmoke FilesSmoke PicoJseStdSmoke TarSmoke
+TESTS_SINGLE = Fib HelloWorld BubbleSort Counter StringTest RomStringTest NativeOpsTest StaticInitTest MultiArrayTest StringSwitchTest ConstTest TermSmoke FilesSmoke PicoJseStdSmoke TarSmoke ZipSmoke
 TESTS_MULTI  = Shapes Features InterfaceTest ExceptionTest
 TESTS_PAGER  = BigSwitch BigLUT
 ALL_TESTS    = $(TESTS_SINGLE) $(TESTS_MULTI)
 ALL_TESTS_PAGER = $(ALL_TESTS) $(TESTS_PAGER)
 PICOJSE_SRCS = pj/Native.java \
                pj/archive/Tar.java \
+               pj/archive/Zip.java \
                pj/io/Files.java \
                pj/io/Binary.java \
                pj/term/Keys.java \
@@ -131,9 +132,9 @@ tests/ExceptionTest.pjvm: tests/MyException.class tests/ExceptionTest.class
 tests/MyException.class tests/ExceptionTest.class: tests/ExceptionTest.java tests/Native.java
 	$(JAVAC) -d tests $^
 
-$(BUILDDIR)/picojse.stamp: $(PICOJSE_SRCS) tests/TermSmoke.java tests/FilesSmoke.java tests/TermDemo.java tests/PicoJseStdSmoke.java tests/TarSmoke.java | $(BUILDDIR)
+$(BUILDDIR)/picojse.stamp: $(PICOJSE_SRCS) tests/TermSmoke.java tests/FilesSmoke.java tests/TermDemo.java tests/PicoJseStdSmoke.java tests/TarSmoke.java tests/ZipSmoke.java | $(BUILDDIR)
 	@mkdir -p $(PICOJSE_CLASSDIR)
-	$(JAVAC) -d $(PICOJSE_CLASSDIR) $(PICOJSE_SRCS) tests/TermSmoke.java tests/FilesSmoke.java tests/TermDemo.java tests/PicoJseStdSmoke.java tests/TarSmoke.java
+	$(JAVAC) -d $(PICOJSE_CLASSDIR) $(PICOJSE_SRCS) tests/TermSmoke.java tests/FilesSmoke.java tests/TermDemo.java tests/PicoJseStdSmoke.java tests/TarSmoke.java tests/ZipSmoke.java
 	@touch $@
 
 tests/TermSmoke.pjvm: $(BUILDDIR)/picojse.stamp
@@ -182,6 +183,18 @@ tests/TarSmoke.pjvm: $(BUILDDIR)/picojse.stamp
 		$(PICOJSE_CLASSDIR)/pj/Native.class \
 		$(PICOJSE_CLASSDIR)/pj/archive/Tar.class \
 		$(PICOJSE_CLASSDIR)/pj/io/Files.class \
+		$(PICOJSE_CLASSDIR)/pj/text/Format.class \
+		$(PICOJSE_CLASSDIR)/pj/text/Strings.class \
+		$(PICOJSE_CLASSDIR)/pj/util/Bytes.class \
+		-o $@ -v
+
+tests/ZipSmoke.pjvm: $(BUILDDIR)/picojse.stamp
+	$(PYTHON) pjvmpack.py \
+		$(PICOJSE_CLASSDIR)/ZipSmoke.class \
+		$(PICOJSE_CLASSDIR)/pj/Native.class \
+		$(PICOJSE_CLASSDIR)/pj/archive/Zip.class \
+		$(PICOJSE_CLASSDIR)/pj/io/Files.class \
+		$(PICOJSE_CLASSDIR)/pj/io/Binary.class \
 		$(PICOJSE_CLASSDIR)/pj/text/Format.class \
 		$(PICOJSE_CLASSDIR)/pj/text/Strings.class \
 		$(PICOJSE_CLASSDIR)/pj/util/Bytes.class \

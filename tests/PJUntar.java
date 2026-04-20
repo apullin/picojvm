@@ -1,19 +1,17 @@
-import pj.Native;
 import pj.archive.Tar;
+import pj.io.Console;
 import pj.io.Files;
-import pj.text.Format;
 
 public class PJUntar {
     private static void usage() {
-        Native.print("usage: PJUntar archive.tar\n");
+        Console.println("usage: PJUntar archive.tar");
     }
 
     private static void emitExtracted(String name, int size) {
-        Native.print("x ");
-        Native.print(name);
-        Native.putchar(',');
-        Format.printInt(size);
-        Native.putchar('\n');
+        Console.print("x ");
+        Console.print(name);
+        Console.printChar(',');
+        Console.printlnInt(size);
     }
 
     public static void main(String[] args) {
@@ -28,7 +26,7 @@ public class PJUntar {
             return;
         }
         if (Files.openRead(args[0]) != 0) {
-            Native.print("open fail\n");
+            Console.println("open fail");
             return;
         }
         for (;;) {

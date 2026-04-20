@@ -1,19 +1,17 @@
-import pj.Native;
 import pj.archive.Zip;
+import pj.io.Console;
 import pj.io.Files;
-import pj.text.Format;
 
 public class PJUnzip {
     private static void usage() {
-        Native.print("usage: PJUnzip archive.zip\n");
+        Console.println("usage: PJUnzip archive.zip");
     }
 
     private static void emitExtracted(String name, int size) {
-        Native.print("x ");
-        Native.print(name);
-        Native.putchar(',');
-        Format.printInt(size);
-        Native.putchar('\n');
+        Console.print("x ");
+        Console.print(name);
+        Console.printChar(',');
+        Console.printlnInt(size);
     }
 
     public static void main(String[] args) {
@@ -29,7 +27,7 @@ public class PJUnzip {
             return;
         }
         if (Files.openRead(args[0]) != 0) {
-            Native.print("open fail\n");
+            Console.println("open fail");
             return;
         }
         for (;;) {

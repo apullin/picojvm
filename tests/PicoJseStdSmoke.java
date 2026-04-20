@@ -1,5 +1,7 @@
 import pj.Native;
 import pj.io.Binary;
+import pj.io.Console;
+import pj.io.TextWriter;
 import pj.text.Format;
 import pj.text.Parse;
 import pj.text.Strings;
@@ -47,5 +49,11 @@ public class PicoJseStdSmoke {
         Native.putchar(',');
         Format.printHex(Binary.readIntLE(a, 0), 8);
         Native.putchar('\n');
+
+        Console.println("console");
+
+        TextWriter out = TextWriter.stdout();
+        out.print("writer,");
+        out.printlnInt(7);
     }
 }

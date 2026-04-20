@@ -157,6 +157,14 @@ void pjvm_platform_poke8(uint32_t a, uint8_t v) {
 void pjvm_platform_out(uint16_t port, uint16_t val) {
     if (port == 0xFE) {
         fprintf(stderr, "[DBG] %c\n", (char)val);
+        return;
+    }
+    if (port == 1) {
+        fputc((int)(val & 0xFF), stderr);
+        return;
+    }
+    if (port == 2) {
+        putchar((int)(val & 0xFF));
     }
 }
 

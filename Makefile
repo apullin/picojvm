@@ -24,8 +24,10 @@ ALL_TESTS_PAGER = $(ALL_TESTS) $(TESTS_PAGER)
 PICOJSE_SRCS = pj/Native.java \
                pj/archive/Tar.java \
                pj/archive/Zip.java \
+               pj/io/Console.java \
                pj/io/Files.java \
                pj/io/Binary.java \
+               pj/io/TextWriter.java \
                pj/term/Keys.java \
                pj/term/Terminal.java \
                pj/term/CellSurface.java \
@@ -170,6 +172,8 @@ tests/PicoJseStdSmoke.pjvm: $(BUILDDIR)/picojse.stamp
 		$(PICOJSE_CLASSDIR)/PicoJseStdSmoke.class \
 		$(PICOJSE_CLASSDIR)/pj/Native.class \
 		$(PICOJSE_CLASSDIR)/pj/io/Binary.class \
+		$(PICOJSE_CLASSDIR)/pj/io/Console.class \
+		$(PICOJSE_CLASSDIR)/pj/io/TextWriter.class \
 		$(PICOJSE_CLASSDIR)/pj/text/Format.class \
 		$(PICOJSE_CLASSDIR)/pj/text/Parse.class \
 		$(PICOJSE_CLASSDIR)/pj/text/Strings.class \
@@ -205,8 +209,9 @@ tests/PJTar.pjvm: $(BUILDDIR)/picojse.stamp
 		$(PICOJSE_CLASSDIR)/PJTar.class \
 		$(PICOJSE_CLASSDIR)/pj/Native.class \
 		$(PICOJSE_CLASSDIR)/pj/archive/Tar.class \
+		$(PICOJSE_CLASSDIR)/pj/io/Console.class \
 		$(PICOJSE_CLASSDIR)/pj/io/Files.class \
-		$(PICOJSE_CLASSDIR)/pj/text/Format.class \
+		$(PICOJSE_CLASSDIR)/pj/io/TextWriter.class \
 		$(PICOJSE_CLASSDIR)/pj/util/Bytes.class \
 		-o $@ -v
 
@@ -215,8 +220,9 @@ tests/PJUntar.pjvm: $(BUILDDIR)/picojse.stamp
 		$(PICOJSE_CLASSDIR)/PJUntar.class \
 		$(PICOJSE_CLASSDIR)/pj/Native.class \
 		$(PICOJSE_CLASSDIR)/pj/archive/Tar.class \
+		$(PICOJSE_CLASSDIR)/pj/io/Console.class \
 		$(PICOJSE_CLASSDIR)/pj/io/Files.class \
-		$(PICOJSE_CLASSDIR)/pj/text/Format.class \
+		$(PICOJSE_CLASSDIR)/pj/io/TextWriter.class \
 		$(PICOJSE_CLASSDIR)/pj/util/Bytes.class \
 		-o $@ -v
 
@@ -225,9 +231,10 @@ tests/PJZip.pjvm: $(BUILDDIR)/picojse.stamp
 		$(PICOJSE_CLASSDIR)/PJZip.class \
 		$(PICOJSE_CLASSDIR)/pj/Native.class \
 		$(PICOJSE_CLASSDIR)/pj/archive/Zip.class \
+		$(PICOJSE_CLASSDIR)/pj/io/Console.class \
 		$(PICOJSE_CLASSDIR)/pj/io/Files.class \
 		$(PICOJSE_CLASSDIR)/pj/io/Binary.class \
-		$(PICOJSE_CLASSDIR)/pj/text/Format.class \
+		$(PICOJSE_CLASSDIR)/pj/io/TextWriter.class \
 		$(PICOJSE_CLASSDIR)/pj/util/Bytes.class \
 		-o $@ -v
 
@@ -236,9 +243,10 @@ tests/PJUnzip.pjvm: $(BUILDDIR)/picojse.stamp
 		$(PICOJSE_CLASSDIR)/PJUnzip.class \
 		$(PICOJSE_CLASSDIR)/pj/Native.class \
 		$(PICOJSE_CLASSDIR)/pj/archive/Zip.class \
+		$(PICOJSE_CLASSDIR)/pj/io/Console.class \
 		$(PICOJSE_CLASSDIR)/pj/io/Files.class \
 		$(PICOJSE_CLASSDIR)/pj/io/Binary.class \
-		$(PICOJSE_CLASSDIR)/pj/text/Format.class \
+		$(PICOJSE_CLASSDIR)/pj/io/TextWriter.class \
 		$(PICOJSE_CLASSDIR)/pj/util/Bytes.class \
 		-o $@ -v
 

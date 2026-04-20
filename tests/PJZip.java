@@ -1,19 +1,17 @@
-import pj.Native;
 import pj.archive.Zip;
+import pj.io.Console;
 import pj.io.Files;
-import pj.text.Format;
 
 public class PJZip {
     private static void usage() {
-        Native.print("usage: PJZip archive.zip file...\n");
+        Console.println("usage: PJZip archive.zip file...");
     }
 
     private static void emitAdded(String name, int size) {
-        Native.print("+ ");
-        Native.print(name);
-        Native.putchar(',');
-        Format.printInt(size);
-        Native.putchar('\n');
+        Console.print("+ ");
+        Console.print(name);
+        Console.printChar(',');
+        Console.printlnInt(size);
     }
 
     public static void main(String[] args) {
@@ -39,18 +37,18 @@ public class PJZip {
         for (int i = 0; i < n; i++) {
             sizes[i] = Files.countBytes(args[i + 1], scratch);
             if (sizes[i] < 0) {
-                Native.print("read fail\n");
+                Console.println("read fail");
                 return;
             }
             crcs[i] = Zip.crc32File(args[i + 1], scratch);
             if (crcs[i] < 0) {
-                Native.print("crc fail\n");
+                Console.println("crc fail");
                 return;
             }
         }
 
         if (Files.openWrite(args[0]) != 0) {
-            Native.print("open fail\n");
+            Console.println("open fail");
             return;
         }
 

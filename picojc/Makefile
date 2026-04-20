@@ -356,13 +356,15 @@ test-disk-picojse-std: $(PICOJVM) $(BUILDDIR)/picojc-disk.pjvm
 	@mkdir -p $(BUILDDIR)/disk_picojse_std
 	@cp $(PICOJSE_DIR)/Native.java $(BUILDDIR)/disk_picojse_std/
 	@cp $(PICOJSE_DIR)/io/Binary.java $(BUILDDIR)/disk_picojse_std/
+	@cp $(PICOJSE_DIR)/io/Console.java $(BUILDDIR)/disk_picojse_std/
+	@cp $(PICOJSE_DIR)/io/TextWriter.java $(BUILDDIR)/disk_picojse_std/
 	@cp $(PICOJSE_DIR)/util/Bytes.java $(BUILDDIR)/disk_picojse_std/
 	@cp $(PICOJSE_DIR)/util/Ints.java $(BUILDDIR)/disk_picojse_std/
 	@cp $(PICOJSE_DIR)/text/Format.java $(BUILDDIR)/disk_picojse_std/
 	@cp $(PICOJSE_DIR)/text/Parse.java $(BUILDDIR)/disk_picojse_std/
 	@cp $(PICOJSE_DIR)/text/Strings.java $(BUILDDIR)/disk_picojse_std/
 	@cp $(PICOJSE_TESTDIR)/PicoJseStdSmoke.java $(BUILDDIR)/disk_picojse_std/
-	@printf 'Native.java\nBinary.java\nBytes.java\nInts.java\nFormat.java\nParse.java\nStrings.java\nPicoJseStdSmoke.java\n' > $(BUILDDIR)/disk_picojse_std/sources.lst
+	@printf 'Native.java\nBinary.java\nConsole.java\nTextWriter.java\nBytes.java\nInts.java\nFormat.java\nParse.java\nStrings.java\nPicoJseStdSmoke.java\n' > $(BUILDDIR)/disk_picojse_std/sources.lst
 	@echo "--- picoJSE StdSmoke (disk package) ---"
 	@cd $(BUILDDIR)/disk_picojse_std && $(DISK_PICOJVM) $(DISK_COMPILER) > PicoJseStdSmoke.pjvm \
 		2> PicoJseStdSmoke_compile.log
@@ -431,16 +433,17 @@ test-disk-picojse-tools-tar: $(PICOJVM) $(BUILDDIR)/picojc-disk.pjvm
 	@mkdir -p $(BUILDDIR)/disk_picojse_tools_tar
 	@cp $(PICOJSE_DIR)/Native.java $(BUILDDIR)/disk_picojse_tools_tar/
 	@cp $(PICOJSE_DIR)/archive/Tar.java $(BUILDDIR)/disk_picojse_tools_tar/
+	@cp $(PICOJSE_DIR)/io/Console.java $(BUILDDIR)/disk_picojse_tools_tar/
 	@cp $(PICOJSE_DIR)/io/Files.java $(BUILDDIR)/disk_picojse_tools_tar/
-	@cp $(PICOJSE_DIR)/text/Format.java $(BUILDDIR)/disk_picojse_tools_tar/
+	@cp $(PICOJSE_DIR)/io/TextWriter.java $(BUILDDIR)/disk_picojse_tools_tar/
 	@cp $(PICOJSE_DIR)/util/Bytes.java $(BUILDDIR)/disk_picojse_tools_tar/
 	@cp $(PICOJSE_TESTDIR)/PJTar.java $(BUILDDIR)/disk_picojse_tools_tar/
 	@cp $(PICOJSE_TESTDIR)/PJUntar.java $(BUILDDIR)/disk_picojse_tools_tar/
-	@printf 'Native.java\nTar.java\nFiles.java\nFormat.java\nBytes.java\nPJTar.java\n' > $(BUILDDIR)/disk_picojse_tools_tar/sources.lst
+	@printf 'Native.java\nTar.java\nConsole.java\nFiles.java\nTextWriter.java\nBytes.java\nPJTar.java\n' > $(BUILDDIR)/disk_picojse_tools_tar/sources.lst
 	@echo "--- picoJSE PJTar (disk package) ---"
 	@cd $(BUILDDIR)/disk_picojse_tools_tar && $(DISK_PICOJVM) $(DISK_COMPILER) > PJTar.pjvm \
 		2> PJTar_compile.log
-	@printf 'Native.java\nTar.java\nFiles.java\nFormat.java\nBytes.java\nPJUntar.java\n' > $(BUILDDIR)/disk_picojse_tools_tar/sources.lst
+	@printf 'Native.java\nTar.java\nConsole.java\nFiles.java\nTextWriter.java\nBytes.java\nPJUntar.java\n' > $(BUILDDIR)/disk_picojse_tools_tar/sources.lst
 	@echo "--- picoJSE PJUntar (disk package) ---"
 	@cd $(BUILDDIR)/disk_picojse_tools_tar && $(DISK_PICOJVM) $(DISK_COMPILER) > PJUntar.pjvm \
 		2> PJUntar_compile.log
@@ -476,17 +479,18 @@ test-disk-picojse-tools-zip: $(PICOJVM) $(BUILDDIR)/picojc-disk.pjvm
 	@mkdir -p $(BUILDDIR)/disk_picojse_tools_zip
 	@cp $(PICOJSE_DIR)/Native.java $(BUILDDIR)/disk_picojse_tools_zip/
 	@cp $(PICOJSE_DIR)/archive/Zip.java $(BUILDDIR)/disk_picojse_tools_zip/
+	@cp $(PICOJSE_DIR)/io/Console.java $(BUILDDIR)/disk_picojse_tools_zip/
 	@cp $(PICOJSE_DIR)/io/Files.java $(BUILDDIR)/disk_picojse_tools_zip/
 	@cp $(PICOJSE_DIR)/io/Binary.java $(BUILDDIR)/disk_picojse_tools_zip/
-	@cp $(PICOJSE_DIR)/text/Format.java $(BUILDDIR)/disk_picojse_tools_zip/
+	@cp $(PICOJSE_DIR)/io/TextWriter.java $(BUILDDIR)/disk_picojse_tools_zip/
 	@cp $(PICOJSE_DIR)/util/Bytes.java $(BUILDDIR)/disk_picojse_tools_zip/
 	@cp $(PICOJSE_TESTDIR)/PJZip.java $(BUILDDIR)/disk_picojse_tools_zip/
 	@cp $(PICOJSE_TESTDIR)/PJUnzip.java $(BUILDDIR)/disk_picojse_tools_zip/
-	@printf 'Native.java\nZip.java\nFiles.java\nBinary.java\nFormat.java\nBytes.java\nPJZip.java\n' > $(BUILDDIR)/disk_picojse_tools_zip/sources.lst
+	@printf 'Native.java\nZip.java\nConsole.java\nFiles.java\nBinary.java\nTextWriter.java\nBytes.java\nPJZip.java\n' > $(BUILDDIR)/disk_picojse_tools_zip/sources.lst
 	@echo "--- picoJSE PJZip (disk package) ---"
 	@cd $(BUILDDIR)/disk_picojse_tools_zip && $(DISK_PICOJVM) $(DISK_COMPILER) > PJZip.pjvm \
 		2> PJZip_compile.log
-	@printf 'Native.java\nZip.java\nFiles.java\nBinary.java\nFormat.java\nBytes.java\nPJUnzip.java\n' > $(BUILDDIR)/disk_picojse_tools_zip/sources.lst
+	@printf 'Native.java\nZip.java\nConsole.java\nFiles.java\nBinary.java\nTextWriter.java\nBytes.java\nPJUnzip.java\n' > $(BUILDDIR)/disk_picojse_tools_zip/sources.lst
 	@echo "--- picoJSE PJUnzip (disk package) ---"
 	@cd $(BUILDDIR)/disk_picojse_tools_zip && $(DISK_PICOJVM) $(DISK_COMPILER) > PJUnzip.pjvm \
 		2> PJUnzip_compile.log

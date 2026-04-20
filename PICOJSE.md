@@ -18,7 +18,8 @@ is to move application-facing functionality into Java packages that can run on:
 - `pj.archive`
   - reusable archive/container helpers
 - `pj.io`
-  - file and byte-stream helpers on top of the existing file natives
+  - routed text output plus file and byte-stream helpers on top of the
+    existing file natives
 - `pj.util`
   - low-level array, byte, and integer helpers
 - `pj.text`
@@ -79,7 +80,9 @@ Implemented:
 - `pj.Native`
 - `pj.archive.Tar`
 - `pj.archive.Zip`
+- `pj.io.Console`
 - `pj.io.Files`
+- `pj.io.TextWriter`
 - `pj.io.Binary`
 - `pj.util.Bytes`
 - `pj.util.Ints`
@@ -115,7 +118,7 @@ Still missing:
 - a real SOL-20 presenter
 - higher-level `pj.ui` widgets
 - richer terminal capabilities / attributes
-- stream-style `pj.io` readers/writers
+- stream-style `pj.io` readers and binary/text readers
 - collection types beyond raw arrays
 - compressed ZIP/DEFLATE support beyond stored entries
 

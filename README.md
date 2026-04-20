@@ -93,7 +93,7 @@ Current package roots:
 
 - `pj.Native` — package-visible native bridge
 - `pj.archive` — archive/container helpers (`Tar` and stored-entry `Zip` today)
-- `pj.io` — file and byte/binary helpers
+- `pj.io` — routed console/text output plus file and byte/binary helpers
 - `pj.util` — array, byte, and integer helpers
 - `pj.text` — formatting, parsing, and small string utilities
 - `pj.term` — retained cell-surface / terminal abstraction and drawing helpers

@@ -1,19 +1,17 @@
-import pj.Native;
 import pj.archive.Tar;
+import pj.io.Console;
 import pj.io.Files;
-import pj.text.Format;
 
 public class PJTar {
     private static void usage() {
-        Native.print("usage: PJTar archive.tar file...\n");
+        Console.println("usage: PJTar archive.tar file...");
     }
 
     private static void emitAdded(String name, int size) {
-        Native.print("+ ");
-        Native.print(name);
-        Native.putchar(',');
-        Format.printInt(size);
-        Native.putchar('\n');
+        Console.print("+ ");
+        Console.print(name);
+        Console.printChar(',');
+        Console.printlnInt(size);
     }
 
     public static void main(String[] args) {
@@ -26,14 +24,14 @@ public class PJTar {
             return;
         }
         if (Files.openWrite(args[0]) != 0) {
-            Native.print("open fail\n");
+            Console.println("open fail");
             return;
         }
         for (int i = 1; i < args.length; i++) {
             size = Tar.addFile(args[i], args[i], hdr, scratch);
             if (size < 0) {
                 Files.close(Files.MODE_WRITE);
-                Native.print("add fail\n");
+                Console.println("add fail");
                 return;
             }
             emitAdded(args[i], size);

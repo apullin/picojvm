@@ -106,7 +106,7 @@ Implemented:
   - `PJUntar`
   - `PJZip`
   - `PJUnzip`
-  - `PJPack`
+  - `PJArc`
 - self-hosted `picojc` multi-file package validation:
   - `make test-disk-picojse`
   - compiles the real `pj.*` sources plus `TermSmoke` / `FilesSmoke` /
@@ -131,7 +131,7 @@ The current archive tools are thin wrappers over the reusable library classes:
 - `PJUntar archive.tar`
 - `PJZip archive.zip file...`
 - `PJUnzip archive.zip`
-- `PJPack tar|untar|zip|unzip archive [file...]`
+- `PJArc tar|untar|zip|unzip archive [file...]`
 
 That is intentional. The floppy ecosystem can ship:
 

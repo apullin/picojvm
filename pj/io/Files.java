@@ -37,6 +37,16 @@ public class Files {
         return Native.fileRead(buf, off, len);
     }
 
+    public static int readFully(byte[] buf, int off, int len) {
+        int done = 0;
+        while (done < len) {
+            int n = Native.fileRead(buf, off + done, len - done);
+            if (n <= 0) break;
+            done += n;
+        }
+        return done;
+    }
+
     public static void writeByte(int b) {
         Native.fileWriteByte(b);
     }
@@ -48,6 +58,57 @@ public class Files {
     public static void writeString(String s) {
         byte[] buf = asciiBytes(s);
         Native.fileWrite(buf, 0, buf.length);
+    }
+
+    public static int countBytes(String path, byte[] scratch) {
+        int total = 0;
+        int n;
+        if (openRead(path) != 0) return -1;
+        for (;;) {
+            n = read(scratch, 0, scratch.length);
+            if (n <= 0) break;
+            total += n;
+        }
+        close(MODE_READ);
+        return total;
+    }
+
+    public static void copyCurrent(int len, byte[] scratch) {
+        int left = len;
+        while (left > 0) {
+            int want = left;
+            if (want > scratch.length) want = scratch.length;
+            int n = readFully(scratch, 0, want);
+            if (n <= 0) return;
+            write(scratch, 0, n);
+            left -= n;
+        }
+    }
+
+    public static void discardCurrent(int len, byte[] scratch) {
+        int left = len;
+        while (left > 0) {
+            int want = left;
+            if (want > scratch.length) want = scratch.length;
+            int n = readFully(scratch, 0, want);
+            if (n <= 0) return;
+            left -= n;
+        }
+    }
+
+    public static void writeZeros(int len, byte[] scratch) {
+        int left = len;
+        clear(scratch);
+        while (left > 0) {
+            int n = left;
+            if (n > scratch.length) n = scratch.length;
+            write(scratch, 0, n);
+            left -= n;
+        }
+    }
+
+    public static void clear(byte[] buf) {
+        for (int i = 0; i < buf.length; i++) buf[i] = 0;
     }
 
     public static void close(int mode) {

@@ -1,0 +1,4 @@
+a.txt,6
+b.txt,6
+ALPHA
+BETA!

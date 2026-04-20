@@ -15,6 +15,8 @@ is to move application-facing functionality into Java packages that can run on:
 - `pj.Native`
   - package-visible native bridge
   - keeps `pj.*` code out of the default package
+- `pj.archive`
+  - reusable archive/container helpers
 - `pj.io`
   - file and byte-stream helpers on top of the existing file natives
 - `pj.util`
@@ -75,6 +77,7 @@ without reprogrammable tile sets.
 Implemented:
 
 - `pj.Native`
+- `pj.archive.Tar`
 - `pj.io.Files`
 - `pj.io.Binary`
 - `pj.util.Bytes`
@@ -90,12 +93,13 @@ Implemented:
   - `TermSmoke`
   - `FilesSmoke`
   - `PicoJseStdSmoke`
+  - `TarSmoke`
 - manual host demo:
   - `TermDemo`
 - self-hosted `picojc` multi-file package validation:
   - `make test-disk-picojse`
   - compiles the real `pj.*` sources plus `TermSmoke` / `FilesSmoke` /
-    `PicoJseStdSmoke`
+    `PicoJseStdSmoke` / `TarSmoke`
   - runs the resulting programs under `picoJVM`
 
 Still missing:
@@ -105,12 +109,13 @@ Still missing:
 - richer terminal capabilities / attributes
 - stream-style `pj.io` readers/writers
 - collection types beyond raw arrays
+- compression formats beyond plain tar/ustar
 
 ## Near-term next steps
 
 1. Add a SOL-20 presenter backend using the same `CellSurface`.
 2. Add stream-style `pj.io` helpers and enough binary/text support for archive
-   tools (`pjzip`, `pjunzip`, later `pjtar`).
+   tools (`pjtar`, later `pjzip` / `pjunzip`).
 3. Add a simple grid widget in `pj.ui`.
 4. Build a spreadsheet-shell prototype on top of `pj.term` + `pj.io`.
 5. Add a cleaner app/library build flow so `picojc` package builds do not rely

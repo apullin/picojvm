@@ -110,6 +110,7 @@ Current tiny utility front-ends built on top of `pj.archive`:
 - `PJUntar`
 - `PJZip`
 - `PJUnzip`
+- `PJPack`
 
 Useful commands:
 

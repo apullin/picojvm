@@ -521,7 +521,73 @@ test-disk-picojse-tools-zip: $(PICOJVM) $(BUILDDIR)/picojc-disk.pjvm
 		false; \
 	fi
 
-test-disk-picojse: test-disk-picojse-term test-disk-picojse-io test-disk-picojse-std test-disk-picojse-archive test-disk-picojse-zip test-disk-picojse-tools-tar test-disk-picojse-tools-zip
+test-disk-picojse-tools-pack: $(PICOJVM) $(BUILDDIR)/picojc-disk.pjvm
+	@rm -rf $(BUILDDIR)/disk_picojse_tools_pack
+	@mkdir -p $(BUILDDIR)/disk_picojse_tools_pack
+	@cp $(PICOJSE_DIR)/Native.java $(BUILDDIR)/disk_picojse_tools_pack/
+	@cp $(PICOJSE_DIR)/archive/Tar.java $(BUILDDIR)/disk_picojse_tools_pack/
+	@cp $(PICOJSE_DIR)/archive/Zip.java $(BUILDDIR)/disk_picojse_tools_pack/
+	@cp $(PICOJSE_DIR)/io/Console.java $(BUILDDIR)/disk_picojse_tools_pack/
+	@cp $(PICOJSE_DIR)/io/Files.java $(BUILDDIR)/disk_picojse_tools_pack/
+	@cp $(PICOJSE_DIR)/io/Binary.java $(BUILDDIR)/disk_picojse_tools_pack/
+	@cp $(PICOJSE_DIR)/io/TextWriter.java $(BUILDDIR)/disk_picojse_tools_pack/
+	@cp $(PICOJSE_DIR)/util/Bytes.java $(BUILDDIR)/disk_picojse_tools_pack/
+	@cp $(PICOJSE_TESTDIR)/PJPack.java $(BUILDDIR)/disk_picojse_tools_pack/
+	@printf 'Native.java\nTar.java\nZip.java\nConsole.java\nFiles.java\nBinary.java\nTextWriter.java\nBytes.java\nPJPack.java\n' > $(BUILDDIR)/disk_picojse_tools_pack/sources.lst
+	@echo "--- picoJSE PJPack (disk package) ---"
+	@cd $(BUILDDIR)/disk_picojse_tools_pack && $(DISK_PICOJVM) $(DISK_COMPILER) > PJPack.pjvm \
+		2> PJPack_compile.log
+	@printf 'ALPHA\n' > $(BUILDDIR)/disk_picojse_tools_pack/a.txt
+	@printf 'BETA!\n' > $(BUILDDIR)/disk_picojse_tools_pack/b.txt
+	@cd $(BUILDDIR)/disk_picojse_tools_pack && $(DISK_PICOJVM) PJPack.pjvm -- tar out.tar a.txt b.txt > create-tar.out 2> create-tar.log
+	@if diff -q $(BUILDDIR)/disk_picojse_tools_pack/create-tar.out ../expected/PJArchiveCreate.txt > /dev/null 2>&1; then :; else \
+		echo "FAIL: picoJSE PJPack tar create (disk package)"; \
+		echo "  Expected:"; cat ../expected/PJArchiveCreate.txt; \
+		echo "  Got:"; cat $(BUILDDIR)/disk_picojse_tools_pack/create-tar.out; \
+		false; \
+	fi
+	@rm -f $(BUILDDIR)/disk_picojse_tools_pack/a.txt $(BUILDDIR)/disk_picojse_tools_pack/b.txt
+	@cd $(BUILDDIR)/disk_picojse_tools_pack && $(DISK_PICOJVM) PJPack.pjvm -- untar out.tar > extract-tar.out 2> extract-tar.log
+	@if diff -q $(BUILDDIR)/disk_picojse_tools_pack/extract-tar.out ../expected/PJArchiveExtract.txt > /dev/null 2>&1; then :; else \
+		echo "FAIL: picoJSE PJPack tar extract (disk package)"; \
+		echo "  Expected:"; cat ../expected/PJArchiveExtract.txt; \
+		echo "  Got:"; cat $(BUILDDIR)/disk_picojse_tools_pack/extract-tar.out; \
+		false; \
+	fi
+	@printf 'ALPHA\n' > $(BUILDDIR)/disk_picojse_tools_pack/exp_a.txt
+	@printf 'BETA!\n' > $(BUILDDIR)/disk_picojse_tools_pack/exp_b.txt
+	@if diff -q $(BUILDDIR)/disk_picojse_tools_pack/a.txt $(BUILDDIR)/disk_picojse_tools_pack/exp_a.txt > /dev/null 2>&1 && \
+	    diff -q $(BUILDDIR)/disk_picojse_tools_pack/b.txt $(BUILDDIR)/disk_picojse_tools_pack/exp_b.txt > /dev/null 2>&1; then :; else \
+		echo "FAIL: picoJSE PJPack tar contents (disk package)"; \
+		false; \
+	fi
+	@rm -f $(BUILDDIR)/disk_picojse_tools_pack/a.txt $(BUILDDIR)/disk_picojse_tools_pack/b.txt $(BUILDDIR)/disk_picojse_tools_pack/out.tar
+	@printf 'ALPHA\n' > $(BUILDDIR)/disk_picojse_tools_pack/a.txt
+	@printf 'BETA!\n' > $(BUILDDIR)/disk_picojse_tools_pack/b.txt
+	@cd $(BUILDDIR)/disk_picojse_tools_pack && $(DISK_PICOJVM) PJPack.pjvm -- zip out.zip a.txt b.txt > create-zip.out 2> create-zip.log
+	@if diff -q $(BUILDDIR)/disk_picojse_tools_pack/create-zip.out ../expected/PJArchiveCreate.txt > /dev/null 2>&1; then :; else \
+		echo "FAIL: picoJSE PJPack zip create (disk package)"; \
+		echo "  Expected:"; cat ../expected/PJArchiveCreate.txt; \
+		echo "  Got:"; cat $(BUILDDIR)/disk_picojse_tools_pack/create-zip.out; \
+		false; \
+	fi
+	@rm -f $(BUILDDIR)/disk_picojse_tools_pack/a.txt $(BUILDDIR)/disk_picojse_tools_pack/b.txt
+	@cd $(BUILDDIR)/disk_picojse_tools_pack && $(DISK_PICOJVM) PJPack.pjvm -- unzip out.zip > extract-zip.out 2> extract-zip.log
+	@if diff -q $(BUILDDIR)/disk_picojse_tools_pack/extract-zip.out ../expected/PJArchiveExtract.txt > /dev/null 2>&1; then :; else \
+		echo "FAIL: picoJSE PJPack zip extract (disk package)"; \
+		echo "  Expected:"; cat ../expected/PJArchiveExtract.txt; \
+		echo "  Got:"; cat $(BUILDDIR)/disk_picojse_tools_pack/extract-zip.out; \
+		false; \
+	fi
+	@if diff -q $(BUILDDIR)/disk_picojse_tools_pack/a.txt $(BUILDDIR)/disk_picojse_tools_pack/exp_a.txt > /dev/null 2>&1 && \
+	    diff -q $(BUILDDIR)/disk_picojse_tools_pack/b.txt $(BUILDDIR)/disk_picojse_tools_pack/exp_b.txt > /dev/null 2>&1; then \
+		echo "PASS: picoJSE pack tool (disk package)"; \
+	else \
+		echo "FAIL: picoJSE PJPack zip contents (disk package)"; \
+		false; \
+	fi
+
+test-disk-picojse: test-disk-picojse-term test-disk-picojse-io test-disk-picojse-std test-disk-picojse-archive test-disk-picojse-zip test-disk-picojse-tools-tar test-disk-picojse-tools-zip test-disk-picojse-tools-pack
 
 # Disk selfhost: compile compiler sources via sources.lst, verify byte-identical to memory mode
 test-disk-selfhost: $(PICOJVM) $(BUILDDIR)/picojc-disk.pjvm $(BUILDDIR)/gen1.pjvm
@@ -659,7 +725,7 @@ test-all: test test-negative test-selfhost test-disk test-disk-multi test-disk-p
 clean:
 	rm -rf $(BUILDDIR)
 
-.PHONY: all test test-negative test-all build check-javac clean test-disk test-disk-multi test-disk-package test-disk-picojse test-disk-picojse-term test-disk-picojse-io test-disk-picojse-std test-disk-picojse-archive test-disk-picojse-zip test-disk-picojse-tools-tar test-disk-picojse-tools-zip test-disk-selfhost
+.PHONY: all test test-negative test-all build check-javac clean test-disk test-disk-multi test-disk-package test-disk-picojse test-disk-picojse-term test-disk-picojse-io test-disk-picojse-std test-disk-picojse-archive test-disk-picojse-zip test-disk-picojse-tools-tar test-disk-picojse-tools-zip test-disk-picojse-tools-pack test-disk-selfhost
 .PHONY: test-selfhost test-selfhost-fixpoint test-binmatch test-gen1
 .PRECIOUS: $(BUILDDIR)/%.pjvm $(BUILDDIR)/%.out
 .PRECIOUS: $(BUILDDIR)/gen1_%.pjvm $(BUILDDIR)/gen1_%.out

@@ -134,9 +134,9 @@ tests/ExceptionTest.pjvm: tests/MyException.class tests/ExceptionTest.class
 tests/MyException.class tests/ExceptionTest.class: tests/ExceptionTest.java tests/Native.java
 	$(JAVAC) -d tests $^
 
-$(BUILDDIR)/picojse.stamp: $(PICOJSE_SRCS) tests/TermSmoke.java tests/FilesSmoke.java tests/TermDemo.java tests/PicoJseStdSmoke.java tests/TarSmoke.java tests/ZipSmoke.java tests/PJTar.java tests/PJUntar.java tests/PJZip.java tests/PJUnzip.java | $(BUILDDIR)
+$(BUILDDIR)/picojse.stamp: $(PICOJSE_SRCS) tests/TermSmoke.java tests/FilesSmoke.java tests/TermDemo.java tests/PicoJseStdSmoke.java tests/TarSmoke.java tests/ZipSmoke.java tests/PJTar.java tests/PJUntar.java tests/PJZip.java tests/PJUnzip.java tests/PJPack.java | $(BUILDDIR)
 	@mkdir -p $(PICOJSE_CLASSDIR)
-	$(JAVAC) -d $(PICOJSE_CLASSDIR) $(PICOJSE_SRCS) tests/TermSmoke.java tests/FilesSmoke.java tests/TermDemo.java tests/PicoJseStdSmoke.java tests/TarSmoke.java tests/ZipSmoke.java tests/PJTar.java tests/PJUntar.java tests/PJZip.java tests/PJUnzip.java
+	$(JAVAC) -d $(PICOJSE_CLASSDIR) $(PICOJSE_SRCS) tests/TermSmoke.java tests/FilesSmoke.java tests/TermDemo.java tests/PicoJseStdSmoke.java tests/TarSmoke.java tests/ZipSmoke.java tests/PJTar.java tests/PJUntar.java tests/PJZip.java tests/PJUnzip.java tests/PJPack.java
 	@touch $@
 
 tests/TermSmoke.pjvm: $(BUILDDIR)/picojse.stamp
@@ -242,6 +242,19 @@ tests/PJUnzip.pjvm: $(BUILDDIR)/picojse.stamp
 	$(PYTHON) pjvmpack.py \
 		$(PICOJSE_CLASSDIR)/PJUnzip.class \
 		$(PICOJSE_CLASSDIR)/pj/Native.class \
+		$(PICOJSE_CLASSDIR)/pj/archive/Zip.class \
+		$(PICOJSE_CLASSDIR)/pj/io/Console.class \
+		$(PICOJSE_CLASSDIR)/pj/io/Files.class \
+		$(PICOJSE_CLASSDIR)/pj/io/Binary.class \
+		$(PICOJSE_CLASSDIR)/pj/io/TextWriter.class \
+		$(PICOJSE_CLASSDIR)/pj/util/Bytes.class \
+		-o $@ -v
+
+tests/PJPack.pjvm: $(BUILDDIR)/picojse.stamp
+	$(PYTHON) pjvmpack.py \
+		$(PICOJSE_CLASSDIR)/PJPack.class \
+		$(PICOJSE_CLASSDIR)/pj/Native.class \
+		$(PICOJSE_CLASSDIR)/pj/archive/Tar.class \
 		$(PICOJSE_CLASSDIR)/pj/archive/Zip.class \
 		$(PICOJSE_CLASSDIR)/pj/io/Console.class \
 		$(PICOJSE_CLASSDIR)/pj/io/Files.class \
@@ -376,7 +389,60 @@ test-pjtools-zip: $(PICOJVM) tests/PJZip.pjvm tests/PJUnzip.pjvm $(EXPDIR)/PJArc
 		exit 1; \
 	fi
 
-test-pjtools: test-pjtools-tar test-pjtools-zip
+test-pjtools-pack: $(PICOJVM) tests/PJPack.pjvm $(EXPDIR)/PJArchiveCreate.txt $(EXPDIR)/PJArchiveExtract.txt | $(BUILDDIR)
+	@rm -rf $(BUILDDIR)/pjtools_pack
+	@mkdir -p $(BUILDDIR)/pjtools_pack
+	@printf 'ALPHA\n' > $(BUILDDIR)/pjtools_pack/a.txt
+	@printf 'BETA!\n' > $(BUILDDIR)/pjtools_pack/b.txt
+	@cd $(BUILDDIR)/pjtools_pack && $(abspath $(PICOJVM)) $(abspath tests/PJPack.pjvm) -- tar out.tar a.txt b.txt > create-tar.out 2> create-tar.log
+	@if diff -q $(BUILDDIR)/pjtools_pack/create-tar.out $(EXPDIR)/PJArchiveCreate.txt > /dev/null 2>&1; then :; else \
+		echo "FAIL: PJPack tar create"; \
+		echo "  Expected:"; cat $(EXPDIR)/PJArchiveCreate.txt; \
+		echo "  Got:"; cat $(BUILDDIR)/pjtools_pack/create-tar.out; \
+		exit 1; \
+	fi
+	@rm -f $(BUILDDIR)/pjtools_pack/a.txt $(BUILDDIR)/pjtools_pack/b.txt
+	@cd $(BUILDDIR)/pjtools_pack && $(abspath $(PICOJVM)) $(abspath tests/PJPack.pjvm) -- untar out.tar > extract-tar.out 2> extract-tar.log
+	@if diff -q $(BUILDDIR)/pjtools_pack/extract-tar.out $(EXPDIR)/PJArchiveExtract.txt > /dev/null 2>&1; then :; else \
+		echo "FAIL: PJPack untar extract"; \
+		echo "  Expected:"; cat $(EXPDIR)/PJArchiveExtract.txt; \
+		echo "  Got:"; cat $(BUILDDIR)/pjtools_pack/extract-tar.out; \
+		exit 1; \
+	fi
+	@printf 'ALPHA\n' > $(BUILDDIR)/pjtools_pack/exp_a.txt
+	@printf 'BETA!\n' > $(BUILDDIR)/pjtools_pack/exp_b.txt
+	@if diff -q $(BUILDDIR)/pjtools_pack/a.txt $(BUILDDIR)/pjtools_pack/exp_a.txt > /dev/null 2>&1 && \
+	    diff -q $(BUILDDIR)/pjtools_pack/b.txt $(BUILDDIR)/pjtools_pack/exp_b.txt > /dev/null 2>&1; then :; else \
+		echo "FAIL: pjtools pack tar contents"; \
+		exit 1; \
+	fi
+	@rm -f $(BUILDDIR)/pjtools_pack/a.txt $(BUILDDIR)/pjtools_pack/b.txt $(BUILDDIR)/pjtools_pack/out.tar
+	@printf 'ALPHA\n' > $(BUILDDIR)/pjtools_pack/a.txt
+	@printf 'BETA!\n' > $(BUILDDIR)/pjtools_pack/b.txt
+	@cd $(BUILDDIR)/pjtools_pack && $(abspath $(PICOJVM)) $(abspath tests/PJPack.pjvm) -- zip out.zip a.txt b.txt > create-zip.out 2> create-zip.log
+	@if diff -q $(BUILDDIR)/pjtools_pack/create-zip.out $(EXPDIR)/PJArchiveCreate.txt > /dev/null 2>&1; then :; else \
+		echo "FAIL: PJPack zip create"; \
+		echo "  Expected:"; cat $(EXPDIR)/PJArchiveCreate.txt; \
+		echo "  Got:"; cat $(BUILDDIR)/pjtools_pack/create-zip.out; \
+		exit 1; \
+	fi
+	@rm -f $(BUILDDIR)/pjtools_pack/a.txt $(BUILDDIR)/pjtools_pack/b.txt
+	@cd $(BUILDDIR)/pjtools_pack && $(abspath $(PICOJVM)) $(abspath tests/PJPack.pjvm) -- unzip out.zip > extract-zip.out 2> extract-zip.log
+	@if diff -q $(BUILDDIR)/pjtools_pack/extract-zip.out $(EXPDIR)/PJArchiveExtract.txt > /dev/null 2>&1; then :; else \
+		echo "FAIL: PJPack unzip extract"; \
+		echo "  Expected:"; cat $(EXPDIR)/PJArchiveExtract.txt; \
+		echo "  Got:"; cat $(BUILDDIR)/pjtools_pack/extract-zip.out; \
+		exit 1; \
+	fi
+	@if diff -q $(BUILDDIR)/pjtools_pack/a.txt $(BUILDDIR)/pjtools_pack/exp_a.txt > /dev/null 2>&1 && \
+	    diff -q $(BUILDDIR)/pjtools_pack/b.txt $(BUILDDIR)/pjtools_pack/exp_b.txt > /dev/null 2>&1; then \
+		echo "PASS: pjtools pack"; \
+	else \
+		echo "FAIL: pjtools pack zip contents"; \
+		exit 1; \
+	fi
+
+test-pjtools: test-pjtools-tar test-pjtools-zip test-pjtools-pack
 
 # Run all tests on host with golden-output comparison
 test: $(PICOJVM) $(addprefix tests/,$(addsuffix .pjvm,$(TESTS_SINGLE))) tests/Shapes.pjvm tests/Features.pjvm tests/InterfaceTest.pjvm tests/ExceptionTest.pjvm

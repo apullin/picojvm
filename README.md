@@ -104,11 +104,21 @@ The current `pj.term` implementation is intentionally text-first:
 - serial-terminal / TUI route
 - later direct character-display presenters such as SOL-20
 
+Current tiny utility front-ends built on top of `pj.archive`:
+
+- `PJTar`
+- `PJUntar`
+- `PJZip`
+- `PJUnzip`
+
 Useful commands:
 
 ```bash
 # Build and run host-side package smoke tests
 make test-TermSmoke test-FilesSmoke test-PicoJseStdSmoke test-TarSmoke test-ZipSmoke
+
+# Run the standalone archive CLI tool tests
+make test-pjtools
 
 # Manual terminal demo (ANSI/raw-key capable host terminal)
 make run-term-demo

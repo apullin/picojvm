@@ -98,10 +98,16 @@ Implemented:
   - `ZipSmoke`
 - manual host demo:
   - `TermDemo`
+- tiny archive CLI tools:
+  - `PJTar`
+  - `PJUntar`
+  - `PJZip`
+  - `PJUnzip`
 - self-hosted `picojc` multi-file package validation:
   - `make test-disk-picojse`
   - compiles the real `pj.*` sources plus `TermSmoke` / `FilesSmoke` /
-    `PicoJseStdSmoke` / `TarSmoke`
+    `PicoJseStdSmoke` / `TarSmoke` / `ZipSmoke` /
+    `PJTar` / `PJUntar` / `PJZip` / `PJUnzip`
   - runs the resulting programs under `picoJVM`
 
 Still missing:
@@ -112,6 +118,21 @@ Still missing:
 - stream-style `pj.io` readers/writers
 - collection types beyond raw arrays
 - compressed ZIP/DEFLATE support beyond stored entries
+
+## Archive tool shape
+
+The current archive tools are thin wrappers over the reusable library classes:
+
+- `PJTar archive.tar file...`
+- `PJUntar archive.tar`
+- `PJZip archive.zip file...`
+- `PJUnzip archive.zip`
+
+That is intentional. The floppy ecosystem can ship:
+
+- compiled tools for immediate use
+- the underlying `pj.*` source
+- the reusable archive library itself
 
 ## Near-term next steps
 

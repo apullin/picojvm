@@ -509,6 +509,26 @@ public class Expr {
 						E.eASt(type);
 						type = 0;
 						clearRefInfo();
+					} else if (Tk.type >= Tk.PLUS_EQ && Tk.type <= Tk.USHR_EQ) {
+						int op = Tk.type;
+						int elemType = type;
+						int narrowKind = arrNarrow(type);
+						Lexer.nextToken();
+						E.push(); // re-count idx
+						E.eb(E.DUP2); E.push(); E.push();
+						E.eALd(type);
+						E.pop();
+						pExpr();
+						E.eCO(op); E.pop();
+						E.eNarrow(narrowKind);
+						E.eb(E.DUP_X2); E.push();
+						E.eASt(type);
+						E.pop(); E.pop(); E.pop();
+						type = 1;
+						if (elemType == 4) setScalarKind(C.NK_BYTE);
+						else if (elemType == 5) setScalarKind(C.NK_CHAR);
+						else if (elemType == 8) setScalarKind(C.NK_SHORT);
+						else clearRefInfo();
 					} else if (Tk.type == Tk.INC || Tk.type == Tk.DEC) {
 						// Array element post-increment: arr[idx]++
 						int op = Tk.type;

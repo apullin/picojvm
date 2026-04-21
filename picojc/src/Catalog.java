@@ -231,7 +231,7 @@ public class Catalog {
 		if (typeTok == Tk.BYTE || typeTok == Tk.BOOLEAN) return 4;
 		if (typeTok == Tk.CHAR) return 5;
 		if (typeTok == Tk.SHORT) return 8;
-		return 0;
+		return 3;
 	}
 
 	// Scan one declared type and leave its shape in tyBase/tyDims/tyRefNm/tyNarrow.

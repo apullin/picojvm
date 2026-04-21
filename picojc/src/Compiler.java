@@ -69,7 +69,7 @@ class C {
 	static short[] fSlot   = new short[MAX_FIELDS]; // assigned in resolve
 	static int[] fInitPos  = new int[MAX_FIELDS]; // source pos of initializer (must be int: >32KB sources)
 	static short[] fInitLn = new short[MAX_FIELDS]; // line of initializer
-	static byte[] fArrKind = new byte[MAX_FIELDS]; // 0=non-array/int[], 4=byte[], 5=char[], 8=short[]
+	static byte[] fArrKind = new byte[MAX_FIELDS]; // 0=non-array, 3=int[], 4=byte[], 5=char[], 8=short[]
 	static short[] fRefNm = new short[MAX_FIELDS]; // declared ref type name, -1 if unknown/non-ref
 	static boolean[] fFinal = new boolean[MAX_FIELDS];
 	static boolean[] fHasConst = new boolean[MAX_FIELDS]; // compile-time constant?

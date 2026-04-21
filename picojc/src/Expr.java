@@ -8,6 +8,7 @@ public class Expr {
 	static int lvN;      // scalar narrow kind (0=none/int/bool, 1=byte, 2=char, 3=short)
 	static int lvArr;    // field array kind
 	static int lvRefNm;  // declared ref type name, -1 if unknown/non-ref
+	static boolean lvG;  // storage holds a heap reference (object/array)
 	static boolean lvRV; // assign DUPs and returns value
 	static int exprRefNm = -1; // declared ref type name for the last parsed ref expression
 	static int exprArrRefNm = -1; // element ref type when the last parsed expression is object[]
@@ -94,13 +95,14 @@ public class Expr {
 	}
 
 	// Lvalue sites reuse the same descriptor shape across locals, statics, and fields.
-	static void setLValue(int kind, int index, int type, int narrowKind, int arrKind, int refNm, boolean returnsValue) {
+	static void setLValue(int kind, int index, int type, int narrowKind, int arrKind, int refNm, boolean gcRef, boolean returnsValue) {
 		lvK = kind;
 		lvI = index;
 		lvT = type;
 		lvN = narrowKind;
 		lvArr = arrKind;
 		lvRefNm = refNm;
+		lvG = gcRef;
 		lvRV = returnsValue;
 	}
 
@@ -415,6 +417,7 @@ public class Expr {
 			int nm = C.iN();
 			int li = E.fLoc(nm);
 			if (li >= 0) {
+				if (C.locType[li] != 0) Lexer.error(211); // ++/-- needs an int-like local
 				int slot = C.locSlot[li];
 				int narrowKind = C.locNarrow[li];
 				// Pre-increment: load, add/sub 1, dup, store
@@ -523,6 +526,7 @@ public class Expr {
 						type = 0;
 						clearRefInfo();
 					} else if (Tk.type >= Tk.PLUS_EQ && Tk.type <= Tk.USHR_EQ) {
+						if (type != 3 && type != 4 && type != 5 && type != 8) Lexer.error(211); // arithmetic update needs a primitive array element
 						int op = Tk.type;
 						int elemType = type;
 						int narrowKind = arrNarrow(type);
@@ -544,6 +548,7 @@ public class Expr {
 						else if (elemType == 8) setScalarKind(C.NK_SHORT);
 						else clearRefInfo();
 					} else if (Tk.type == Tk.INC || Tk.type == Tk.DEC) {
+						if (type != 3 && type != 4 && type != 5 && type != 8) Lexer.error(211); // arithmetic update needs a primitive array element
 						// Array element post-increment: arr[idx]++
 						int op = Tk.type;
 						Lexer.nextToken();
@@ -577,10 +582,7 @@ public class Expr {
 					}
 				}
 				else if (Tk.type == Tk.INC || Tk.type == Tk.DEC) {
-					// Post-increment/decrement in general postfix position
-					Lexer.nextToken();
-					type = 1;
-					clearRefInfo();
+					Lexer.error(211); // postfix ++/-- requires a supported lvalue
 				}
 				else if (Tk.type == Tk.ASSIGN ||
 						 (Tk.type >= Tk.PLUS_EQ && Tk.type <= Tk.USHR_EQ)) {
@@ -646,7 +648,7 @@ public class Expr {
 			int fi = fInstFieldTarget(parentNm, memberNm);
 			if (fi < 0) { Lexer.error(206); return 0; }
 			E.ethis();
-			setLValue(3, E.aCP(C.fSlot[fi]), C.fType[fi], C.fNarrow[fi], C.fArrKind[fi], C.fRefNm[fi], false);
+			setLValue(3, E.aCP(C.fSlot[fi]), C.fType[fi], C.fNarrow[fi], C.fArrKind[fi], C.fRefNm[fi], C.fGcRef[fi], false);
 			return lvOps();
 		}
 		if (Tk.type == Tk.NEW) {
@@ -674,7 +676,7 @@ public class Expr {
 							if (fi < 0) { Lexer.error(207); return 0; }
 							if (C.fFinal[fi] && C.fHasConst[fi]) return emitConstField(fi);
 							// ClassName.field — no return value on assign
-							setLValue(2, E.aCP(C.fSlot[fi]), C.fType[fi], C.fNarrow[fi], C.fArrKind[fi], C.fRefNm[fi], false);
+							setLValue(2, E.aCP(C.fSlot[fi]), C.fType[fi], C.fNarrow[fi], C.fArrKind[fi], C.fRefNm[fi], C.fGcRef[fi], false);
 							return lvOps();
 						}
 					}
@@ -684,7 +686,7 @@ public class Expr {
 				int li = E.fLoc(nm);
 				if (li >= 0) {
 					// Local var lvalue
-					setLValue(0, C.locSlot[li], C.locType[li], C.locNarrow[li], 0, C.locRefNm[li], true);
+					setLValue(0, C.locSlot[li], C.locType[li], C.locNarrow[li], 0, C.locRefNm[li], C.locType[li] != 0, true);
 					return lvOps();
 				}
 
@@ -693,7 +695,7 @@ public class Expr {
 					int fi = Resolver.fField(C.curCi, nm);
 					if (fi >= 0 && !C.fStatic[fi]) {
 						// Implicit this.field lvalue
-						setLValue(1, E.aCP(C.fSlot[fi]), C.fType[fi], C.fNarrow[fi], C.fArrKind[fi], C.fRefNm[fi], false);
+						setLValue(1, E.aCP(C.fSlot[fi]), C.fType[fi], C.fNarrow[fi], C.fArrKind[fi], C.fRefNm[fi], C.fGcRef[fi], false);
 						return lvOps();
 					}
 				}
@@ -704,7 +706,7 @@ public class Expr {
 						if (fi >= 0) {
 							if (C.fFinal[fi] && C.fHasConst[fi]) return emitConstField(fi);
 						// Static field lvalue (in-class, returns value on assign)
-						setLValue(2, E.aCP(C.fSlot[fi]), C.fType[fi], C.fNarrow[fi], C.fArrKind[fi], C.fRefNm[fi], true);
+						setLValue(2, E.aCP(C.fSlot[fi]), C.fType[fi], C.fNarrow[fi], C.fArrKind[fi], C.fRefNm[fi], C.fGcRef[fi], true);
 						return lvOps();
 					}
 				}
@@ -910,7 +912,7 @@ public class Expr {
 
 	// Snapshot descriptors into locals — pExpr() may recurse into lvOps
 	static int lvOps() {
-		int k = lvK, i = lvI, t = lvT, n = lvN, arr = lvArr, refNm = lvRefNm; boolean rv = lvRV;
+		int k = lvK, i = lvI, t = lvT, n = lvN, arr = lvArr, refNm = lvRefNm; boolean g = lvG, rv = lvRV;
 		if (Tk.type == Tk.ASSIGN) {
 			Lexer.nextToken();
 			if (k == 1) E.ethis();
@@ -928,6 +930,7 @@ public class Expr {
 		}
 		if (Tk.type >= Tk.PLUS_EQ && Tk.type <= Tk.USHR_EQ) {
 			int op = Tk.type; Lexer.nextToken();
+			if (g) Lexer.error(211); // compound assign needs an int-like scalar lvalue
 			if (k == 0) {
 				E.eLd(i, t); E.push();
 				int rhsType = pExpr();
@@ -960,6 +963,8 @@ public class Expr {
 		}
 		if (Tk.type == Tk.INC || Tk.type == Tk.DEC) {
 			int op = Tk.type; Lexer.nextToken();
+			if (k == 3) Lexer.error(211); // explicit obj.field++/-- unsupported for now
+			if (g) Lexer.error(211); // ++/-- needs an int-like scalar lvalue
 			if (k == 0) {
 				if (n != C.NK_NONE) {
 					E.eLd(i, 0); E.push();
@@ -1002,7 +1007,7 @@ public class Expr {
 	static int eFldAcc(int recvNm, int fieldNm) {
 		int fi = recvNm >= 0 ? fInstFieldTarget(recvNm, fieldNm) : -1;
 		if (fi < 0) { Lexer.error(206); return 0; }
-		setLValue(3, E.aCP(C.fSlot[fi]), C.fType[fi], C.fNarrow[fi], C.fArrKind[fi], C.fRefNm[fi], false);
+		setLValue(3, E.aCP(C.fSlot[fi]), C.fType[fi], C.fNarrow[fi], C.fArrKind[fi], C.fRefNm[fi], C.fGcRef[fi], false);
 		return lvOps();
 	}
 

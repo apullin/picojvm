@@ -38,14 +38,17 @@ TESTS = T01_Empty T02_Literal T03_Arithmetic T04_IfElse T05_WhileLoop \
         T55_ExactDispatch T56_OverloadDispatch T57_InheritedOverload \
         T58_Super T59_NarrowWrap T60_NarrowAssign T62_ArrayInit \
         T63_PackageLocal T65_BigArrayInit T66_Const T67_HybridSwitch \
-        T68_ArrayField T69_StaticIntArrayInit T70_ArrayElemCompound
+        T68_ArrayField T69_StaticIntArrayInit T70_ArrayElemCompound \
+        T71_ObjectFieldCompound
 
 NEGTESTS = N01_InvalidStaticCall N02_OverloadSameClass \
            N03_OverloadInherited N04_SwitchTooManyCases \
            N05_InvalidLocalNarrowing N06_InvalidStaticInitNarrowing \
            N07_InvalidFieldAssignNarrowing N08_InvalidReturnNarrowing \
            N09_InvalidMainSig N10_FieldAssignExprValue \
-           N11_ArrayAssignExprValue
+           N11_ArrayAssignExprValue N12_InvalidRefLocalPostInc \
+           N13_InvalidRefLocalCompound N14_InvalidFieldPostInc \
+           N15_InvalidObjArrayElemCompound N16_InvalidLiteralPostInc
 
 # Tests requiring lib/ (platform package)
 LIB_SRCS = ../lib/Console.java ../lib/Arrays.java ../lib/IO.java

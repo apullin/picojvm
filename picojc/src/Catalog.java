@@ -213,6 +213,7 @@ public class Catalog {
 		if (typeTok == Tk.BYTE) return C.NK_BYTE;
 		if (typeTok == Tk.CHAR) return C.NK_CHAR;
 		if (typeTok == Tk.SHORT) return C.NK_SHORT;
+		if (typeTok == Tk.BOOLEAN) return C.NK_BOOL;
 		return C.NK_NONE;
 	}
 
@@ -228,7 +229,8 @@ public class Catalog {
 	static boolean sigOneStringArray;
 
 	static int primArrKind(int typeTok) {
-		if (typeTok == Tk.BYTE || typeTok == Tk.BOOLEAN) return 4;
+		if (typeTok == Tk.BYTE) return 4;
+		if (typeTok == Tk.BOOLEAN) return 9;
 		if (typeTok == Tk.CHAR) return 5;
 		if (typeTok == Tk.SHORT) return 8;
 		return 3;
@@ -324,7 +326,7 @@ public class Catalog {
 			retType = tyDims == 0 ? 1 : 2;
 			retNarrow = tyNarrow;
 			fieldNarrow = tyNarrow;
-			arrayKind = tyArrKind;
+			arrayKind = tyDims == 0 ? 0 : tyArrKind;
 			fieldGcRef = tyDims != 0;
 		} else if (tyBase == 2) {
 			retType = 2;

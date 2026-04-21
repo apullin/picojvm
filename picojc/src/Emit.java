@@ -413,7 +413,7 @@ class E {
 	}
 
 	static int pTypeLoc() {
-		// Returns: 0=int, 1=ref, 2=object[], 3=int[], 4=byte[], 5=char[], 8=short[]
+		// Returns: 0=int, 1=ref, 2=object[], 3=int[], 4=byte[], 5=char[], 8=short[], 9=boolean[]
 		Catalog.scanTy(false);
 		tyRefNm = Catalog.tyRefNm;
 		tyNarrow = Catalog.tyNarrow;
@@ -427,9 +427,10 @@ class E {
 		tyRefNm = -1;
 		tyNarrow = C.NK_NONE;
 		if (Catalog.tyDims > 1) return 1;
-		if (Catalog.tyArrKind == 4) return 4; // byte[] or boolean[]
+		if (Catalog.tyArrKind == 4) return 4; // byte[]
 		if (Catalog.tyArrKind == 5) return 5; // char[]
 		if (Catalog.tyArrKind == 8) return 8; // short[]
+		if (Catalog.tyArrKind == 9) return 9; // boolean[]
 		return 3; // int[]
 	}
 
@@ -521,8 +522,8 @@ class E {
 	static void eOp(int op, int cp) { eb(op); eSBE(cp); }
 	static void epop() { eb(POP); pop(); }
 	static void ethis() { eLd(0, 1); push(); } // ALOAD_0 this
-	static void eALd(int t) { eb(t==4 ? 0x33 : t==5 ? 0x34 : t==8 ? 0x35 : 0x2E); } // backend/runtime use generic IALOAD for ref arrays too
-	static void eASt(int t) { eb(t==4 ? 0x54 : t==5 ? 0x55 : t==8 ? 0x56 : 0x4F); } // backend/runtime use generic IASTORE for ref arrays too
+	static void eALd(int t) { eb((t==4 || t==9) ? 0x33 : t==5 ? 0x34 : t==8 ? 0x35 : 0x2E); } // backend/runtime use generic IALOAD for ref arrays too
+	static void eASt(int t) { eb((t==4 || t==9) ? 0x54 : t==5 ? 0x55 : t==8 ? 0x56 : 0x4F); } // backend/runtime use generic IASTORE for ref arrays too
 	static void pushLp(int brk, int cont) {
 		C.chk(C.lpDepth, 32, 263);
 		C.lpBrkLbl[C.lpDepth] = (short)brk;
@@ -761,9 +762,9 @@ class E {
 	// @Const: parse array initializer into Linker's const_data buffer
 	static void eConstArray(int fi) {
 		Lexer.expect(Tk.LBRACE);
-		int arrKind = C.fArrKind[fi]; // 0/3=int[], 4=byte[], 5=char[], 8=short[]
+		int arrKind = C.fArrKind[fi]; // 0/3=int[], 4=byte[], 5=char[], 8=short[], 9=boolean[]
 		int elemType, elemSize;
-		if (arrKind == 4) { elemType = 0; elemSize = 1; }       // byte
+		if (arrKind == 4 || arrKind == 9) { elemType = 0; elemSize = 1; } // byte/bool
 		else if (arrKind == 5) { elemType = 1; elemSize = 2; }   // char
 		else if (arrKind == 8) { elemType = 2; elemSize = 2; }   // short
 		else { elemType = 3; elemSize = 4; }                      // int

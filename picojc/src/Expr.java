@@ -1,11 +1,11 @@
 public class Expr {
-	// Returns: 0=void, 1=int, 2=ref
+	// Returns: 0=void, 1=scalar, 2+=reference/array
 
 	// Lvalue descriptor for unified assign/compound/inc-dec/load
 	static int lvK;      // 0=local, 1=this_field, 2=static, 3=obj_field
 	static int lvI;      // slot (local) or cpIdx (field)
 	static int lvT;      // local type (0=int, 1=ref, 3+=array)
-	static int lvN;      // scalar narrow kind (0=none/int/bool, 1=byte, 2=char, 3=short)
+	static int lvN;      // scalar narrow kind (0=int-like, 1=byte, 2=char, 3=short, 4=boolean)
 	static int lvArr;    // field array kind
 	static int lvRefNm;  // declared ref type name, -1 if unknown/non-ref
 	static boolean lvG;  // storage holds a heap reference (object/array)
@@ -67,6 +67,11 @@ public class Expr {
 	}
 
 	static void chkImplicitNarrow(int narrowKind) {
+		if (exprNarrow == C.NK_BOOL) {
+			if (narrowKind == C.NK_BOOL) return;
+			Lexer.error(208);
+		}
+		if (narrowKind == C.NK_BOOL) Lexer.error(208);
 		if (narrowKind == C.NK_NONE) return;
 		if (exprConst && fitsNarrow(exprConstVal, narrowKind)) return;
 		if (widensTo(exprNarrow, narrowKind)) return;
@@ -138,6 +143,7 @@ public class Expr {
 		if (arrType == 4) return 8;
 		if (arrType == 5) return 5;
 		if (arrType == 8) return 9;
+		if (arrType == 9) return 4;
 		return 10;
 	}
 
@@ -145,11 +151,13 @@ public class Expr {
 		if (arrType == 4) return C.NK_BYTE;
 		if (arrType == 5) return C.NK_CHAR;
 		if (arrType == 8) return C.NK_SHORT;
+		if (arrType == 9) return C.NK_BOOL;
 		return C.NK_NONE;
 	}
 
 	static int primArrKind(int elemTok) {
-		if (elemTok == Tk.BYTE || elemTok == Tk.BOOLEAN) return 4;
+		if (elemTok == Tk.BYTE) return 4;
+		if (elemTok == Tk.BOOLEAN) return 9;
 		if (elemTok == Tk.CHAR) return 5;
 		if (elemTok == Tk.SHORT) return 8;
 		return 3;
@@ -226,7 +234,7 @@ public class Expr {
 	}
 
 	static int pTypedInit(int type, int refNm) {
-		if (Tk.type == Tk.LBRACE && (type == 2 || type == 3 || type == 4 || type == 5 || type == 8)) {
+		if (Tk.type == Tk.LBRACE && (type == 2 || type == 3 || type == 4 || type == 5 || type == 8 || type == 9)) {
 			return pArrayInit(type, refNm);
 		}
 		type = pExpr();
@@ -251,6 +259,7 @@ public class Expr {
 			if (tType == 0) Lexer.error(210); // ternary arm needs a value
 			int tRefNm = exprRefNm;
 			int tArrRefNm = exprArrRefNm;
+			int tNarrow = exprNarrow;
 			E.eBr(E.GOTO, lblEnd); // GOTO end
 			E.pop();
 			Lexer.expect(Tk.COLON);
@@ -259,11 +268,14 @@ public class Expr {
 			if (fType == 0) Lexer.error(210); // ternary arm needs a value
 			int fRefNm = exprRefNm;
 			int fArrRefNm = exprArrRefNm;
+			int fNarrow = exprNarrow;
 			E.mark(lblEnd);
 			type = tType;
 			if (tType == 2 && fType == 2 && tRefNm == fRefNm && tArrRefNm == fArrRefNm) {
 				exprRefNm = tRefNm;
 				exprArrRefNm = tArrRefNm;
+			} else if (tType == 1 && fType == 1 && tNarrow == fNarrow) {
+				setScalarKind(tNarrow);
 			} else clearRefInfo();
 		}
 		return type;
@@ -303,6 +315,8 @@ public class Expr {
 			if (prec < minPrec) break;
 			int opcode = info & 0xFF;
 			int tok = Tk.type;
+			int lhsType = type;
+			int lhsNarrow = exprNarrow;
 			boolean lhsConst = exprConst;
 			int lhsVal = exprConstVal;
 			Lexer.nextToken();
@@ -314,47 +328,66 @@ public class Expr {
 				E.pop(); E.epop();
 				int rhsType = pBin(prec + 1);
 				if (rhsType == 0) Lexer.error(210); // operator operand needs a value
+				if (lhsType != 1 || lhsNarrow != C.NK_BOOL || rhsType != 1 || exprNarrow != C.NK_BOOL) Lexer.error(211); // &&/|| need boolean operands
 				E.eBr(E.GOTO, lbl2);
 				E.mark(lbl1); E.mark(lbl2);
-				clearRefInfo();
+				type = 1;
+				setScalarKind(C.NK_BOOL);
 				} else if (prec == 6) {
 					// Equality: ==, !=
 					int rtype = pBin(prec + 1);
 					if (rtype == 0) Lexer.error(210); // operator operand needs a value
+					boolean lhsRef = lhsType >= 2;
+					boolean rhsRef = rtype >= 2;
+					if (lhsRef || rhsRef) {
+						if (!lhsRef || !rhsRef) Lexer.error(211); // don't mix scalar and reference equality
+					} else if ((lhsType == 1 && lhsNarrow == C.NK_BOOL) != (rtype == 1 && exprNarrow == C.NK_BOOL)) {
+						Lexer.error(211); // don't mix boolean and integer equality
+					}
 					E.pop(); E.pop();
-					if (type == 2 || rtype == 2)
-					E.cmpBool(tok == Tk.EQ ? 0xA5 : 0xA6);
-				else
+					if (lhsRef) E.cmpBool(tok == Tk.EQ ? 0xA5 : 0xA6);
+					else
 						E.cmpBool(tok == Tk.EQ ? 0x9F : 0xA0);
 					type = 1;
-					clearRefInfo();
+					setScalarKind(C.NK_BOOL);
 				} else if (tok == Tk.INSTANCEOF) {
+					if (lhsType < 2) Lexer.error(211); // instanceof needs a reference lhs
 					int classNm = Catalog.parseTypeNm();
 					E.pop();
 					int ci = Resolver.fClsByNm(classNm);
 					int cpIdx = E.aCP(ci >= 0 ? ci : 0);
 					E.eOp(E.INSTANCEOF, cpIdx); E.push();
 					type = 1;
-					clearRefInfo();
+					setScalarKind(C.NK_BOOL);
 				} else if (prec == 7) {
 					// Comparison: <, >, <=, >=
 					int rhsType = pBin(prec + 1);
 					if (rhsType == 0) Lexer.error(210); // operator operand needs a value
+					if (lhsType != 1 || lhsNarrow == C.NK_BOOL || rhsType != 1 || exprNarrow == C.NK_BOOL) Lexer.error(211); // ordering needs int-like scalars
 					E.pop(); E.pop();
 					E.cmpBool(opcode);
 					type = 1;
-					clearRefInfo();
+					setScalarKind(C.NK_BOOL);
 				} else {
 					// Standard: |, ^, &, <<, >>, >>>, +, -, *, /, %
 					int rhsType = pBin(prec + 1);
 					if (rhsType == 0) Lexer.error(210); // operator operand needs a value
+					int rhsNarrow = exprNarrow;
+					boolean lhsBool = lhsType == 1 && lhsNarrow == C.NK_BOOL;
+					boolean rhsBool = rhsType == 1 && rhsNarrow == C.NK_BOOL;
+					if (tok == Tk.PIPE || tok == Tk.CARET || tok == Tk.AMP) {
+						if (lhsType != 1 || rhsType != 1) Lexer.error(211); // bitwise ops need scalar operands
+						if (lhsBool != rhsBool) Lexer.error(211); // don't mix boolean and integer bitwise ops
+					} else if (lhsType != 1 || lhsNarrow == C.NK_BOOL || rhsType != 1 || rhsNarrow == C.NK_BOOL) {
+						Lexer.error(211); // arithmetic ops need int-like scalars
+					}
 					E.pop();
 					E.eb(opcode);
 					if (lhsConst && exprConst) {
 						int rhsVal = exprConstVal;
-						if (tok == Tk.PIPE) setConstInt(lhsVal | rhsVal, C.NK_NONE);
-						else if (tok == Tk.CARET) setConstInt(lhsVal ^ rhsVal, C.NK_NONE);
-						else if (tok == Tk.AMP) setConstInt(lhsVal & rhsVal, C.NK_NONE);
+						if (tok == Tk.PIPE) setConstInt(lhsVal | rhsVal, lhsBool ? C.NK_BOOL : C.NK_NONE);
+						else if (tok == Tk.CARET) setConstInt(lhsVal ^ rhsVal, lhsBool ? C.NK_BOOL : C.NK_NONE);
+						else if (tok == Tk.AMP) setConstInt(lhsVal & rhsVal, lhsBool ? C.NK_BOOL : C.NK_NONE);
 						else if (tok == Tk.SHL) setConstInt(lhsVal << rhsVal, C.NK_NONE);
 						else if (tok == Tk.SHR) setConstInt(lhsVal >> rhsVal, C.NK_NONE);
 						else if (tok == Tk.USHR) setConstInt(lhsVal >>> rhsVal, C.NK_NONE);
@@ -364,7 +397,8 @@ public class Expr {
 						else if (tok == Tk.SLASH && rhsVal != 0) setConstInt(lhsVal / rhsVal, C.NK_NONE);
 						else if (tok == Tk.PERCENT && rhsVal != 0) setConstInt(lhsVal % rhsVal, C.NK_NONE);
 						else clearRefInfo();
-					} else clearRefInfo();
+					} else if (lhsBool && rhsBool) setScalarKind(C.NK_BOOL);
+					else setScalarKind(C.NK_NONE);
 				}
 			}
 			return type;
@@ -378,7 +412,8 @@ public class Expr {
 				Tk.intValue = -Tk.intValue;
 				return pPrim();
 			}
-				pUnary();
+				int type = pUnary();
+				if (type != 1 || exprNarrow == C.NK_BOOL) Lexer.error(211); // unary minus needs an int-like scalar
 				E.eb(E.INEG);
 				if (exprConst) {
 					exprConstVal = -exprConstVal;
@@ -388,7 +423,8 @@ public class Expr {
 			}
 		if (Tk.type == Tk.TILDE) {
 			Lexer.nextToken();
-			pUnary();
+			int type = pUnary();
+			if (type != 1 || exprNarrow == C.NK_BOOL) Lexer.error(211); // bitwise complement needs an int-like scalar
 			// ~x = x ^ (-1)
 			E.eb(E.ICONST_0 - 1); // ICONST_M1
 				E.push();
@@ -402,13 +438,14 @@ public class Expr {
 			}
 		if (Tk.type == Tk.BANG) {
 			Lexer.nextToken();
-				pUnary();
+				int type = pUnary();
+				if (type != 1 || exprNarrow != C.NK_BOOL) Lexer.error(211); // logical not needs a boolean scalar
 				E.pop();
 				E.cmpBool(E.IFEQ); // IFEQ: !x
 				if (exprConst) {
 					exprConstVal = exprConstVal == 0 ? 1 : 0;
-					exprNarrow = C.NK_NONE;
-				} else setScalarKind(C.NK_NONE);
+					exprNarrow = C.NK_BOOL;
+				} else setScalarKind(C.NK_BOOL);
 				return 1;
 			}
 		if (Tk.type == Tk.INC || Tk.type == Tk.DEC) {
@@ -417,7 +454,7 @@ public class Expr {
 			int nm = C.iN();
 			int li = E.fLoc(nm);
 			if (li >= 0) {
-				if (C.locType[li] != 0) Lexer.error(211); // ++/-- needs an int-like local
+				if (C.locType[li] != 0 || C.locNarrow[li] == C.NK_BOOL) Lexer.error(211); // ++/-- needs an int-like local
 				int slot = C.locSlot[li];
 				int narrowKind = C.locNarrow[li];
 				// Pre-increment: load, add/sub 1, dup, store
@@ -521,12 +558,15 @@ public class Expr {
 						Lexer.nextToken();
 						int rhsType = pExpr();
 						if (rhsType == 0) Lexer.error(210); // assignment rhs needs a value
+						int narrowKind = arrNarrow(type);
+						chkImplicitNarrow(narrowKind);
+						E.eNarrow(narrowKind);
 						E.pop(); E.pop();
 						E.eASt(type);
 						type = 0;
 						clearRefInfo();
 					} else if (Tk.type >= Tk.PLUS_EQ && Tk.type <= Tk.USHR_EQ) {
-						if (type != 3 && type != 4 && type != 5 && type != 8) Lexer.error(211); // arithmetic update needs a primitive array element
+						if (type != 3 && type != 4 && type != 5 && type != 8) Lexer.error(211); // arithmetic update needs an int-like array element
 						int op = Tk.type;
 						int elemType = type;
 						int narrowKind = arrNarrow(type);
@@ -546,9 +586,10 @@ public class Expr {
 						if (elemType == 4) setScalarKind(C.NK_BYTE);
 						else if (elemType == 5) setScalarKind(C.NK_CHAR);
 						else if (elemType == 8) setScalarKind(C.NK_SHORT);
+						else if (elemType == 9) setScalarKind(C.NK_BOOL);
 						else clearRefInfo();
 					} else if (Tk.type == Tk.INC || Tk.type == Tk.DEC) {
-						if (type != 3 && type != 4 && type != 5 && type != 8) Lexer.error(211); // arithmetic update needs a primitive array element
+						if (type != 3 && type != 4 && type != 5 && type != 8) Lexer.error(211); // arithmetic update needs an int-like array element
 						// Array element post-increment: arr[idx]++
 						int op = Tk.type;
 						Lexer.nextToken();
@@ -577,6 +618,7 @@ public class Expr {
 							if (elemType == 4) setScalarKind(C.NK_BYTE);
 							else if (elemType == 5) setScalarKind(C.NK_CHAR);
 							else if (elemType == 8) setScalarKind(C.NK_SHORT);
+							else if (elemType == 9) setScalarKind(C.NK_BOOL);
 							else clearRefInfo();
 						}
 					}
@@ -617,8 +659,8 @@ public class Expr {
 			setObjRef(C.N_STRING);
 			return 2; // reference
 		}
-		if (Tk.type == Tk.TRUE) { Lexer.nextToken(); E.ic1(); setConstInt(1, C.NK_NONE); return 1; }
-		if (Tk.type == Tk.FALSE) { Lexer.nextToken(); E.ic0(); setConstInt(0, C.NK_NONE); return 1; }
+		if (Tk.type == Tk.TRUE) { Lexer.nextToken(); E.ic1(); setConstInt(1, C.NK_BOOL); return 1; }
+		if (Tk.type == Tk.FALSE) { Lexer.nextToken(); E.ic0(); setConstInt(0, C.NK_BOOL); return 1; }
 		if (Tk.type == Tk.NULL) {
 			Lexer.nextToken();
 			E.eb(E.ACONST_NULL);
@@ -930,7 +972,7 @@ public class Expr {
 		}
 		if (Tk.type >= Tk.PLUS_EQ && Tk.type <= Tk.USHR_EQ) {
 			int op = Tk.type; Lexer.nextToken();
-			if (g) Lexer.error(211); // compound assign needs an int-like scalar lvalue
+			if (g || n == C.NK_BOOL) Lexer.error(211); // compound assign needs an int-like scalar lvalue
 			if (k == 0) {
 				E.eLd(i, t); E.push();
 				int rhsType = pExpr();
@@ -964,7 +1006,7 @@ public class Expr {
 		if (Tk.type == Tk.INC || Tk.type == Tk.DEC) {
 			int op = Tk.type; Lexer.nextToken();
 			if (k == 3) Lexer.error(211); // explicit obj.field++/-- unsupported for now
-			if (g) Lexer.error(211); // ++/-- needs an int-like scalar lvalue
+			if (g || n == C.NK_BOOL) Lexer.error(211); // ++/-- needs an int-like scalar lvalue
 			if (k == 0) {
 				if (n != C.NK_NONE) {
 					E.eLd(i, 0); E.push();

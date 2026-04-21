@@ -2,8 +2,8 @@
 class C {
 	// Limits — sized to fit in picoJVM 64KB heap
 	static final int MAX_CLASSES  = 32;
-	// Leave headroom for self-hosting feature work until method storage is dynamic.
-	static final int MAX_METHODS  = 256;
+	// .pjvm stores n_methods in one byte, so 255 is the true format ceiling.
+	static final int MAX_METHODS  = 255;
 	static final int MAX_FIELDS   = 416;
 	static final int MAX_NAMES    = 1024;
 	static final int MAX_NAME_POOL= 12288;

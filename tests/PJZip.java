@@ -1,4 +1,5 @@
 import pj.archive.Zip;
+import pj.archive.ZipWrite;
 import pj.io.Console;
 import pj.io.Files;
 
@@ -17,9 +18,12 @@ public class PJZip {
     public static void main(String[] args) {
         byte[] hdr = new byte[256];
         byte[] scratch = new byte[128];
+        int[] info = new int[4];
         int n;
         int[] sizes;
+        int[] compSizes;
         int[] crcs;
+        int[] methods;
         int[] offs;
         int offset;
         int centralOff;
@@ -31,21 +35,10 @@ public class PJZip {
         }
         n = args.length - 1;
         sizes = new int[n];
+        compSizes = new int[n];
         crcs = new int[n];
+        methods = new int[n];
         offs = new int[n];
-
-        for (int i = 0; i < n; i++) {
-            sizes[i] = Files.countBytes(args[i + 1], scratch);
-            if (sizes[i] < 0) {
-                Console.println("read fail");
-                return;
-            }
-            crcs[i] = Zip.crc32File(args[i + 1], scratch);
-            if (crcs[i] < 0) {
-                Console.println("crc fail");
-                return;
-            }
-        }
 
         if (Files.openWrite(args[0]) != 0) {
             Console.println("open fail");
@@ -55,15 +48,24 @@ public class PJZip {
         offset = 0;
         for (int i = 0; i < n; i++) {
             offs[i] = offset;
-            offset += Zip.writeStoredFile(args[i + 1], args[i + 1], hdr, scratch, sizes[i], crcs[i]);
+            offset += ZipWrite.writeCompressedFile(args[i + 1], args[i + 1], hdr, scratch, info);
+            if (offset < 0) {
+                Files.close(Files.MODE_WRITE);
+                Console.println("zip fail");
+                return;
+            }
+            methods[i] = info[0];
+            sizes[i] = info[1];
+            compSizes[i] = info[2];
+            crcs[i] = info[3];
             emitAdded(args[i + 1], sizes[i]);
         }
         centralOff = offset;
         centralSize = 0;
         for (int i = 0; i < n; i++) {
-            centralSize += Zip.writeStoredCentral(args[i + 1], hdr, sizes[i], crcs[i], offs[i]);
+            centralSize += ZipWrite.writeCentral(args[i + 1], hdr, methods[i], sizes[i], compSizes[i], crcs[i], offs[i]);
         }
-        Zip.writeEnd(hdr, n, centralSize, centralOff);
+        ZipWrite.writeEnd(hdr, n, centralSize, centralOff);
         Files.close(Files.MODE_WRITE);
     }
 }

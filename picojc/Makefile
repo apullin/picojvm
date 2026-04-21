@@ -4,6 +4,8 @@
 
 JAVAC   = javac
 PYTHON  = python3
+CC      = cc
+CFLAGS  = -Wall -Wextra -O2
 PICOJVM = ../picojvm
 PJVMPACK = ../pjvmpack.py
 
@@ -49,10 +51,14 @@ NEGTESTS = N01_InvalidStaticCall N02_OverloadSameClass \
            N11_ArrayAssignExprValue N12_InvalidRefLocalPostInc \
            N13_InvalidRefLocalCompound N14_InvalidFieldPostInc \
            N15_InvalidObjArrayElemCompound N16_InvalidLiteralPostInc \
-           N17_InvalidBooleanLocalUpdate N18_InvalidBooleanArrayUpdate \
-           N19_InvalidBooleanArithmetic N20_InvalidBooleanLogicalMixed \
-           N21_InvalidBooleanNot N22_InvalidEqualityKinds \
-           N23_InvalidInstanceofScalar
+	           N17_InvalidBooleanLocalUpdate N18_InvalidBooleanArrayUpdate \
+	           N19_InvalidBooleanArithmetic N20_InvalidBooleanLogicalMixed \
+	           N21_InvalidBooleanNot N22_InvalidEqualityKinds \
+	           N23_InvalidInstanceofScalar N24_InvalidIfCondition \
+	           N25_InvalidTernaryCondition N26_InvalidRefLocalInit \
+	           N27_InvalidStaticRefInit N28_InvalidRefAssign \
+	           N29_InvalidObjArrayStore N30_InvalidRefReturn \
+	           N31_InvalidThrowScalar N32_InvalidObjArrayInit
 
 # Tests requiring lib/ (platform package)
 LIB_SRCS = ../lib/Console.java ../lib/Arrays.java ../lib/IO.java
@@ -228,7 +234,11 @@ $(BUILDDIR)/picojc-disk.pjvm: $(BUILDDIR)/classes
 
 # End-to-end disk test: compile a test program via disk I/O, run it, verify output
 DISK_PICOJVM = $(abspath $(PICOJVM))
+DISK_PICOJVM_BIG = $(abspath $(BUILDDIR)/picojvm-bigheap)
 DISK_COMPILER = $(abspath $(BUILDDIR)/picojc-disk.pjvm)
+
+$(BUILDDIR)/picojvm-bigheap: ../src/pjvm.c ../src/pjvm_heap.c ../src/pjvm_gc.c ../platform/host.c ../src/pjvm.h | $(BUILDDIR)
+	$(CC) $(CFLAGS) -DPJVM_DEBUG_TOOLS -DPJVM_MAX_FRAMES=128 -DPJVM_HEAP_MODE=PJVM_HEAP_FREELIST -DPJVM_GC_TRIGGERS=3 -DPJVM_GC_WATERMARK_PCT=75 -o $@ ../src/pjvm.c ../src/pjvm_heap.c ../src/pjvm_gc.c ../platform/host.c
 
 define disk_test
 	@echo "--- Disk compile: $(1) ---"
@@ -411,19 +421,27 @@ test-disk-picojse-archive: $(PICOJVM) $(BUILDDIR)/picojc-disk.pjvm
 		false; \
 	fi
 
-test-disk-picojse-zip: $(PICOJVM) $(BUILDDIR)/picojc-disk.pjvm
+test-disk-picojse-zip: $(PICOJVM) $(BUILDDIR)/picojc-disk.pjvm $(BUILDDIR)/picojvm-bigheap
 	@mkdir -p $(BUILDDIR)/disk_picojse_zip
 	@cp $(PICOJSE_DIR)/Native.java $(BUILDDIR)/disk_picojse_zip/
 	@cp $(PICOJSE_DIR)/archive/Zip.java $(BUILDDIR)/disk_picojse_zip/
+	@cp $(PICOJSE_DIR)/archive/ZipRead.java $(BUILDDIR)/disk_picojse_zip/
+	@cp $(PICOJSE_DIR)/archive/ZipWrite.java $(BUILDDIR)/disk_picojse_zip/
+	@cp $(PICOJSE_DIR)/archive/ZipDeflateBits.java $(BUILDDIR)/disk_picojse_zip/
+	@cp $(PICOJSE_DIR)/archive/ZipDeflate.java $(BUILDDIR)/disk_picojse_zip/
+	@cp $(PICOJSE_DIR)/archive/ZipHuffman.java $(BUILDDIR)/disk_picojse_zip/
+	@cp $(PICOJSE_DIR)/archive/ZipInflate.java $(BUILDDIR)/disk_picojse_zip/
+	@cp $(PICOJSE_DIR)/archive/ZipTables.java $(BUILDDIR)/disk_picojse_zip/
 	@cp $(PICOJSE_DIR)/io/Files.java $(BUILDDIR)/disk_picojse_zip/
 	@cp $(PICOJSE_DIR)/io/Binary.java $(BUILDDIR)/disk_picojse_zip/
 	@cp $(PICOJSE_DIR)/text/Format.java $(BUILDDIR)/disk_picojse_zip/
 	@cp $(PICOJSE_DIR)/text/Strings.java $(BUILDDIR)/disk_picojse_zip/
 	@cp $(PICOJSE_DIR)/util/Bytes.java $(BUILDDIR)/disk_picojse_zip/
 	@cp $(PICOJSE_TESTDIR)/ZipSmoke.java $(BUILDDIR)/disk_picojse_zip/
-	@printf 'Native.java\nZip.java\nFiles.java\nBinary.java\nFormat.java\nStrings.java\nBytes.java\nZipSmoke.java\n' > $(BUILDDIR)/disk_picojse_zip/sources.lst
+	@cp $(PICOJSE_TESTDIR)/ZipDeflateSmoke.java $(BUILDDIR)/disk_picojse_zip/
+	@printf 'Native.java\nZip.java\nZipRead.java\nZipWrite.java\nZipDeflateBits.java\nZipDeflate.java\nZipHuffman.java\nZipInflate.java\nZipTables.java\nFiles.java\nBinary.java\nFormat.java\nStrings.java\nBytes.java\nZipSmoke.java\n' > $(BUILDDIR)/disk_picojse_zip/sources.lst
 	@echo "--- picoJSE ZipSmoke (disk package) ---"
-	@cd $(BUILDDIR)/disk_picojse_zip && $(DISK_PICOJVM) $(DISK_COMPILER) > ZipSmoke.pjvm \
+	@cd $(BUILDDIR)/disk_picojse_zip && $(DISK_PICOJVM_BIG) $(DISK_COMPILER) > ZipSmoke.pjvm \
 		2> ZipSmoke_compile.log
 	@$(PICOJVM) $(BUILDDIR)/disk_picojse_zip/ZipSmoke.pjvm > $(BUILDDIR)/disk_picojse_zip/ZipSmoke.out \
 		2> $(BUILDDIR)/disk_picojse_zip/ZipSmoke_run.log || true
@@ -433,6 +451,20 @@ test-disk-picojse-zip: $(PICOJVM) $(BUILDDIR)/picojc-disk.pjvm
 		echo "FAIL: picoJSE ZipSmoke (disk package)"; \
 		echo "  Expected:"; cat $(EXPDIR)/ZipSmoke.txt | head -8; \
 		echo "  Got:"; cat $(BUILDDIR)/disk_picojse_zip/ZipSmoke.out | head -8; \
+		false; \
+	fi
+	@printf 'Native.java\nZip.java\nZipRead.java\nZipWrite.java\nZipDeflateBits.java\nZipDeflate.java\nZipHuffman.java\nZipInflate.java\nZipTables.java\nFiles.java\nBinary.java\nFormat.java\nStrings.java\nBytes.java\nZipDeflateSmoke.java\n' > $(BUILDDIR)/disk_picojse_zip/sources.lst
+	@echo "--- picoJSE ZipDeflateSmoke (disk package) ---"
+	@cd $(BUILDDIR)/disk_picojse_zip && $(DISK_PICOJVM_BIG) $(DISK_COMPILER) > ZipDeflateSmoke.pjvm \
+		2> ZipDeflateSmoke_compile.log
+	@$(PICOJVM) $(BUILDDIR)/disk_picojse_zip/ZipDeflateSmoke.pjvm > $(BUILDDIR)/disk_picojse_zip/ZipDeflateSmoke.out \
+		2> $(BUILDDIR)/disk_picojse_zip/ZipDeflateSmoke_run.log || true
+	@if diff -q $(BUILDDIR)/disk_picojse_zip/ZipDeflateSmoke.out $(EXPDIR)/ZipDeflateSmoke.txt > /dev/null 2>&1; then \
+		echo "PASS: picoJSE ZipDeflateSmoke (disk package)"; \
+	else \
+		echo "FAIL: picoJSE ZipDeflateSmoke (disk package)"; \
+		echo "  Expected:"; cat $(EXPDIR)/ZipDeflateSmoke.txt | head -12; \
+		echo "  Got:"; cat $(BUILDDIR)/disk_picojse_zip/ZipDeflateSmoke.out | head -12; \
 		false; \
 	fi
 
@@ -482,11 +514,18 @@ test-disk-picojse-tools-tar: $(PICOJVM) $(BUILDDIR)/picojc-disk.pjvm
 		false; \
 	fi
 
-test-disk-picojse-tools-zip: $(PICOJVM) $(BUILDDIR)/picojc-disk.pjvm
+test-disk-picojse-tools-zip: $(PICOJVM) $(BUILDDIR)/picojc-disk.pjvm $(BUILDDIR)/picojvm-bigheap
 	@rm -rf $(BUILDDIR)/disk_picojse_tools_zip
 	@mkdir -p $(BUILDDIR)/disk_picojse_tools_zip
 	@cp $(PICOJSE_DIR)/Native.java $(BUILDDIR)/disk_picojse_tools_zip/
 	@cp $(PICOJSE_DIR)/archive/Zip.java $(BUILDDIR)/disk_picojse_tools_zip/
+	@cp $(PICOJSE_DIR)/archive/ZipRead.java $(BUILDDIR)/disk_picojse_tools_zip/
+	@cp $(PICOJSE_DIR)/archive/ZipWrite.java $(BUILDDIR)/disk_picojse_tools_zip/
+	@cp $(PICOJSE_DIR)/archive/ZipDeflateBits.java $(BUILDDIR)/disk_picojse_tools_zip/
+	@cp $(PICOJSE_DIR)/archive/ZipDeflate.java $(BUILDDIR)/disk_picojse_tools_zip/
+	@cp $(PICOJSE_DIR)/archive/ZipHuffman.java $(BUILDDIR)/disk_picojse_tools_zip/
+	@cp $(PICOJSE_DIR)/archive/ZipInflate.java $(BUILDDIR)/disk_picojse_tools_zip/
+	@cp $(PICOJSE_DIR)/archive/ZipTables.java $(BUILDDIR)/disk_picojse_tools_zip/
 	@cp $(PICOJSE_DIR)/io/Console.java $(BUILDDIR)/disk_picojse_tools_zip/
 	@cp $(PICOJSE_DIR)/io/Files.java $(BUILDDIR)/disk_picojse_tools_zip/
 	@cp $(PICOJSE_DIR)/io/Binary.java $(BUILDDIR)/disk_picojse_tools_zip/
@@ -494,13 +533,13 @@ test-disk-picojse-tools-zip: $(PICOJVM) $(BUILDDIR)/picojc-disk.pjvm
 	@cp $(PICOJSE_DIR)/util/Bytes.java $(BUILDDIR)/disk_picojse_tools_zip/
 	@cp $(PICOJSE_TESTDIR)/PJZip.java $(BUILDDIR)/disk_picojse_tools_zip/
 	@cp $(PICOJSE_TESTDIR)/PJUnzip.java $(BUILDDIR)/disk_picojse_tools_zip/
-	@printf 'Native.java\nZip.java\nConsole.java\nFiles.java\nBinary.java\nTextWriter.java\nBytes.java\nPJZip.java\n' > $(BUILDDIR)/disk_picojse_tools_zip/sources.lst
+	@printf 'Native.java\nZip.java\nZipWrite.java\nZipDeflateBits.java\nZipDeflate.java\nZipHuffman.java\nZipTables.java\nConsole.java\nFiles.java\nBinary.java\nTextWriter.java\nBytes.java\nPJZip.java\n' > $(BUILDDIR)/disk_picojse_tools_zip/sources.lst
 	@echo "--- picoJSE PJZip (disk package) ---"
-	@cd $(BUILDDIR)/disk_picojse_tools_zip && $(DISK_PICOJVM) $(DISK_COMPILER) > PJZip.pjvm \
+	@cd $(BUILDDIR)/disk_picojse_tools_zip && $(DISK_PICOJVM_BIG) $(DISK_COMPILER) > PJZip.pjvm \
 		2> PJZip_compile.log
-	@printf 'Native.java\nZip.java\nConsole.java\nFiles.java\nBinary.java\nTextWriter.java\nBytes.java\nPJUnzip.java\n' > $(BUILDDIR)/disk_picojse_tools_zip/sources.lst
+	@printf 'Native.java\nZip.java\nZipRead.java\nZipHuffman.java\nZipInflate.java\nZipTables.java\nConsole.java\nFiles.java\nBinary.java\nTextWriter.java\nBytes.java\nPJUnzip.java\n' > $(BUILDDIR)/disk_picojse_tools_zip/sources.lst
 	@echo "--- picoJSE PJUnzip (disk package) ---"
-	@cd $(BUILDDIR)/disk_picojse_tools_zip && $(DISK_PICOJVM) $(DISK_COMPILER) > PJUnzip.pjvm \
+	@cd $(BUILDDIR)/disk_picojse_tools_zip && $(DISK_PICOJVM_BIG) $(DISK_COMPILER) > PJUnzip.pjvm \
 		2> PJUnzip_compile.log
 	@printf 'ALPHA\n' > $(BUILDDIR)/disk_picojse_tools_zip/a.txt
 	@printf 'BETA!\n' > $(BUILDDIR)/disk_picojse_tools_zip/b.txt
@@ -529,21 +568,28 @@ test-disk-picojse-tools-zip: $(PICOJVM) $(BUILDDIR)/picojc-disk.pjvm
 		false; \
 	fi
 
-test-disk-picojse-tools-arc: $(PICOJVM) $(BUILDDIR)/picojc-disk.pjvm
+test-disk-picojse-tools-arc: $(PICOJVM) $(BUILDDIR)/picojc-disk.pjvm $(BUILDDIR)/picojvm-bigheap
 	@rm -rf $(BUILDDIR)/disk_picojse_tools_arc
 	@mkdir -p $(BUILDDIR)/disk_picojse_tools_arc
 	@cp $(PICOJSE_DIR)/Native.java $(BUILDDIR)/disk_picojse_tools_arc/
 	@cp $(PICOJSE_DIR)/archive/Tar.java $(BUILDDIR)/disk_picojse_tools_arc/
 	@cp $(PICOJSE_DIR)/archive/Zip.java $(BUILDDIR)/disk_picojse_tools_arc/
+	@cp $(PICOJSE_DIR)/archive/ZipRead.java $(BUILDDIR)/disk_picojse_tools_arc/
+	@cp $(PICOJSE_DIR)/archive/ZipWrite.java $(BUILDDIR)/disk_picojse_tools_arc/
+	@cp $(PICOJSE_DIR)/archive/ZipDeflateBits.java $(BUILDDIR)/disk_picojse_tools_arc/
+	@cp $(PICOJSE_DIR)/archive/ZipDeflate.java $(BUILDDIR)/disk_picojse_tools_arc/
+	@cp $(PICOJSE_DIR)/archive/ZipHuffman.java $(BUILDDIR)/disk_picojse_tools_arc/
+	@cp $(PICOJSE_DIR)/archive/ZipInflate.java $(BUILDDIR)/disk_picojse_tools_arc/
+	@cp $(PICOJSE_DIR)/archive/ZipTables.java $(BUILDDIR)/disk_picojse_tools_arc/
 	@cp $(PICOJSE_DIR)/io/Console.java $(BUILDDIR)/disk_picojse_tools_arc/
 	@cp $(PICOJSE_DIR)/io/Files.java $(BUILDDIR)/disk_picojse_tools_arc/
 	@cp $(PICOJSE_DIR)/io/Binary.java $(BUILDDIR)/disk_picojse_tools_arc/
 	@cp $(PICOJSE_DIR)/io/TextWriter.java $(BUILDDIR)/disk_picojse_tools_arc/
 	@cp $(PICOJSE_DIR)/util/Bytes.java $(BUILDDIR)/disk_picojse_tools_arc/
 	@cp $(PICOJSE_TESTDIR)/PJArc.java $(BUILDDIR)/disk_picojse_tools_arc/
-	@printf 'Native.java\nTar.java\nZip.java\nConsole.java\nFiles.java\nBinary.java\nTextWriter.java\nBytes.java\nPJArc.java\n' > $(BUILDDIR)/disk_picojse_tools_arc/sources.lst
+	@printf 'Native.java\nTar.java\nZip.java\nZipRead.java\nZipWrite.java\nZipDeflateBits.java\nZipDeflate.java\nZipHuffman.java\nZipInflate.java\nZipTables.java\nConsole.java\nFiles.java\nBinary.java\nTextWriter.java\nBytes.java\nPJArc.java\n' > $(BUILDDIR)/disk_picojse_tools_arc/sources.lst
 	@echo "--- picoJSE PJArc (disk package) ---"
-	@cd $(BUILDDIR)/disk_picojse_tools_arc && $(DISK_PICOJVM) $(DISK_COMPILER) > PJArc.pjvm \
+	@cd $(BUILDDIR)/disk_picojse_tools_arc && $(DISK_PICOJVM_BIG) $(DISK_COMPILER) > PJArc.pjvm \
 		2> PJArc_compile.log
 	@printf 'ALPHA\n' > $(BUILDDIR)/disk_picojse_tools_arc/a.txt
 	@printf 'BETA!\n' > $(BUILDDIR)/disk_picojse_tools_arc/b.txt
@@ -592,6 +638,13 @@ test-disk-picojse-tools-arc: $(PICOJVM) $(BUILDDIR)/picojc-disk.pjvm
 		echo "PASS: picoJSE arc tool (disk package)"; \
 	else \
 		echo "FAIL: picoJSE PJArc zip contents (disk package)"; \
+		false; \
+	fi
+	@if diff -q $(BUILDDIR)/disk_picojse_tools_arc/a.txt $(BUILDDIR)/disk_picojse_tools_arc/exp_a.txt > /dev/null 2>&1 && \
+	    diff -q $(BUILDDIR)/disk_picojse_tools_arc/b.txt $(BUILDDIR)/disk_picojse_tools_arc/exp_b.txt > /dev/null 2>&1; then \
+		echo "PASS: picoJSE arc deflate tool (disk package)"; \
+	else \
+		echo "FAIL: picoJSE PJArc deflate contents (disk package)"; \
 		false; \
 	fi
 

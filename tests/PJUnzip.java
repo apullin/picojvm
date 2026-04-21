@@ -1,4 +1,5 @@
 import pj.archive.Zip;
+import pj.archive.ZipRead;
 import pj.io.Console;
 import pj.io.Files;
 
@@ -34,12 +35,9 @@ public class PJUnzip {
             nameLen = Zip.readLocalHeader(hdr, nameBuf, scratch);
             if (nameLen <= 0) break;
             name = Zip.entryName(nameBuf, nameLen);
-            size = Zip.entrySize(hdr);
-            if (Zip.isStoredEntry(hdr)) {
-                Zip.extractStoredCurrent(name, hdr, scratch);
+            if (ZipRead.extractCurrent(name, hdr, scratch)) {
+                size = Zip.entrySize(hdr);
                 emitExtracted(name, size);
-            } else {
-                Zip.skipCurrent(hdr, scratch);
             }
         }
         Files.close(Files.MODE_READ);

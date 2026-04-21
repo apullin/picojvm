@@ -251,17 +251,17 @@ class E {
 		Lexer.nextToken(); // skip '='
 		int initType = -1;
 		int initRefNm = -1;
-		int fi = Resolver.fStatField(ci, nm);
-		if (fi >= 0) {
-			if (C.fType[fi] == 2) { initType = 2; initRefNm = C.fRefNm[fi]; }
-			else if (C.fArrKind[fi] != 0) initType = C.fArrKind[fi];
-		}
-		Expr.pTypedInit(initType, initRefNm);
-		if (fi >= 0) {
-			Expr.chkImplicitNarrow(C.fNarrow[fi]);
-			eNarrow(C.fNarrow[fi]);
-			int cpIdx = aCP(C.fSlot[fi]);
-			eOp(PUTSTATIC, cpIdx); pop();
+			int fi = Resolver.fStatField(ci, nm);
+			if (fi >= 0) {
+				if (C.fType[fi] == 2) { initType = 2; initRefNm = C.fRefNm[fi]; }
+				else if (C.fArrKind[fi] != 0) initType = C.fArrKind[fi];
+			}
+			int exprType = Expr.pTypedInit(initType, initRefNm);
+			if (fi >= 0) {
+				Expr.chkStoreCompat(exprType, C.fArrKind[fi] != 0 ? C.fArrKind[fi] : C.fType[fi], C.fRefNm[fi], C.fNarrow[fi]);
+				eNarrow(C.fNarrow[fi]);
+				int cpIdx = aCP(C.fSlot[fi]);
+				eOp(PUTSTATIC, cpIdx); pop();
 		}
 		endClinitChunk(false);
 	}
@@ -370,7 +370,7 @@ class E {
 	}
 
 	static void commitMC(int mi) {
-		C.mCodeOff[mi] = (short)C.cdLen;
+		C.mCodeOff[mi] = C.cdLen;
 		if (C.diskSpill) {
 			for (int i = 0; i < C.mcLen; i++) {
 				Native.fileWriteByte(C.mcode[i] & 0xFF); C.cdLen++;

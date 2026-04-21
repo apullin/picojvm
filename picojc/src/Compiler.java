@@ -84,7 +84,7 @@ class C {
 	static byte[] mMaxLoc = new byte[MAX_METHODS];
 	static byte[] mMaxStk  = new byte[MAX_METHODS];
 	static byte[] mFlags     = new byte[MAX_METHODS]; // native encoding
-	static short[] mCodeOff   = new short[MAX_METHODS];
+	static int[] mCodeOff   = new int[MAX_METHODS]; // bytecode offsets can exceed 32KB in self-hosted images
 	static short[] mCpBase    = new short[MAX_METHODS];
 	static byte[] mVtSlot= new byte[MAX_METHODS];
 	static byte[] mVmid      = new byte[MAX_METHODS];
@@ -98,9 +98,9 @@ class C {
 	static byte[] mFixedArgs = new byte[MAX_METHODS];
 	static int[] mBodyS = new int[MAX_METHODS]; // source pos (must be int: >32KB sources)
 	static int[] mBodyE   = new int[MAX_METHODS]; // source pos (must be int: >32KB sources)
-	static byte[] mRetT   = new byte[MAX_METHODS]; // 0=void,1=int,2=ref
-	static byte[] mRetNarrow = new byte[MAX_METHODS]; // 0=int-like, 1=byte, 2=char, 3=short, 4=boolean
-	static short[] mRetRefNm = new short[MAX_METHODS]; // declared ref return type, -1 if unknown/non-ref
+		static byte[] mRetT   = new byte[MAX_METHODS]; // 0=void,1=int-like scalar,2=reference/array
+		static byte[] mRetNarrow = new byte[MAX_METHODS]; // scalar narrow kind, or array kind when mRetT==2
+		static short[] mRetRefNm = new short[MAX_METHODS]; // declared ref return type or object[] element type, -1 if unknown/non-ref
 	static int mainMi;
 
 	// --- CP resolution table (16-bit entries, stored as lo/hi byte arrays) ---
@@ -319,7 +319,7 @@ class C {
 		int mi = mCount++;
 		mClass[mi] = (byte)ci; mName[mi] = (short)nm; mArgC[mi] = (byte)argc;
 		mStatic[mi] = isStat; mIsCtor[mi] = isCtor; mNative[mi] = isNat;
-		mRetT[mi] = (byte)retType; mVtSlot[mi] = (byte)0xFF; mVmid[mi] = (byte)0xFF; mExcC[mi] = 0;
+			mRetT[mi] = (byte)retType; mVtSlot[mi] = (byte)0xFF; mVmid[mi] = (byte)0xFF; mExcC[mi] = 0;
 			mRetNarrow[mi] = (byte)NK_NONE;
 			mRetRefNm[mi] = (short)-1;
 			mVarargs[mi] = false; mFixedArgs[mi] = 0;
@@ -376,10 +376,12 @@ class C {
 		for (int i = 0; i < mCount; i++) {
 			if (mNative[i] && mName[i] == methodNm && mClass[i] == classNm) {
 				mFlags[i] = (byte)((nativeId << 1) | 1);
+				if (methodNm == N_EQUALS) mRetNarrow[i] = (byte)NK_BOOL;
 				return i;
 			}
 		}
 		int mi = initMethod(classNm, methodNm, argCount, isStatic, false, true, retType);
+		if (methodNm == N_EQUALS) mRetNarrow[mi] = (byte)NK_BOOL;
 		mMaxLoc[mi] = (byte)argCount;
 		mMaxStk[mi] = (byte)(argCount > 0 ? argCount : 1);
 		mFlags[mi] = (byte)((nativeId << 1) | 1);

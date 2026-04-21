@@ -108,13 +108,13 @@ public class Stmt {
 			E.aLoc(nm, varType, refNm, varNarrow);
 			Lexer.nextToken();
 
-			if (Tk.type == Tk.ASSIGN) {
-				Lexer.nextToken();
-				Expr.pTypedInit(varType, refNm);
-				Expr.chkImplicitNarrow(varNarrow);
-				E.eStN(slot, varType, varNarrow);
-				E.pop();
-			}
+				if (Tk.type == Tk.ASSIGN) {
+					Lexer.nextToken();
+					int initType = Expr.pTypedInit(varType, refNm);
+					Expr.chkStoreCompat(initType, varType, refNm, varNarrow);
+					E.eStN(slot, varType, varNarrow);
+					E.pop();
+				}
 
 			if (Tk.type == Tk.COMMA) {
 				Lexer.nextToken();
@@ -132,6 +132,7 @@ public class Stmt {
 		int savedDepth = C.stkDepth;
 		int condType = Expr.pExpr();
 		if (condType == 0) Lexer.error(210); // condition needs a value
+		if (condType != 1 || Expr.exprNarrow != C.NK_BOOL) Lexer.error(211);
 		if (C.mcLen >= 8 && C.patC >= 2) {
 			int start = C.mcLen - 8;
 			int op = C.mcode[start] & 0xFF;
@@ -246,27 +247,27 @@ public class Stmt {
 					return;
 				}
 
-				// Traditional for — already declared the local, handle initializer
-				if (Tk.type == Tk.ASSIGN) {
-					Lexer.nextToken();
-					Expr.pTypedInit(varType, varRefNm);
-					Expr.chkImplicitNarrow(varNarrow);
-					E.eStN(slot, varType, varNarrow);
-					E.pop();
-				}
+					// Traditional for — already declared the local, handle initializer
+					if (Tk.type == Tk.ASSIGN) {
+						Lexer.nextToken();
+						int initType = Expr.pTypedInit(varType, varRefNm);
+						Expr.chkStoreCompat(initType, varType, varRefNm, varNarrow);
+						E.eStN(slot, varType, varNarrow);
+						E.pop();
+					}
 				while (Tk.type == Tk.COMMA) {
 					Lexer.nextToken();
 					int nm2 = C.intern(Tk.strBuf, Tk.strLen);
 					int slot2 = C.locCount;
 					E.aLoc(nm2, varType, varRefNm, varNarrow);
-					Lexer.nextToken();
-					if (Tk.type == Tk.ASSIGN) {
 						Lexer.nextToken();
-						Expr.pTypedInit(varType, varRefNm);
-						Expr.chkImplicitNarrow(varNarrow);
-						E.eStN(slot2, varType, varNarrow);
-						E.pop();
-					}
+						if (Tk.type == Tk.ASSIGN) {
+							Lexer.nextToken();
+							int initType = Expr.pTypedInit(varType, varRefNm);
+							Expr.chkStoreCompat(initType, varType, varRefNm, varNarrow);
+							E.eStN(slot2, varType, varNarrow);
+							E.pop();
+						}
 				}
 				Lexer.expect(Tk.SEMI);
 			} else {
@@ -388,17 +389,20 @@ public class Stmt {
 		if (Tk.type == Tk.SEMI) {
 			Lexer.nextToken();
 			E.eb(E.RETURN);
-		} else {
-			int retType = C.mRetT[C.curMi];
-			int exprType = Expr.pExpr();
-			if (exprType == 0) Lexer.error(210); // return expression needs a value
-			E.pop();
-			if (retType == 2) E.eb(E.ARETURN);
-			else {
-				Expr.chkImplicitNarrow(C.mRetNarrow[C.curMi]);
-				E.eNarrow(C.mRetNarrow[C.curMi]);
-				E.eb(E.IRETURN);
-			}
+			} else {
+				int retType = C.mRetT[C.curMi];
+				int retArrKind = retType == 2 ? C.mRetNarrow[C.curMi] : 0;
+				int exprType = Expr.pExpr();
+				if (exprType == 0) Lexer.error(210); // return expression needs a value
+				E.pop();
+				if (retType == 2) {
+					Expr.chkStoreCompat(exprType, retArrKind != 0 ? retArrKind : 1, C.mRetRefNm[C.curMi], C.NK_NONE);
+					E.eb(E.ARETURN);
+				} else {
+					Expr.chkStoreCompat(exprType, 0, -1, C.mRetNarrow[C.curMi]);
+					E.eNarrow(C.mRetNarrow[C.curMi]);
+					E.eb(E.IRETURN);
+				}
 			Lexer.expect(Tk.SEMI);
 		}
 	}
@@ -407,6 +411,7 @@ public class Stmt {
 		Lexer.nextToken(); // skip 'throw'
 		int exprType = Expr.pExpr();
 		if (exprType == 0) Lexer.error(210); // throw expression needs a value
+		Expr.chkStoreCompat(exprType, 1, C.N_THROWABLE, C.NK_NONE);
 		E.pop();
 		E.eb(E.ATHROW);
 		Lexer.expect(Tk.SEMI);

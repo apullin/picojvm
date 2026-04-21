@@ -305,10 +305,10 @@ public class Catalog {
 			return;
 		}
 
-		if (isCtor(ci)) {
-			catMethod(ci, C.cName[ci], mStat, true, mNat, mAbst, 0, -1, C.NK_NONE);
-			return;
-		}
+			if (isCtor(ci)) {
+				catMethod(ci, C.cName[ci], mStat, true, mNat, mAbst, 0, -1, C.NK_NONE);
+				return;
+			}
 
 		// Parse return/field type once, then map it for methods or fields.
 		int retType = 0;
@@ -320,19 +320,20 @@ public class Catalog {
 		boolean fieldGcRef = false;
 
 		scanTy(true);
-		if (tyBase == 0) {
-			retType = 0;
-		} else if (tyBase == 1) {
-			retType = tyDims == 0 ? 1 : 2;
-			retNarrow = tyNarrow;
-			fieldNarrow = tyNarrow;
-			arrayKind = tyDims == 0 ? 0 : tyArrKind;
-			fieldGcRef = tyDims != 0;
-		} else if (tyBase == 2) {
-			retType = 2;
-			fieldType = tyDims == 1 ? 2 : 1;
-			refNm = tyRefNm;
-			fieldGcRef = true;
+			if (tyBase == 0) {
+				retType = 0;
+			} else if (tyBase == 1) {
+				retType = tyDims == 0 ? 1 : 2;
+				retNarrow = tyDims == 0 ? tyNarrow : (tyDims == 1 ? tyArrKind : 0);
+				fieldNarrow = tyNarrow;
+				arrayKind = tyDims == 0 ? 0 : tyArrKind;
+				fieldGcRef = tyDims != 0;
+			} else if (tyBase == 2) {
+				retType = 2;
+				retNarrow = tyDims == 1 ? 2 : 0;
+				fieldType = tyDims == 1 ? 2 : 1;
+				refNm = tyRefNm;
+				fieldGcRef = true;
 		} else {
 			Native.putchar('T'); Lexer.printNum(Tk.type);
 			Native.putchar('P'); Lexer.printNum(Lexer.pos);
@@ -347,12 +348,12 @@ public class Catalog {
 			return;
 		}
 
-		int nm = C.iN();
-		if (Tk.type == Tk.LPAREN) {
-			catMethod(ci, nm, mStat, false, mNat, mAbst, retType, fieldType == 2 ? -1 : refNm, retNarrow);
-		} else {
-			catField(ci, nm, mStat, mFinal, fieldType, arrayKind, refNm, fieldNarrow, fieldGcRef);
-		}
+			int nm = C.iN();
+			if (Tk.type == Tk.LPAREN) {
+				catMethod(ci, nm, mStat, false, mNat, mAbst, retType, refNm, retNarrow);
+			} else {
+				catField(ci, nm, mStat, mFinal, fieldType, arrayKind, refNm, fieldNarrow, fieldGcRef);
+			}
 	}
 
 	static int initField(int ci, int nm, boolean isStat, boolean isFinal,

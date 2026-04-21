@@ -10,7 +10,7 @@ public class Expr {
 	static int lvRefNm;  // declared ref type name, -1 if unknown/non-ref
 	static boolean lvG;  // storage holds a heap reference (object/array)
 	static boolean lvRV; // assign DUPs and returns value
-	static int exprRefNm = -1; // declared ref type name for the last parsed ref expression
+		static int exprRefNm = -1; // declared ref type name for the last parsed ref expression (-2 = null literal)
 	static int exprArrRefNm = -1; // element ref type when the last parsed expression is object[]
 	static int exprNarrow = C.NK_NONE; // exact scalar kind when known, else int-like
 	static boolean exprConst;
@@ -75,6 +75,71 @@ public class Expr {
 		if (narrowKind == C.NK_NONE) return;
 		if (exprConst && fitsNarrow(exprConstVal, narrowKind)) return;
 		if (widensTo(exprNarrow, narrowKind)) return;
+		Lexer.error(208);
+	}
+
+	static void chkStoreCompat(int exprType, int dstType, int dstRefNm, int dstNarrow) {
+		int srcCi, dstCi, start;
+		if (dstType == 0) {
+			chkImplicitNarrow(dstNarrow);
+			return;
+		}
+		if (dstType == 1) {
+			if (exprType == 2) {
+				if (exprRefNm == -2) return;
+				if (exprArrRefNm >= 0) {
+					if (dstRefNm < 0 || dstRefNm == C.N_OBJECT) return;
+					Lexer.error(208);
+				}
+				if (dstRefNm < 0 || exprRefNm < 0 || exprRefNm == dstRefNm || dstRefNm == C.N_OBJECT) return;
+				srcCi = Resolver.fClsByNm(exprRefNm);
+				dstCi = Resolver.fClsByNm(dstRefNm);
+				if (srcCi >= 0 && dstCi >= 0) {
+					for (int ci = srcCi; ci >= 0; ci = C.cParent[ci]) {
+						if (ci == dstCi) return;
+					}
+					if (C.cIsIface[dstCi]) {
+						for (int ci = srcCi; ci >= 0; ci = C.cParent[ci]) {
+							start = C.cIfaceS[ci];
+							for (int j = 0; j < C.cIfaceC[ci]; j++) {
+								if (C.ifList[start + j] == dstCi) return;
+							}
+						}
+					}
+				}
+			} else if (exprType >= 3 && (dstRefNm < 0 || dstRefNm == C.N_OBJECT)) {
+				return;
+			}
+			Lexer.error(208);
+		}
+		if (dstType == 2) {
+			if (exprType == 2) {
+				if (exprRefNm == -2) return;
+				if (exprArrRefNm >= 0) {
+					if (dstRefNm < 0 || exprArrRefNm < 0 || exprArrRefNm == dstRefNm || dstRefNm == C.N_OBJECT) return;
+					srcCi = Resolver.fClsByNm(exprArrRefNm);
+					dstCi = Resolver.fClsByNm(dstRefNm);
+					if (srcCi >= 0 && dstCi >= 0) {
+						for (int ci = srcCi; ci >= 0; ci = C.cParent[ci]) {
+							if (ci == dstCi) return;
+						}
+						if (C.cIsIface[dstCi]) {
+							for (int ci = srcCi; ci >= 0; ci = C.cParent[ci]) {
+								start = C.cIfaceS[ci];
+								for (int j = 0; j < C.cIfaceC[ci]; j++) {
+									if (C.ifList[start + j] == dstCi) return;
+								}
+							}
+						}
+					}
+				}
+				if (exprRefNm < 0 && exprArrRefNm < 0) return;
+			}
+			Lexer.error(208);
+		}
+		if (exprType == dstType) return;
+		if (exprType == 2 && exprRefNm == -2) return;
+		if (exprType == 2 && exprRefNm < 0 && exprArrRefNm < 0) return;
 		Lexer.error(208);
 	}
 
@@ -214,19 +279,23 @@ public class Expr {
 		}
 
 		Lexer.expect(Tk.LBRACE);
-		for (int i = 0; Tk.type != Tk.RBRACE && Tk.type != Tk.EOF; i++) {
-			E.edup();
-			E.eIC(i);
-			E.push();
-			int elemType = pExpr();
-			if (elemType == 0) Lexer.error(210); // array element initializer needs a value
-			int narrowKind = arrNarrow(arrType);
-			chkImplicitNarrow(narrowKind);
-			E.eNarrow(narrowKind);
-			E.eASt(arrType);
-			E.pop(); E.pop(); E.pop();
-			if (Tk.type == Tk.COMMA) Lexer.nextToken();
-		}
+			for (int i = 0; Tk.type != Tk.RBRACE && Tk.type != Tk.EOF; i++) {
+				E.edup();
+				E.eIC(i);
+				E.push();
+				int elemType = pExpr();
+				if (elemType == 0) Lexer.error(210); // array element initializer needs a value
+				if (arrType == 2) {
+					chkStoreCompat(elemType, 1, refNm, C.NK_NONE);
+				} else {
+					int narrowKind = arrNarrow(arrType);
+					chkImplicitNarrow(narrowKind);
+					E.eNarrow(narrowKind);
+				}
+				E.eASt(arrType);
+				E.pop(); E.pop(); E.pop();
+				if (Tk.type == Tk.COMMA) Lexer.nextToken();
+			}
 		Lexer.expect(Tk.RBRACE);
 		if (arrType == 2) setObjArrayRef(refNm);
 		else clearRefInfo();
@@ -250,6 +319,7 @@ public class Expr {
 		int type = pBin(1);
 		if (Tk.type == Tk.QUESTION) {
 			if (type == 0) Lexer.error(210); // ternary condition needs a value
+			if (type != 1 || exprNarrow != C.NK_BOOL) Lexer.error(211);
 			Lexer.nextToken();
 			E.pop();
 			int lblFalse = E.label();
@@ -558,9 +628,13 @@ public class Expr {
 						Lexer.nextToken();
 						int rhsType = pExpr();
 						if (rhsType == 0) Lexer.error(210); // assignment rhs needs a value
-						int narrowKind = arrNarrow(type);
-						chkImplicitNarrow(narrowKind);
-						E.eNarrow(narrowKind);
+						if (type == 2 && arrElemRefNm >= 0) {
+							chkStoreCompat(rhsType, 1, arrElemRefNm, C.NK_NONE);
+						} else {
+							int narrowKind = arrNarrow(type);
+							chkImplicitNarrow(narrowKind);
+							E.eNarrow(narrowKind);
+						}
 						E.pop(); E.pop();
 						E.eASt(type);
 						type = 0;
@@ -665,7 +739,10 @@ public class Expr {
 			Lexer.nextToken();
 			E.eb(E.ACONST_NULL);
 			E.push();
-			clearRefInfo();
+			exprRefNm = -2;
+			exprArrRefNm = -1;
+			exprNarrow = C.NK_NONE;
+			exprConst = false;
 			return 2;
 		}
 		if (Tk.type == Tk.THIS) {
@@ -904,11 +981,21 @@ public class Expr {
 	static int eCallRet(int mi, int argc) {
 		for (int j = 0; j < argc; j++) E.pop();
 		int rt = C.mRetT[mi];
-		if (rt == 2) setObjRef(C.mRetRefNm[mi]);
-		else if (rt == 1) setScalarKind(C.mRetNarrow[mi]);
-		else clearRefInfo();
-		if (rt != 0) E.push();
-		return rt;
+		if (rt == 2) {
+			int arrKind = C.mRetNarrow[mi];
+			if (arrKind == 2) setObjArrayRef(C.mRetRefNm[mi]);
+			else if (arrKind != 0) clearRefInfo();
+			else setObjRef(C.mRetRefNm[mi]);
+			E.push();
+			return arrKind != 0 ? arrKind : 2;
+		}
+		if (rt == 1) {
+			setScalarKind(C.mRetNarrow[mi]);
+			E.push();
+			return 1;
+		}
+		clearRefInfo();
+		return 0;
 	}
 
 	// Shared invoke emission keeps direct, virtual, and interface calls aligned.
@@ -960,7 +1047,7 @@ public class Expr {
 			if (k == 1) E.ethis();
 			int rhsType = pExpr();
 			if (rhsType == 0) Lexer.error(210); // assignment rhs needs a value
-			chkImplicitNarrow(n);
+			chkStoreCompat(rhsType, arr != 0 ? arr : t, refNm, n);
 			if (k == 0) { E.eNarrow(n); E.edup(); E.eSt(i, t); E.pop(); return fRetType(t, refNm, n); }
 			if (k == 2) {
 				E.eNarrow(n);

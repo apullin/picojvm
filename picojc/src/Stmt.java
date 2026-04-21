@@ -130,7 +130,8 @@ public class Stmt {
 	// Parse a condition and branch directly when the tail is a materialized cmpBool.
 	static void pCondBr(int lbl, boolean onTrue) {
 		int savedDepth = C.stkDepth;
-		Expr.pExpr();
+		int condType = Expr.pExpr();
+		if (condType == 0) Lexer.error(210); // condition needs a value
 		if (C.mcLen >= 8 && C.patC >= 2) {
 			int start = C.mcLen - 8;
 			int op = C.mcode[start] & 0xFF;
@@ -328,6 +329,7 @@ public class Stmt {
 
 		// Parse array expression
 		int arrType = Expr.pExpr(); // array ref on stack
+		if (arrType == 0) Lexer.error(210); // foreach source needs a value
 
 		// Allocate hidden locals: $a (array ref), $i (index), $n (length)
 		byte[] sb = Tk.strBuf;
@@ -388,7 +390,8 @@ public class Stmt {
 			E.eb(E.RETURN);
 		} else {
 			int retType = C.mRetT[C.curMi];
-			Expr.pExpr();
+			int exprType = Expr.pExpr();
+			if (exprType == 0) Lexer.error(210); // return expression needs a value
 			E.pop();
 			if (retType == 2) E.eb(E.ARETURN);
 			else {
@@ -402,7 +405,8 @@ public class Stmt {
 
 	static void pThrow() {
 		Lexer.nextToken(); // skip 'throw'
-		Expr.pExpr();
+		int exprType = Expr.pExpr();
+		if (exprType == 0) Lexer.error(210); // throw expression needs a value
 		E.pop();
 		E.eb(E.ATHROW);
 		Lexer.expect(Tk.SEMI);
@@ -523,6 +527,7 @@ public class Stmt {
 		Lexer.nextToken(); // skip 'switch'
 		Lexer.expect(Tk.LPAREN);
 		int switchType = Expr.pExpr();
+		if (switchType == 0) Lexer.error(210); // switch expression needs a value
 		Lexer.expect(Tk.RPAREN);
 
 		if (switchType == 2) {

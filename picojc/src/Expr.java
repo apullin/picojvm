@@ -208,7 +208,8 @@ public class Expr {
 			E.edup();
 			E.eIC(i);
 			E.push();
-			pExpr();
+			int elemType = pExpr();
+			if (elemType == 0) Lexer.error(210); // array element initializer needs a value
 			int narrowKind = arrNarrow(arrType);
 			chkImplicitNarrow(narrowKind);
 			E.eNarrow(narrowKind);
@@ -226,7 +227,9 @@ public class Expr {
 		if (Tk.type == Tk.LBRACE && (type == 2 || type == 3 || type == 4 || type == 5 || type == 8)) {
 			return pArrayInit(type, refNm);
 		}
-		return pExpr();
+		type = pExpr();
+		if (type == 0) Lexer.error(210); // value required here
+		return type;
 	}
 
 	static int pExpr() {
@@ -236,12 +239,14 @@ public class Expr {
 	static int pTern() {
 		int type = pBin(1);
 		if (Tk.type == Tk.QUESTION) {
+			if (type == 0) Lexer.error(210); // ternary condition needs a value
 			Lexer.nextToken();
 			E.pop();
 			int lblFalse = E.label();
 			int lblEnd = E.label();
 			E.eBr(E.IFEQ, lblFalse); // IFEQ → false
 			int tType = pExpr();
+			if (tType == 0) Lexer.error(210); // ternary arm needs a value
 			int tRefNm = exprRefNm;
 			int tArrRefNm = exprArrRefNm;
 			E.eBr(E.GOTO, lblEnd); // GOTO end
@@ -249,6 +254,7 @@ public class Expr {
 			Lexer.expect(Tk.COLON);
 			E.mark(lblFalse);
 			int fType = pExpr();
+			if (fType == 0) Lexer.error(210); // ternary arm needs a value
 			int fRefNm = exprRefNm;
 			int fArrRefNm = exprArrRefNm;
 			E.mark(lblEnd);
@@ -290,6 +296,7 @@ public class Expr {
 		while (true) {
 			int info = binInfo(Tk.type);
 			if (info < 0) break;
+			if (type == 0) Lexer.error(210); // binary operator operand needs a value
 			int prec = info >> 8;
 			if (prec < minPrec) break;
 			int opcode = info & 0xFF;
@@ -303,13 +310,15 @@ public class Expr {
 				E.edup();
 				E.eBr(prec == 1 ? E.IFNE : E.IFEQ, lbl1);
 				E.pop(); E.epop();
-				pBin(prec + 1);
+				int rhsType = pBin(prec + 1);
+				if (rhsType == 0) Lexer.error(210); // operator operand needs a value
 				E.eBr(E.GOTO, lbl2);
 				E.mark(lbl1); E.mark(lbl2);
 				clearRefInfo();
 				} else if (prec == 6) {
 					// Equality: ==, !=
 					int rtype = pBin(prec + 1);
+					if (rtype == 0) Lexer.error(210); // operator operand needs a value
 					E.pop(); E.pop();
 					if (type == 2 || rtype == 2)
 					E.cmpBool(tok == Tk.EQ ? 0xA5 : 0xA6);
@@ -327,14 +336,16 @@ public class Expr {
 					clearRefInfo();
 				} else if (prec == 7) {
 					// Comparison: <, >, <=, >=
-					pBin(prec + 1);
+					int rhsType = pBin(prec + 1);
+					if (rhsType == 0) Lexer.error(210); // operator operand needs a value
 					E.pop(); E.pop();
 					E.cmpBool(opcode);
 					type = 1;
 					clearRefInfo();
 				} else {
 					// Standard: |, ^, &, <<, >>, >>>, +, -, *, /, %
-					pBin(prec + 1);
+					int rhsType = pBin(prec + 1);
+					if (rhsType == 0) Lexer.error(210); // operator operand needs a value
 					E.pop();
 					E.eb(opcode);
 					if (lhsConst && exprConst) {
@@ -497,14 +508,16 @@ public class Expr {
 					// Array access
 					int arrElemRefNm = exprArrRefNm;
 					Lexer.nextToken();
-					pExpr();
+					int indexType = pExpr();
+					if (indexType == 0) Lexer.error(210); // array index needs a value
 					Lexer.expect(Tk.RBRACKET);
 					E.pop(); // index
 
 					// Check for store
 					if (Tk.type == Tk.ASSIGN) {
 						Lexer.nextToken();
-						pExpr();
+						int rhsType = pExpr();
+						if (rhsType == 0) Lexer.error(210); // assignment rhs needs a value
 						E.pop(); E.pop();
 						E.eASt(type);
 						type = 0;
@@ -518,7 +531,8 @@ public class Expr {
 						E.eb(E.DUP2); E.push(); E.push();
 						E.eALd(type);
 						E.pop();
-						pExpr();
+						int rhsType = pExpr();
+						if (rhsType == 0) Lexer.error(210); // assignment rhs needs a value
 						E.eCO(op); E.pop();
 						E.eNarrow(narrowKind);
 						E.eb(E.DUP_X2); E.push();
@@ -730,7 +744,8 @@ public class Expr {
 				clearRefInfo();
 				return 0;
 			}
-			pExpr();
+			int sizeType = pExpr();
+			if (sizeType == 0) Lexer.error(210); // array size needs a value
 			Lexer.expect(Tk.RBRACKET);
 
 			int arrType = primArrKind(elemType);
@@ -747,7 +762,8 @@ public class Expr {
 					clearRefInfo();
 					return 2; // reference array
 				}
-				pExpr();
+				int sizeType2 = pExpr();
+				if (sizeType2 == 0) Lexer.error(210); // array size needs a value
 				Lexer.expect(Tk.RBRACKET);
 				int cpIdx = E.aCP(0);
 				E.eOp(E.MULTIANEWARRAY, cpIdx);
@@ -781,7 +797,8 @@ public class Expr {
 				clearRefInfo();
 				return 0;
 			}
-			pExpr();
+			int refSizeType = pExpr();
+			if (refSizeType == 0) Lexer.error(210); // array size needs a value
 			Lexer.expect(Tk.RBRACKET);
 
 			int ci = Resolver.fClsByNm(classNm);
@@ -790,7 +807,8 @@ public class Expr {
 			// Check for 2D
 			if (Tk.type == Tk.LBRACKET) {
 				Lexer.nextToken();
-				pExpr();
+				int sizeType2 = pExpr();
+				if (sizeType2 == 0) Lexer.error(210); // array size needs a value
 				Lexer.expect(Tk.RBRACKET);
 				E.eOp(E.MULTIANEWARRAY, cpIdx);
 				E.eb(2);
@@ -896,7 +914,8 @@ public class Expr {
 		if (Tk.type == Tk.ASSIGN) {
 			Lexer.nextToken();
 			if (k == 1) E.ethis();
-			pExpr();
+			int rhsType = pExpr();
+			if (rhsType == 0) Lexer.error(210); // assignment rhs needs a value
 			chkImplicitNarrow(n);
 			if (k == 0) { E.eNarrow(n); E.edup(); E.eSt(i, t); E.pop(); return fRetType(t, refNm, n); }
 			if (k == 2) {
@@ -910,21 +929,32 @@ public class Expr {
 		if (Tk.type >= Tk.PLUS_EQ && Tk.type <= Tk.USHR_EQ) {
 			int op = Tk.type; Lexer.nextToken();
 			if (k == 0) {
-				E.eLd(i, t); E.push(); pExpr(); E.eCO(op); E.pop();
+				E.eLd(i, t); E.push();
+				int rhsType = pExpr();
+				if (rhsType == 0) Lexer.error(210); // assignment rhs needs a value
+				E.eCO(op); E.pop();
 				E.eNarrow(n); E.edup(); E.eSt(i, t); E.pop(); return fRetType(t, refNm, n);
 			}
 			if (k == 1) {
 				E.ethis(); E.ethis(); E.eOp(E.GETFIELD, i);
-				pExpr(); E.eCO(op); E.pop();
+				int rhsType = pExpr();
+				if (rhsType == 0) Lexer.error(210); // assignment rhs needs a value
+				E.eCO(op); E.pop();
 				E.eNarrow(n);
 				E.eOp(E.PUTFIELD, i); E.pop(); E.pop(); return 0;
 			}
 			if (k == 2) {
-				E.eOp(E.GETSTATIC, i); E.push(); pExpr(); E.eCO(op); E.pop();
+				E.eOp(E.GETSTATIC, i); E.push();
+				int rhsType = pExpr();
+				if (rhsType == 0) Lexer.error(210); // assignment rhs needs a value
+				E.eCO(op); E.pop();
 				E.eNarrow(n); E.edup(); E.eOp(E.PUTSTATIC, i); E.pop(); return storedType(t, arr, refNm, n);
 			}
 			// k == 3: obj already on stack
-			E.edup(); E.eOp(E.GETFIELD, i); pExpr(); E.eCO(op); E.pop();
+			E.edup(); E.eOp(E.GETFIELD, i);
+			int rhsType = pExpr();
+			if (rhsType == 0) Lexer.error(210); // assignment rhs needs a value
+			E.eCO(op); E.pop();
 			E.eNarrow(n);
 			E.eOp(E.PUTFIELD, i); E.pop(); E.pop(); return 0;
 		}
@@ -979,7 +1009,9 @@ public class Expr {
 	static int pArgs(int start) {
 		int argc = start;
 		while (Tk.type != Tk.RPAREN && Tk.type != Tk.EOF) {
-			pExpr(); argc++;
+			int argType = pExpr();
+			if (argType == 0) Lexer.error(210); // call argument needs a value
+			argc++;
 			if (Tk.type == Tk.COMMA) Lexer.nextToken();
 		}
 		Lexer.expect(Tk.RPAREN);

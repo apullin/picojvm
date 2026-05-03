@@ -23,11 +23,13 @@ public class Catalog {
 
 	static boolean isBuiltinType(int nm) {
 		return nm == C.N_OBJECT || nm == C.N_STRING || nm == C.N_NATIVE ||
+			   nm == C.N_STRING_BUILDER || nm == C.N_STRING_BUILDER_SIMPLE ||
 			   nm == C.N_PJ_NATIVE ||
 			   nm == C.N_THROWABLE || nm == C.N_EXCEPTION || nm == C.N_RUNTIME_EX;
 	}
 
 	static int resolveTypeNm(int nm) {
+		if (nm == C.N_STRING_BUILDER_SIMPLE) return C.N_STRING_BUILDER;
 		if (isBuiltinType(nm)) return nm;
 		for (int i = impCount - 1; i >= 0; i--) {
 			if (impSimple[i] == nm) return impFull[i];
@@ -227,6 +229,8 @@ public class Catalog {
 	static boolean sigVarargs;
 	static int sigFixedArgs;
 	static boolean sigOneStringArray;
+	static short[] sigTmp = new short[C.MAX_CALL_ARGS];
+	static int sigTmpC;
 
 	static int primArrKind(int typeTok) {
 		if (typeTok == Tk.BYTE) return 4;
@@ -444,6 +448,10 @@ public class Catalog {
 
 		scanParamShape(isStat);
 		C.mArgC[mi] = (byte)sigArgc;
+		if (C.sigCount + sigTmpC > C.MAX_SIG_PARAMS) Lexer.error(258);
+		C.mSigS[mi] = (short)C.sigCount;
+		C.mSigC[mi] = (byte)sigTmpC;
+		for (int i = 0; i < sigTmpC; i++) C.sigParam[C.sigCount++] = sigTmp[i];
 		if (!isCtor && isStat && nm == C.N_MAIN) C.mMainStrArgs[mi] = sigOneStringArray;
 		if (sigVarargs) {
 			C.mVarargs[mi] = true;
@@ -477,10 +485,36 @@ public class Catalog {
 		sigVarargs = false;
 		sigFixedArgs = 0;
 		sigOneStringArray = false;
+		sigTmpC = 0;
 		int userArgc = 0;
 		boolean firstIsStringArray = false;
 		while (Tk.type != Tk.RPAREN && Tk.type != Tk.EOF) {
 			skipTy();
+			if (sigTmpC < C.MAX_CALL_ARGS) {
+				short sc;
+				if (Catalog.tyDims == 0) {
+					if (Catalog.tyBase == 1) {
+						if (Catalog.tyNarrow == C.NK_BYTE) sc = C.SIG_BYTE;
+						else if (Catalog.tyNarrow == C.NK_CHAR) sc = C.SIG_CHAR;
+						else if (Catalog.tyNarrow == C.NK_SHORT) sc = C.SIG_SHORT;
+						else if (Catalog.tyNarrow == C.NK_BOOL) sc = C.SIG_BOOL;
+						else sc = C.SIG_INT;
+					} else {
+						sc = (short)Catalog.tyRefNm;
+					}
+				} else if (Catalog.tyBase == 2 && Catalog.tyDims == 1) {
+					sc = (short)(C.SIG_OBJ_ARRAY_BASE + Catalog.tyRefNm);
+				} else if (Catalog.tyBase == 1 && Catalog.tyDims == 1) {
+					if (Catalog.tyArrKind == 4) sc = C.SIG_BYTE_ARR;
+					else if (Catalog.tyArrKind == 5) sc = C.SIG_CHAR_ARR;
+					else if (Catalog.tyArrKind == 8) sc = C.SIG_SHORT_ARR;
+					else if (Catalog.tyArrKind == 9) sc = C.SIG_BOOL_ARR;
+					else sc = C.SIG_INT_ARR;
+				} else {
+					sc = (short)(C.SIG_OBJ_ARRAY_BASE + C.N_OBJECT);
+				}
+				sigTmp[sigTmpC++] = sc;
+			}
 			boolean isStringArray = Catalog.tyBase == 2 && Catalog.tyRefNm == C.N_STRING &&
 									Catalog.tyDims == 1;
 			if (Tk.type == Tk.ELLIPSIS) {

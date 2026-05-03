@@ -12,10 +12,15 @@ class C {
 	static final int MAX_LOCALS   = 64;
 	static final int MAX_EXC      = 32;
 	static final int MAX_VTABLE   = 128;
+	static final int MAX_SIG_PARAMS = 1024;
+	static final int MAX_CALL_ARGS = 16;
 	static final int MAX_INT_CONST= 80;
 	static final int MAX_STR_CONST= 96;
 	static final int MAX_VA_SLOTS = 8;
 	static final int NK_NONE = 0, NK_BYTE = 1, NK_CHAR = 2, NK_SHORT = 3, NK_BOOL = 4;
+	static final short SIG_NULL = -1, SIG_INT = -2, SIG_BYTE = -3, SIG_CHAR = -4, SIG_SHORT = -5, SIG_BOOL = -6;
+	static final short SIG_INT_ARR = -10, SIG_BYTE_ARR = -11, SIG_CHAR_ARR = -12, SIG_SHORT_ARR = -13, SIG_BOOL_ARR = -14;
+	static final int SIG_OBJ_ARRAY_BASE = 4096;
 
 	// --- Name pool (interning) ---
 	static byte[] nPool = new byte[MAX_NAME_POOL];
@@ -36,6 +41,7 @@ class C {
 	static final int N_CONST = 33;
 	static final int N_PJ_NATIVE = 34;
 	static final int N_TERM_INFO = 35, N_KEY_READ = 36, N_TICKS = 37;
+	static final int N_STRING_BUILDER_SIMPLE = 38, N_STRING_BUILDER = 39, N_APPEND = 40;
 
 	// --- Class table ---
 	static int cCount;
@@ -96,12 +102,16 @@ class C {
 	static boolean[] mVarargs    = new boolean[MAX_METHODS];
 	static boolean[] mMainStrArgs = new boolean[MAX_METHODS];
 	static byte[] mFixedArgs = new byte[MAX_METHODS];
+	static short[] mSigS = new short[MAX_METHODS];
+	static byte[] mSigC = new byte[MAX_METHODS];
 	static int[] mBodyS = new int[MAX_METHODS]; // source pos (must be int: >32KB sources)
 	static int[] mBodyE   = new int[MAX_METHODS]; // source pos (must be int: >32KB sources)
 		static byte[] mRetT   = new byte[MAX_METHODS]; // 0=void,1=int-like scalar,2=reference/array
 		static byte[] mRetNarrow = new byte[MAX_METHODS]; // scalar narrow kind, or array kind when mRetT==2
 		static short[] mRetRefNm = new short[MAX_METHODS]; // declared ref return type or object[] element type, -1 if unknown/non-ref
 	static int mainMi;
+	static short[] sigParam = new short[MAX_SIG_PARAMS];
+	static int sigCount;
 
 	// --- CP resolution table (16-bit entries, stored as lo/hi byte arrays) ---
 	static byte[] cpEnt = new byte[MAX_CP];
@@ -232,7 +242,8 @@ class C {
 			"fileOpen", "fileReadByte", "fileWriteByte", "fileRead",
 			"fileWrite", "fileClose", "fileDelete",
 			"length", "charAt", "equals", "toString", "hashCode", "args",
-			"Const", "pj.Native", "termInfo", "keyRead", "ticks"
+			"Const", "pj.Native", "termInfo", "keyRead", "ticks",
+			"StringBuilder", "java.lang.StringBuilder", "append"
 		};
 		for (int i = 0; i < seeds.length; i++) iStr(seeds[i]);
 	}
@@ -324,6 +335,7 @@ class C {
 			mRetRefNm[mi] = (short)-1;
 			mVarargs[mi] = false; mFixedArgs[mi] = 0;
 			mMainStrArgs[mi] = false;
+			mSigS[mi] = 0; mSigC[mi] = 0;
 			return mi;
 		}
 
@@ -339,7 +351,7 @@ class C {
 	// ==================== BUILTIN CLASSES/METHODS ====================
 
 	static void initBuiltins() {
-		cCount = 0; mCount = 0; fCount = 0;
+		cCount = 0; mCount = 0; fCount = 0; sigCount = 0;
 		natTable = new int[] {
 			N_PUTCHAR, packNat(0, 1, 0),
 			N_IN, packNat(1, 1, 1),

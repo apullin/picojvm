@@ -257,9 +257,63 @@ public class Resolver {
 			   (allowCtor || !C.mIsCtor[mi]);
 	}
 
+	static boolean sigFits(int mi, short[] sig, int sigC, boolean exact) {
+		if (sigC < 0 || C.mSigC[mi] == 0 || (!exact && C.mVarargs[mi])) return true;
+		if ((C.mSigC[mi] & 0xFF) != sigC) return false;
+		int s = C.mSigS[mi] & 0xFFFF;
+		for (int i = 0; i < sigC; i++) {
+			short expect = C.sigParam[s + i];
+			short actual = sig[i];
+			if (expect == actual) continue;
+			if (exact) return false;
+			boolean expectRef = expect >= 0 || expect == C.SIG_NULL || expect >= C.SIG_OBJ_ARRAY_BASE ||
+				expect == C.SIG_INT_ARR || expect == C.SIG_BYTE_ARR || expect == C.SIG_CHAR_ARR ||
+				expect == C.SIG_SHORT_ARR || expect == C.SIG_BOOL_ARR;
+			boolean actualRef = actual >= 0 || actual == C.SIG_NULL || actual >= C.SIG_OBJ_ARRAY_BASE ||
+				actual == C.SIG_INT_ARR || actual == C.SIG_BYTE_ARR || actual == C.SIG_CHAR_ARR ||
+				actual == C.SIG_SHORT_ARR || actual == C.SIG_BOOL_ARR;
+			boolean actualScalar = actual == C.SIG_INT || actual == C.SIG_BYTE || actual == C.SIG_CHAR ||
+				actual == C.SIG_SHORT || actual == C.SIG_BOOL;
+			if (actual == C.SIG_NULL && expectRef) continue;
+			if (expect == C.N_OBJECT && actualRef) continue;
+			if (expect >= 0 && expect < C.SIG_OBJ_ARRAY_BASE &&
+				actual >= 0 && actual < C.SIG_OBJ_ARRAY_BASE) {
+				int srcCi = fClsByNm(actual);
+				int dstCi = fClsByNm(expect);
+				if (srcCi >= 0 && dstCi >= 0) {
+					boolean ok = false;
+					for (int ci = srcCi; ci >= 0; ci = C.cParent[ci]) {
+						if (ci == dstCi) { ok = true; break; }
+					}
+					if (!ok && C.cIsIface[dstCi]) {
+						for (int ci = srcCi; ci >= 0 && !ok; ci = C.cParent[ci]) {
+							int start = C.cIfaceS[ci];
+							for (int j = 0; j < C.cIfaceC[ci]; j++) {
+								if (C.ifList[start + j] == dstCi) { ok = true; break; }
+							}
+						}
+					}
+					if (ok) continue;
+				}
+			}
+			if (expect == C.SIG_INT && actualScalar && actual != C.SIG_BOOL) continue;
+			return false;
+		}
+		return true;
+	}
+
 	// Shared call matching: keep staticness, arity, and varargs rules in one place.
 	static boolean sameSig(int mi, int mj) {
-		return C.mName[mi] == C.mName[mj] && C.mArgC[mi] == C.mArgC[mj];
+		if (C.mName[mi] != C.mName[mj] || C.mArgC[mi] != C.mArgC[mj]) return false;
+		int ci = C.mSigC[mi] & 0xFF;
+		int cj = C.mSigC[mj] & 0xFF;
+		if (ci != cj) return false;
+		int si = C.mSigS[mi] & 0xFFFF;
+		int sj = C.mSigS[mj] & 0xFFFF;
+		for (int i = 0; i < ci; i++) {
+			if (C.sigParam[si + i] != C.sigParam[sj + i]) return false;
+		}
+		return true;
 	}
 
 	static boolean argcFits(int mi, int argc) {
@@ -295,16 +349,22 @@ public class Resolver {
 	// Exact declaration lookup for emit-time body matching; calls use fMethodExact/fCallTarget.
 	static int fDeclaredMethod(int ci, int nm, boolean isStatic, int argc) {
 		for (int mi = 0; mi < C.mCount; mi++) {
-			if (declShapeFits(mi, ci, nm, isStatic, argc, false, false)) {
+			if (declShapeFits(mi, ci, nm, isStatic, argc, false, false) &&
+				sigFits(mi, Catalog.sigTmp, Catalog.sigTmpC, true)) {
 				return mi;
 			}
 		}
 		return -1;
 	}
 
+	static boolean sigFromCatalog;
+
 	static int fCtor(int ci, int argc) {
+		short[] sig = sigFromCatalog ? Catalog.sigTmp : Expr.lastArgSig;
+		int sigC = sigFromCatalog ? Catalog.sigTmpC : Expr.lastArgSigC;
 		for (int mi = 0; mi < C.mCount; mi++) {
-			if (declShapeFits(mi, ci, C.N_INIT, false, argc, false, true)) {
+			if (declShapeFits(mi, ci, C.N_INIT, false, argc, false, true) &&
+				sigFits(mi, sig, sigC, true)) {
 				return mi;
 			}
 		}
@@ -328,6 +388,23 @@ public class Resolver {
 		if (mi >= 0 && callShapeFits(mi, methodNm, isStatic, argc)) return mi;
 		int ci = fClsByNm(ownerNm);
 		if (ci < 0) return -1;
-		return fMethodExact(ci, methodNm, isStatic, argc);
+		for (int pass = 0; pass < 2; pass++) {
+			int walkCi = ci;
+			boolean exact = pass == 0;
+			while (walkCi >= 0) {
+				int varargsMi = -1;
+				for (mi = 0; mi < C.mCount; mi++) {
+					if (C.mClass[mi] != walkCi || !callShapeFits(mi, methodNm, isStatic, argc) ||
+						!sigFits(mi, Expr.lastArgSig, Expr.lastArgSigC, exact)) {
+						continue;
+					}
+					if (!C.mVarargs[mi]) return mi;
+					if (varargsMi < 0) varargsMi = mi;
+				}
+				if (varargsMi >= 0) return varargsMi;
+				walkCi = C.cParent[walkCi];
+			}
+		}
+		return -1;
 	}
 }

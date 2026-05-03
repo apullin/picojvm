@@ -465,7 +465,6 @@ point.  All arithmetic is 32-bit integer.
 - Multi-catch (`catch (A | B e)`)
 - Try-with-resources
 - Auto-boxing
-- String concatenation with `+` (no `StringBuilder`)
 - `assert`
 
 ### 4.7 Supported (Advanced)
@@ -478,8 +477,9 @@ These features go beyond the minimal Java subset and are fully implemented:
 - **For-each loops**: `for (int x : arr)` — desugars to indexed loop with ARRAYLENGTH + xALOAD.
 - **`final` field inlining**: `static final int X = 42;` → references emit `BIPUSH 42` instead of `GETSTATIC`.
 - **File I/O**: `Native.fileOpen/fileReadByte/fileWriteByte/fileRead/fileWrite/fileClose/fileDelete` — enables disk-backed compilation on 8085.
-- **Method overloading**: Arity-aware dispatch with varargs fallback.
+- **Method overloading**: Signature-aware dispatch with exact-match preference and varargs fallback.
 - **Narrow type validation**: Compile-time rejection of invalid implicit narrowing (byte/short/char overflow).
+- **String concatenation with `+`**: Lowered to minimal `java.lang.StringBuilder` chains.
 
 ### 4.8 String Handling
 
@@ -495,6 +495,12 @@ constants are interned (same literal = same reference).  Available methods:
 
 String switch works through hashCode + lookupswitch + equals (standard javac
 pattern).
+
+`String +` is supported when bytecode uses Java-8-style inline
+`StringBuilder` lowering. With system `javac`, use `-source 8 -target 8`; if a
+newer toolchain still emits `invokedynamic StringConcatFactory`, add
+`-XDstringConcat=inline`. Java-9-style invokedynamic concat is not supported by
+picoJVM.
 
 ---
 

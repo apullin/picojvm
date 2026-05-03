@@ -15,6 +15,10 @@ public class Expr {
 	static int exprNarrow = C.NK_NONE; // exact scalar kind when known, else int-like
 	static boolean exprConst;
 	static int exprConstVal;
+	static short[] argSigStack = new short[C.MAX_CALL_ARGS * 8];
+	static int argSigDepth;
+	static short[] lastArgSig = new short[C.MAX_CALL_ARGS];
+	static int lastArgSigC;
 
 	// Expression result bookkeeping: the parser threads exact ref/narrow info forward.
 	static void clearRefInfo() {
@@ -377,15 +381,30 @@ public class Expr {
 
 	static int pBin(int minPrec) {
 		int type = pUnary();
+		boolean stringBuild = false;
 		while (true) {
 			int info = binInfo(Tk.type);
 			if (info < 0) break;
-			if (type == 0) Lexer.error(210); // binary operator operand needs a value
 			int prec = info >> 8;
 			if (prec < minPrec) break;
-			int opcode = info & 0xFF;
 			int tok = Tk.type;
+			if (stringBuild && tok != Tk.PLUS) {
+				lastArgSigC = 0;
+				int mi = Resolver.fCallTarget(C.N_STRING_BUILDER, C.N_TOSTRING, false, 1);
+				if (mi < 0) Lexer.error(205);
+				emitInvoke(mi, E.INVOKEVIRTUAL, 1);
+				E.pop();
+				E.push();
+				setObjRef(C.N_STRING);
+				type = 2;
+				stringBuild = false;
+				continue;
+			}
+			if (type == 0) Lexer.error(210); // binary operator operand needs a value
+			int opcode = info & 0xFF;
 			int lhsType = type;
+			int lhsRefNm = exprRefNm;
+			int lhsArrRefNm = exprArrRefNm;
 			int lhsNarrow = exprNarrow;
 			boolean lhsConst = exprConst;
 			int lhsVal = exprConstVal;
@@ -403,54 +422,114 @@ public class Expr {
 				E.mark(lbl1); E.mark(lbl2);
 				type = 1;
 				setScalarKind(C.NK_BOOL);
-				} else if (prec == 6) {
-					// Equality: ==, !=
-					int rtype = pBin(prec + 1);
-					if (rtype == 0) Lexer.error(210); // operator operand needs a value
-					boolean lhsRef = lhsType >= 2;
-					boolean rhsRef = rtype >= 2;
-					if (lhsRef || rhsRef) {
-						if (!lhsRef || !rhsRef) Lexer.error(211); // don't mix scalar and reference equality
-					} else if ((lhsType == 1 && lhsNarrow == C.NK_BOOL) != (rtype == 1 && exprNarrow == C.NK_BOOL)) {
-						Lexer.error(211); // don't mix boolean and integer equality
+			} else if (prec == 6) {
+				// Equality: ==, !=
+				int rtype = pBin(prec + 1);
+				if (rtype == 0) Lexer.error(210); // operator operand needs a value
+				boolean lhsRef = lhsType >= 2;
+				boolean rhsRef = rtype >= 2;
+				if (lhsRef || rhsRef) {
+					if (!lhsRef || !rhsRef) Lexer.error(211); // don't mix scalar and reference equality
+				} else if ((lhsType == 1 && lhsNarrow == C.NK_BOOL) != (rtype == 1 && exprNarrow == C.NK_BOOL)) {
+					Lexer.error(211); // don't mix boolean and integer equality
+				}
+				E.pop(); E.pop();
+				if (lhsRef) E.cmpBool(tok == Tk.EQ ? 0xA5 : 0xA6);
+				else E.cmpBool(tok == Tk.EQ ? 0x9F : 0xA0);
+				type = 1;
+				setScalarKind(C.NK_BOOL);
+			} else if (tok == Tk.INSTANCEOF) {
+				if (lhsType < 2) Lexer.error(211); // instanceof needs a reference lhs
+				int classNm = Catalog.parseTypeNm();
+				E.pop();
+				int ci = Resolver.fClsByNm(classNm);
+				int cpIdx = E.aCP(ci >= 0 ? ci : 0);
+				E.eOp(E.INSTANCEOF, cpIdx); E.push();
+				type = 1;
+				setScalarKind(C.NK_BOOL);
+			} else if (prec == 7) {
+				// Comparison: <, >, <=, >=
+				int rhsType = pBin(prec + 1);
+				if (rhsType == 0) Lexer.error(210); // operator operand needs a value
+				if (lhsType != 1 || lhsNarrow == C.NK_BOOL || rhsType != 1 || exprNarrow == C.NK_BOOL) Lexer.error(211); // ordering needs int-like scalars
+				E.pop(); E.pop();
+				E.cmpBool(opcode);
+				type = 1;
+				setScalarKind(C.NK_BOOL);
+			} else {
+				// Standard: |, ^, &, <<, >>, >>>, +, -, *, /, %
+				int rhsType = pBin(prec + 1);
+				if (rhsType == 0) Lexer.error(210); // operator operand needs a value
+				int rhsRefNm = exprRefNm;
+				int rhsArrRefNm = exprArrRefNm;
+				int rhsNarrow = exprNarrow;
+				boolean lhsBool = lhsType == 1 && lhsNarrow == C.NK_BOOL;
+				boolean rhsBool = rhsType == 1 && rhsNarrow == C.NK_BOOL;
+				if (tok == Tk.PLUS && (stringBuild || (lhsType == 2 && lhsRefNm == C.N_STRING) || (rhsType == 2 && rhsRefNm == C.N_STRING))) {
+					int lhsSlot = -1, rhsSlot = -1;
+					if (!stringBuild) {
+						boolean rref = rhsType != 1;
+						int rnm = C.iStr(rref ? "$sbr1" : "$sbi1");
+						int rli = E.fLoc(rnm);
+						if (rli < 0) { E.aLoc(rnm, rref ? 1 : 0, rref ? C.N_OBJECT : -1, C.NK_NONE); rli = E.fLoc(rnm); }
+						rhsSlot = C.locSlot[rli];
+						E.eSt(rhsSlot, rref ? 1 : 0); E.pop();
+
+						boolean lref = lhsType != 1;
+						int lnm = C.iStr(lref ? "$sbr0" : "$sbi0");
+						int lli = E.fLoc(lnm);
+						if (lli < 0) { E.aLoc(lnm, lref ? 1 : 0, lref ? C.N_OBJECT : -1, C.NK_NONE); lli = E.fLoc(lnm); }
+						lhsSlot = C.locSlot[lli];
+						E.eSt(lhsSlot, lref ? 1 : 0); E.pop();
+
+						int sbCi = Resolver.fClsByNm(C.N_STRING_BUILDER);
+						if (sbCi < 0) Lexer.error(205);
+						E.eOp(E.NEW, E.aCP(sbCi)); E.push(); E.edup();
+						lastArgSigC = 0;
+						Resolver.sigFromCatalog = false;
+						int ctorMi = Resolver.fCtor(sbCi, 1);
+						if (ctorMi < 0) Lexer.error(205);
+						E.eOp(E.INVOKESPECIAL, E.aCP(ctorMi));
+						E.pop();
 					}
-					E.pop(); E.pop();
-					if (lhsRef) E.cmpBool(tok == Tk.EQ ? 0xA5 : 0xA6);
-					else
-						E.cmpBool(tok == Tk.EQ ? 0x9F : 0xA0);
-					type = 1;
-					setScalarKind(C.NK_BOOL);
-				} else if (tok == Tk.INSTANCEOF) {
-					if (lhsType < 2) Lexer.error(211); // instanceof needs a reference lhs
-					int classNm = Catalog.parseTypeNm();
-					E.pop();
-					int ci = Resolver.fClsByNm(classNm);
-					int cpIdx = E.aCP(ci >= 0 ? ci : 0);
-					E.eOp(E.INSTANCEOF, cpIdx); E.push();
-					type = 1;
-					setScalarKind(C.NK_BOOL);
-				} else if (prec == 7) {
-					// Comparison: <, >, <=, >=
-					int rhsType = pBin(prec + 1);
-					if (rhsType == 0) Lexer.error(210); // operator operand needs a value
-					if (lhsType != 1 || lhsNarrow == C.NK_BOOL || rhsType != 1 || exprNarrow == C.NK_BOOL) Lexer.error(211); // ordering needs int-like scalars
-					E.pop(); E.pop();
-					E.cmpBool(opcode);
-					type = 1;
-					setScalarKind(C.NK_BOOL);
-				} else {
-					// Standard: |, ^, &, <<, >>, >>>, +, -, *, /, %
-					int rhsType = pBin(prec + 1);
-					if (rhsType == 0) Lexer.error(210); // operator operand needs a value
-					int rhsNarrow = exprNarrow;
-					boolean lhsBool = lhsType == 1 && lhsNarrow == C.NK_BOOL;
-					boolean rhsBool = rhsType == 1 && rhsNarrow == C.NK_BOOL;
-					if (tok == Tk.PIPE || tok == Tk.CARET || tok == Tk.AMP) {
-						if (lhsType != 1 || rhsType != 1) Lexer.error(211); // bitwise ops need scalar operands
-						if (lhsBool != rhsBool) Lexer.error(211); // don't mix boolean and integer bitwise ops
-					} else if (lhsType != 1 || lhsNarrow == C.NK_BOOL || rhsType != 1 || rhsNarrow == C.NK_BOOL) {
-						Lexer.error(211); // arithmetic ops need int-like scalars
+					int appendCount = stringBuild ? 1 : 2;
+					for (int ai = 0; ai < appendCount; ai++) {
+						int aType = (stringBuild || ai == 1) ? rhsType : lhsType;
+						int aRef = (stringBuild || ai == 1) ? rhsRefNm : lhsRefNm;
+						int aArr = (stringBuild || ai == 1) ? rhsArrRefNm : lhsArrRefNm;
+						int aNarrow = (stringBuild || ai == 1) ? rhsNarrow : lhsNarrow;
+						if (!stringBuild) {
+							int slot = ai == 0 ? lhsSlot : rhsSlot;
+							E.eLd(slot, aType != 1 ? 1 : 0);
+							E.push();
+						}
+						if (aType == 1) {
+							if (aNarrow == C.NK_BYTE) lastArgSig[0] = C.SIG_BYTE;
+							else if (aNarrow == C.NK_CHAR) lastArgSig[0] = C.SIG_CHAR;
+							else if (aNarrow == C.NK_SHORT) lastArgSig[0] = C.SIG_SHORT;
+							else if (aNarrow == C.NK_BOOL) lastArgSig[0] = C.SIG_BOOL;
+							else lastArgSig[0] = C.SIG_INT;
+						} else if (aType == 2) {
+							if (aArr >= 0) lastArgSig[0] = (short)(C.SIG_OBJ_ARRAY_BASE + aArr);
+							else if (aRef == -2) lastArgSig[0] = C.SIG_NULL;
+							else lastArgSig[0] = (short)(aRef >= 0 ? aRef : C.N_OBJECT);
+						} else if (aType == 4) lastArgSig[0] = C.SIG_BYTE_ARR;
+						else if (aType == 5) lastArgSig[0] = C.SIG_CHAR_ARR;
+						else if (aType == 8) lastArgSig[0] = C.SIG_SHORT_ARR;
+						else if (aType == 9) lastArgSig[0] = C.SIG_BOOL_ARR;
+						else lastArgSig[0] = C.SIG_INT_ARR;
+						lastArgSigC = 1;
+						int ami = Resolver.fCallTarget(C.N_STRING_BUILDER, C.N_APPEND, false, 2);
+						if (ami < 0) Lexer.error(205);
+						emitInvoke(ami, E.INVOKEVIRTUAL, 2);
+						E.pop(); E.pop(); E.push();
 					}
+					stringBuild = true;
+					type = 2;
+					setObjRef(C.N_STRING_BUILDER);
+				} else if (tok == Tk.PIPE || tok == Tk.CARET || tok == Tk.AMP) {
+					if (lhsType != 1 || rhsType != 1) Lexer.error(211); // bitwise ops need scalar operands
+					if (lhsBool != rhsBool) Lexer.error(211); // don't mix boolean and integer bitwise ops
 					E.pop();
 					E.eb(opcode);
 					if (lhsConst && exprConst) {
@@ -458,7 +537,18 @@ public class Expr {
 						if (tok == Tk.PIPE) setConstInt(lhsVal | rhsVal, lhsBool ? C.NK_BOOL : C.NK_NONE);
 						else if (tok == Tk.CARET) setConstInt(lhsVal ^ rhsVal, lhsBool ? C.NK_BOOL : C.NK_NONE);
 						else if (tok == Tk.AMP) setConstInt(lhsVal & rhsVal, lhsBool ? C.NK_BOOL : C.NK_NONE);
-						else if (tok == Tk.SHL) setConstInt(lhsVal << rhsVal, C.NK_NONE);
+						else clearRefInfo();
+					} else if (lhsBool && rhsBool) setScalarKind(C.NK_BOOL);
+					else setScalarKind(C.NK_NONE);
+				} else {
+					if (lhsType != 1 || lhsNarrow == C.NK_BOOL || rhsType != 1 || rhsNarrow == C.NK_BOOL) {
+						Lexer.error(211); // arithmetic ops need int-like scalars
+					}
+					E.pop();
+					E.eb(opcode);
+					if (lhsConst && exprConst) {
+						int rhsVal = exprConstVal;
+						if (tok == Tk.SHL) setConstInt(lhsVal << rhsVal, C.NK_NONE);
 						else if (tok == Tk.SHR) setConstInt(lhsVal >> rhsVal, C.NK_NONE);
 						else if (tok == Tk.USHR) setConstInt(lhsVal >>> rhsVal, C.NK_NONE);
 						else if (tok == Tk.PLUS) setConstInt(lhsVal + rhsVal, C.NK_NONE);
@@ -467,11 +557,21 @@ public class Expr {
 						else if (tok == Tk.SLASH && rhsVal != 0) setConstInt(lhsVal / rhsVal, C.NK_NONE);
 						else if (tok == Tk.PERCENT && rhsVal != 0) setConstInt(lhsVal % rhsVal, C.NK_NONE);
 						else clearRefInfo();
-					} else if (lhsBool && rhsBool) setScalarKind(C.NK_BOOL);
-					else setScalarKind(C.NK_NONE);
+					} else setScalarKind(C.NK_NONE);
 				}
 			}
-			return type;
+		}
+		if (stringBuild) {
+			lastArgSigC = 0;
+			int mi = Resolver.fCallTarget(C.N_STRING_BUILDER, C.N_TOSTRING, false, 1);
+			if (mi < 0) Lexer.error(205);
+			emitInvoke(mi, E.INVOKEVIRTUAL, 1);
+			E.pop();
+			E.push();
+			setObjRef(C.N_STRING);
+			type = 2;
+		}
+		return type;
 	}
 
 	static int pUnary() {
@@ -955,6 +1055,7 @@ public class Expr {
 		int argc = pArgs(1); // 'this' counts
 
 		// Find constructor: prefer argc match, fall back to any ctor
+		Resolver.sigFromCatalog = false;
 		int ctorMi = Resolver.fCtor(ci, argc);
 		if (ctorMi < 0) {
 			for (int mi = 0; mi < C.mCount; mi++) {
@@ -1142,13 +1243,40 @@ public class Expr {
 
 	static int pArgs(int start) {
 		int argc = start;
+		int depth = argSigDepth++;
+		if (depth >= 8) Lexer.error(257);
+		int base = depth * C.MAX_CALL_ARGS;
+		int sigC = 0;
 		while (Tk.type != Tk.RPAREN && Tk.type != Tk.EOF) {
 			int argType = pExpr();
 			if (argType == 0) Lexer.error(210); // call argument needs a value
+			if (sigC < C.MAX_CALL_ARGS) {
+				short sc;
+				if (argType == 1) {
+					if (exprNarrow == C.NK_BYTE) sc = C.SIG_BYTE;
+					else if (exprNarrow == C.NK_CHAR) sc = C.SIG_CHAR;
+					else if (exprNarrow == C.NK_SHORT) sc = C.SIG_SHORT;
+					else if (exprNarrow == C.NK_BOOL) sc = C.SIG_BOOL;
+					else sc = C.SIG_INT;
+				} else if (argType == 2) {
+					if (exprArrRefNm >= 0) sc = (short)(C.SIG_OBJ_ARRAY_BASE + exprArrRefNm);
+					else if (exprRefNm == -2) sc = C.SIG_NULL;
+					else sc = (short)(exprRefNm >= 0 ? exprRefNm : C.N_OBJECT);
+				} else if (argType == 4) sc = C.SIG_BYTE_ARR;
+				else if (argType == 5) sc = C.SIG_CHAR_ARR;
+				else if (argType == 8) sc = C.SIG_SHORT_ARR;
+				else if (argType == 9) sc = C.SIG_BOOL_ARR;
+				else sc = C.SIG_INT_ARR;
+				argSigStack[base + sigC] = sc;
+				sigC++;
+			}
 			argc++;
 			if (Tk.type == Tk.COMMA) Lexer.nextToken();
 		}
 		Lexer.expect(Tk.RPAREN);
+		lastArgSigC = sigC;
+		for (int i = 0; i < sigC; i++) lastArgSig[i] = argSigStack[base + i];
+		argSigDepth--;
 		return argc;
 	}
 

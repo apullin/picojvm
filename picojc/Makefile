@@ -16,6 +16,7 @@ EXPDIR  = expected
 NEGDIR  = tests-negative
 PKGDIR  = tests-pkg
 PICOJSE_DIR = ../pj
+JAVA_LANG_DIR = ../java/lang
 PICOJSE_TESTDIR = ../tests
 
 # All compiler source files
@@ -397,6 +398,28 @@ test-disk-picojse-std: $(PICOJVM) $(BUILDDIR)/picojc-disk.pjvm
 		false; \
 	fi
 
+test-disk-picojse-string-concat: $(PICOJVM) $(BUILDDIR)/picojc-disk.pjvm
+	@mkdir -p $(BUILDDIR)/disk_picojse_string_concat
+	@cp $(PICOJSE_DIR)/Native.java $(BUILDDIR)/disk_picojse_string_concat/
+	@cp $(JAVA_LANG_DIR)/StringBuilder.java $(BUILDDIR)/disk_picojse_string_concat/
+	@cp $(PICOJSE_DIR)/io/Console.java $(BUILDDIR)/disk_picojse_string_concat/
+	@cp $(PICOJSE_DIR)/io/TextWriter.java $(BUILDDIR)/disk_picojse_string_concat/
+	@cp $(PICOJSE_TESTDIR)/StringConcatSmoke.java $(BUILDDIR)/disk_picojse_string_concat/
+	@printf 'Native.java\nStringBuilder.java\nConsole.java\nTextWriter.java\nStringConcatSmoke.java\n' > $(BUILDDIR)/disk_picojse_string_concat/sources.lst
+	@echo "--- picoJSE StringConcatSmoke (disk package) ---"
+	@cd $(BUILDDIR)/disk_picojse_string_concat && $(DISK_PICOJVM) $(DISK_COMPILER) > StringConcatSmoke.pjvm \
+		2> StringConcatSmoke_compile.log
+	@$(PICOJVM) $(BUILDDIR)/disk_picojse_string_concat/StringConcatSmoke.pjvm > $(BUILDDIR)/disk_picojse_string_concat/StringConcatSmoke.out \
+		2> $(BUILDDIR)/disk_picojse_string_concat/StringConcatSmoke_run.log || true
+	@if diff -q $(BUILDDIR)/disk_picojse_string_concat/StringConcatSmoke.out $(EXPDIR)/StringConcatSmoke.txt > /dev/null 2>&1; then \
+		echo "PASS: picoJSE StringConcatSmoke (disk package)"; \
+	else \
+		echo "FAIL: picoJSE StringConcatSmoke (disk package)"; \
+		echo "  Expected:"; cat $(EXPDIR)/StringConcatSmoke.txt | head -3; \
+		echo "  Got:"; cat $(BUILDDIR)/disk_picojse_string_concat/StringConcatSmoke.out | head -3; \
+		false; \
+	fi
+
 test-disk-picojse-archive: $(PICOJVM) $(BUILDDIR)/picojc-disk.pjvm
 	@mkdir -p $(BUILDDIR)/disk_picojse_archive
 	@cp $(PICOJSE_DIR)/Native.java $(BUILDDIR)/disk_picojse_archive/
@@ -648,7 +671,7 @@ test-disk-picojse-tools-arc: $(PICOJVM) $(BUILDDIR)/picojc-disk.pjvm $(BUILDDIR)
 		false; \
 	fi
 
-test-disk-picojse: test-disk-picojse-term test-disk-picojse-io test-disk-picojse-std test-disk-picojse-archive test-disk-picojse-zip test-disk-picojse-tools-tar test-disk-picojse-tools-zip test-disk-picojse-tools-arc
+test-disk-picojse: test-disk-picojse-term test-disk-picojse-io test-disk-picojse-std test-disk-picojse-string-concat test-disk-picojse-archive test-disk-picojse-zip test-disk-picojse-tools-tar test-disk-picojse-tools-zip test-disk-picojse-tools-arc
 
 # Disk selfhost: compile compiler sources via sources.lst, verify byte-identical to memory mode
 test-disk-selfhost: $(PICOJVM) $(BUILDDIR)/picojc-disk.pjvm $(BUILDDIR)/gen1.pjvm
@@ -786,7 +809,7 @@ test-all: test test-negative test-selfhost test-disk test-disk-multi test-disk-p
 clean:
 	rm -rf $(BUILDDIR)
 
-.PHONY: all test test-negative test-all build check-javac clean test-disk test-disk-multi test-disk-package test-disk-picojse test-disk-picojse-term test-disk-picojse-io test-disk-picojse-std test-disk-picojse-archive test-disk-picojse-zip test-disk-picojse-tools-tar test-disk-picojse-tools-zip test-disk-picojse-tools-arc test-disk-selfhost
+.PHONY: all test test-negative test-all build check-javac clean test-disk test-disk-multi test-disk-package test-disk-picojse test-disk-picojse-term test-disk-picojse-io test-disk-picojse-std test-disk-picojse-string-concat test-disk-picojse-archive test-disk-picojse-zip test-disk-picojse-tools-tar test-disk-picojse-tools-zip test-disk-picojse-tools-arc test-disk-selfhost
 .PHONY: test-selfhost test-selfhost-fixpoint test-binmatch test-gen1
 .PRECIOUS: $(BUILDDIR)/%.pjvm $(BUILDDIR)/%.out
 .PRECIOUS: $(BUILDDIR)/gen1_%.pjvm $(BUILDDIR)/gen1_%.out

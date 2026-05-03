@@ -77,6 +77,7 @@ without reprogrammable tile sets.
 
 Implemented:
 
+- `java.lang.StringBuilder`
 - `pj.Native`
 - `pj.archive.Tar`
 - `pj.archive.Zip`
@@ -97,6 +98,7 @@ Implemented:
   - `TermSmoke`
   - `FilesSmoke`
   - `PicoJseStdSmoke`
+  - `StringConcatSmoke`
   - `TarSmoke`
   - `ZipSmoke`
 - manual host demo:
@@ -110,9 +112,20 @@ Implemented:
 - self-hosted `picojc` multi-file package validation:
   - `make test-disk-picojse`
   - compiles the real `pj.*` sources plus `TermSmoke` / `FilesSmoke` /
-    `PicoJseStdSmoke` / `TarSmoke` / `ZipSmoke` /
+    `PicoJseStdSmoke` / `StringConcatSmoke` / `TarSmoke` / `ZipSmoke` /
     `PJTar` / `PJUntar` / `PJZip` / `PJUnzip`
   - runs the resulting programs under `picoJVM`
+
+Notes:
+
+- `StringBuilder` is intentionally minimal: constructors plus the append
+  overloads used by Java 8 string-concat lowering. `append(Object)` currently
+  emits `"null"` or `"<object>"`; picoJVM does not yet have a real
+  `java.lang.Object.toString()` virtual baseline.
+- Build Java sources with Java-8-style string concat, e.g.
+  `javac -source 8 -target 8`. If a host toolchain emits Java 9+
+  `invokedynamic` concat anyway, force inline lowering with
+  `-XDstringConcat=inline`.
 
 Still missing:
 

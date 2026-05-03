@@ -150,7 +150,9 @@ class E {
 	static void eMem(int ci) {
 		if (Catalog.parseMods()) { eStatBlock(); return; }
 		if (Catalog.isCtor(ci)) {
-			int mi = Resolver.fCtor(ci, Catalog.peekParamArgc(false));
+			int argc = Catalog.peekParamArgc(false);
+			Resolver.sigFromCatalog = true;
+			int mi = Resolver.fCtor(ci, argc);
 			if (mi >= 0) eMBody(mi);
 			else skipMDecl();
 			return;
@@ -323,6 +325,7 @@ class E {
 				Lexer.expect(Tk.LPAREN);
 				int argc = Expr.pArgs(1);
 				int parentCi = C.cParent[C.curCi];
+				Resolver.sigFromCatalog = false;
 				int targetMi = parentCi >= 0 ? Resolver.fCtor(parentCi, argc) : (argc == 1 ? C.ensNat(C.N_OBJECT, C.N_INIT) : -1);
 				argc = targetMi >= 0 ? Expr.packVarargs(targetMi, argc) : -1;
 				if (targetMi < 0 || argc < 0) { Lexer.error(205); return; }

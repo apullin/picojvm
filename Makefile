@@ -3,6 +3,7 @@ CFLAGS  = -Wall -Wextra -O2
 HOST_VM_DEBUG = -DPJVM_DEBUG_TOOLS
 HOST_VM_OPTS ?=
 JAVAC   = javac
+JAVAC8FLAGS ?= -source 8 -target 8
 PYTHON  = python3
 PICOJVM = ./picojvm
 EXPDIR  = expected
@@ -16,12 +17,13 @@ GC_FRAGMENT_TEST  = $(BUILDDIR)/gc-fragment-test
 GC_EXACT_TEST     = $(BUILDDIR)/gc-exact-test
 
 # Single-class tests
-TESTS_SINGLE = Fib HelloWorld BubbleSort Counter StringTest RomStringTest NativeOpsTest StaticInitTest MultiArrayTest StringSwitchTest ConstTest TermSmoke FilesSmoke PicoJseStdSmoke TarSmoke ZipSmoke ZipDeflateSmoke
+TESTS_SINGLE = Fib HelloWorld BubbleSort Counter StringTest RomStringTest NativeOpsTest StaticInitTest MultiArrayTest StringSwitchTest ConstTest TermSmoke FilesSmoke PicoJseStdSmoke StringConcatSmoke TarSmoke ZipSmoke ZipDeflateSmoke
 TESTS_MULTI  = Shapes Features InterfaceTest ExceptionTest
 TESTS_PAGER  = BigSwitch BigLUT
 ALL_TESTS    = $(TESTS_SINGLE) $(TESTS_MULTI)
 ALL_TESTS_PAGER = $(ALL_TESTS) $(TESTS_PAGER)
-PICOJSE_SRCS = pj/Native.java \
+PICOJSE_SRCS = java/lang/StringBuilder.java \
+               pj/Native.java \
                pj/archive/Tar.java \
                pj/archive/Zip.java \
                pj/archive/ZipRead.java \
@@ -141,9 +143,9 @@ tests/ExceptionTest.pjvm: tests/MyException.class tests/ExceptionTest.class
 tests/MyException.class tests/ExceptionTest.class: tests/ExceptionTest.java tests/Native.java
 	$(JAVAC) -d tests $^
 
-$(BUILDDIR)/picojse.stamp: $(PICOJSE_SRCS) tests/TermSmoke.java tests/FilesSmoke.java tests/TermDemo.java tests/PicoJseStdSmoke.java tests/TarSmoke.java tests/ZipSmoke.java tests/ZipDeflateSmoke.java tests/PJTar.java tests/PJUntar.java tests/PJZip.java tests/PJUnzip.java tests/PJArc.java | $(BUILDDIR)
+$(BUILDDIR)/picojse.stamp: $(PICOJSE_SRCS) tests/TermSmoke.java tests/FilesSmoke.java tests/TermDemo.java tests/PicoJseStdSmoke.java tests/StringConcatSmoke.java tests/TarSmoke.java tests/ZipSmoke.java tests/ZipDeflateSmoke.java tests/PJTar.java tests/PJUntar.java tests/PJZip.java tests/PJUnzip.java tests/PJArc.java | $(BUILDDIR)
 	@mkdir -p $(PICOJSE_CLASSDIR)
-	$(JAVAC) -d $(PICOJSE_CLASSDIR) $(PICOJSE_SRCS) tests/TermSmoke.java tests/FilesSmoke.java tests/TermDemo.java tests/PicoJseStdSmoke.java tests/TarSmoke.java tests/ZipSmoke.java tests/ZipDeflateSmoke.java tests/PJTar.java tests/PJUntar.java tests/PJZip.java tests/PJUnzip.java tests/PJArc.java
+	$(JAVAC) $(JAVAC8FLAGS) -d $(PICOJSE_CLASSDIR) $(PICOJSE_SRCS) tests/TermSmoke.java tests/FilesSmoke.java tests/TermDemo.java tests/PicoJseStdSmoke.java tests/StringConcatSmoke.java tests/TarSmoke.java tests/ZipSmoke.java tests/ZipDeflateSmoke.java tests/PJTar.java tests/PJUntar.java tests/PJZip.java tests/PJUnzip.java tests/PJArc.java
 	@touch $@
 
 tests/TermSmoke.pjvm: $(BUILDDIR)/picojse.stamp
@@ -186,6 +188,15 @@ tests/PicoJseStdSmoke.pjvm: $(BUILDDIR)/picojse.stamp
 		$(PICOJSE_CLASSDIR)/pj/text/Strings.class \
 		$(PICOJSE_CLASSDIR)/pj/util/Bytes.class \
 		$(PICOJSE_CLASSDIR)/pj/util/Ints.class \
+		-o $@ -v
+
+tests/StringConcatSmoke.pjvm: $(BUILDDIR)/picojse.stamp
+	$(PYTHON) pjvmpack.py \
+		$(PICOJSE_CLASSDIR)/StringConcatSmoke.class \
+		$(PICOJSE_CLASSDIR)/java/lang/StringBuilder.class \
+		$(PICOJSE_CLASSDIR)/pj/Native.class \
+		$(PICOJSE_CLASSDIR)/pj/io/Console.class \
+		$(PICOJSE_CLASSDIR)/pj/io/TextWriter.class \
 		-o $@ -v
 
 tests/TarSmoke.pjvm: $(BUILDDIR)/picojse.stamp

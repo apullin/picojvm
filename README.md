@@ -82,6 +82,7 @@ picojc/
   Makefile             Build, test, selfhost, disk modes
 pjvmpack.py            .class to .pjvm packer (bootstrap tool)
 Makefile               picoJVM host build and picoJVM-level tests
+java/                  Minimal java.lang surface supplied by picoJSE
 pj/                    picoJSE Java-side environment (`pj.archive`, `pj.io`, `pj.text`, `pj.term`, `pj.util`)
 ```
 
@@ -91,6 +92,7 @@ pj/                    picoJSE Java-side environment (`pj.archive`, `pj.io`, `pj
 
 Current package roots:
 
+- `java.lang.StringBuilder` — minimal Java-8 string-concat helper
 - `pj.Native` — package-visible native bridge
 - `pj.archive` — archive/container helpers (`Tar` and stored-entry `Zip` today)
 - `pj.io` — routed console/text output plus file and byte/binary helpers

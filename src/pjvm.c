@@ -1054,7 +1054,12 @@ void pjvm_run(PJVMCtx *j) {
             uint8_t et = PROG(p_cd + 2);
             p_cd += 4; /* skip 4-byte header */
             uint16_t dsz = ne;
-            if (et == 1 || et == 2) dsz = (uint16_t)(ne * 2);
+            if (et == PJVM_ELEM_CHAR || et == PJVM_ELEM_SHORT
+#if PJVM_USE_CONST_STRING_ARRAYS
+                || et == PJVM_ELEM_STRING_REF
+#endif
+            )
+                dsz = (uint16_t)(ne * 2);
             else if (et == 3) dsz = (uint16_t)(ne * 4);
             p_cd += dsz;
         }
@@ -1237,8 +1242,19 @@ static void pjvm_exec(void) {
             SPOP32(blo, bhi);
             if (bhi) {
                 /* ROM array: decode 32-bit offset, read via PROG() */
-                uint32_t off = ROM_OFF(bhi, blo) + PJVM_OBJ_HEADER + (uint32_t)alo * 4;
-                spush(PROG16(off), PROG16(off + 2));
+                uint32_t base = ROM_OFF(bhi, blo);
+#if PJVM_USE_CONST_STRING_ARRAYS
+                if (op == OP_AALOAD && PROG(base + 2) == PJVM_ELEM_STRING_REF) {
+                    uint16_t s = PROG16(base + PJVM_OBJ_HEADER + (uint32_t)alo * 2);
+                    if (s == PJVM_CONST_NULL_REF) spush(0, 0);
+                    else spush(s, PJVM_REF_ROM_STRING);
+                } else {
+#endif
+                    uint32_t off = base + PJVM_OBJ_HEADER + (uint32_t)alo * 4;
+                    spush(PROG16(off), PROG16(off + 2));
+#if PJVM_USE_CONST_STRING_ARRAYS
+                }
+#endif
             } else {
                 uint16_t addr = blo + PJVM_OBJ_HEADER + alo * 4;
                 spush(r16(addr), r16((uint16_t)(addr + 2)));

@@ -66,6 +66,8 @@ PJVM_ELEM_BYTE  = 0
 PJVM_ELEM_CHAR  = 1
 PJVM_ELEM_SHORT = 2
 PJVM_ELEM_INT   = 3
+PJVM_ELEM_STRING_REF = 4
+PJVM_CONST_NULL_REF = 0xFFFF
 
 # --- Constant pool tags ---
 CP_UTF8 = 1
@@ -487,8 +489,13 @@ def parse_class(data):
                     for _ in range(num_pairs):
                         ar.u2()  # element_name
                         _skip_annotation_value(ar)
-                    # Annotation type descriptor for @Const is "LConst;"
-                    if type_desc == "LConst;":
+                    # Annotation type descriptor for @Const is "LConst;" in
+                    # the default package, or "L<pkg>/Const;" in a named
+                    # package (e.g. "Lorg/hack80/engine/Const;"). Java
+                    # forbids named-package classes from referencing
+                    # default-package types, so projects that have a
+                    # package structure must put Const in their own package.
+                    if type_desc == "LConst;" or type_desc.endswith("/Const;"):
                         is_const = True
         fields.append((f_access, f_name, f_desc, is_const))
 
@@ -538,7 +545,8 @@ def resolve_method_name(cp, methodref_idx):
 
 # JVM newarray type tags
 _ATYPE = {4: 'Z', 5: 'C', 6: 'F', 7: 'D', 8: 'B', 9: 'S', 10: 'I', 11: 'J'}
-# elem_type encoding for const_data: 0=byte, 1=char, 2=short, 3=int
+# elem_type encoding for const_data: 0=byte, 1=char, 2=short, 3=int,
+# 4=ROM string ref (u16 string index, 0xFFFF=null)
 _ELEM_TYPE = {'B': PJVM_ELEM_BYTE, 'C': PJVM_ELEM_CHAR, 'S': PJVM_ELEM_SHORT,
               'I': PJVM_ELEM_INT, 'Z': PJVM_ELEM_BYTE}
 
@@ -569,13 +577,19 @@ def _extract_const_arrays(cls, cp, static_field_base_slot, verbose=False):
     if clinit_code is None:
         return []
 
-    # Resolve fieldref CP indices to field names
+    def resolve_classref(cp_idx):
+        entry = cp[cp_idx]
+        if entry and entry[0] == "Class":
+            return cp[entry[1]][1]
+        return None
+
+    # Resolve fieldref CP indices to field names/descriptors
     def resolve_fieldref(cp_idx):
         entry = cp[cp_idx]
         if entry and entry[0] == "Fieldref":
             nat = cp[entry[2]]
-            return cp[nat[1]][1]  # field name
-        return None
+            return cp[nat[1]][1], cp[nat[2]][1]
+        return None, None
 
     # Simple bytecode simulation to extract newarray + store patterns
     results = []
@@ -594,6 +608,9 @@ def _extract_const_arrays(cls, cp, static_field_base_slot, verbose=False):
         elif op == 0x02:  # iconst_m1
             last_push_start = i
             stack.append(-1); i += 1
+        elif op == 0x01:  # aconst_null
+            last_push_start = i
+            stack.append(('null',)); i += 1
         elif 0x03 <= op <= 0x08:  # iconst_0..iconst_5
             last_push_start = i
             stack.append(op - 0x03); i += 1
@@ -609,6 +626,8 @@ def _extract_const_arrays(cls, cp, static_field_base_slot, verbose=False):
             entry = cp[cp_idx]
             if entry and entry[0] == "Integer":
                 stack.append(entry[1])
+            elif entry and entry[0] == "String":
+                stack.append(('string', cp[entry[1]][1]))
             else:
                 stack.append(('opaque',))
             i += 2
@@ -618,6 +637,8 @@ def _extract_const_arrays(cls, cp, static_field_base_slot, verbose=False):
             entry = cp[cp_idx]
             if entry and entry[0] == "Integer":
                 stack.append(entry[1])
+            elif entry and entry[0] == "String":
+                stack.append(('string', cp[entry[1]][1]))
             else:
                 stack.append(('opaque',))
             i += 3
@@ -633,6 +654,20 @@ def _extract_const_arrays(cls, cp, static_field_base_slot, verbose=False):
             stack.append(('array', arr_id))
             pending[arr_id] = arr
             i += 2
+        elif op == 0xBD:  # anewarray
+            cp_idx = (bc[i + 1] << 8) | bc[i + 2]
+            class_name = resolve_classref(cp_idx)
+            size = stack.pop() if stack else 0
+            arr_id = len(results) + len(pending)
+            seq_start = last_push_start if last_push_start is not None else i
+            if class_name == "java/lang/String" and isinstance(size, int):
+                arr = {'type': 'Ljava/lang/String;', 'size': size,
+                       'values': [None] * size, 'start': seq_start}
+                stack.append(('array', arr_id))
+                pending[arr_id] = arr
+            else:
+                stack.append(('opaque',))
+            i += 3
         elif op == 0x59:  # dup
             if stack:
                 stack.append(stack[-1])
@@ -677,15 +712,28 @@ def _extract_const_arrays(cls, cp, static_field_base_slot, verbose=False):
                     if 0 <= idx < arr['size']:
                         arr['values'][idx] = val & 0xFFFF
             i += 1
+        elif op == 0x53:  # aastore
+            val = stack.pop() if stack else None
+            idx = stack.pop() if stack else 0
+            aref = stack.pop() if stack else None
+            if isinstance(aref, tuple) and aref[0] == 'array':
+                arr = pending.get(aref[1])
+                if arr and arr['type'] == 'Ljava/lang/String;' and isinstance(idx, int):
+                    if 0 <= idx < arr['size'] and (
+                            isinstance(val, tuple) and val[0] in ('string', 'null')):
+                        arr['values'][idx] = None if val[0] == 'null' else val[1]
+            i += 1
         elif op == 0xB3:  # putstatic
             cp_idx = (bc[i + 1] << 8) | bc[i + 2]
-            field_name = resolve_fieldref(cp_idx)
+            field_name, field_desc = resolve_fieldref(cp_idx)
             val = stack.pop() if stack else None
             if (field_name and field_name in cls.const_fields and
                     isinstance(val, tuple) and val[0] == 'array'):
                 arr = pending.pop(val[1], None)
                 if arr:
                     etype = _ELEM_TYPE.get(arr['type'])
+                    if arr['type'] == 'Ljava/lang/String;' and field_desc == "[Ljava/lang/String;":
+                        etype = PJVM_ELEM_STRING_REF
                     if etype is not None:
                         end_off = i + 3  # past the putstatic
                         results.append((field_name, etype, arr['values'],
@@ -708,7 +756,6 @@ def _extract_const_arrays(cls, cp, static_field_base_slot, verbose=False):
                 0xB6: 3, 0xB7: 3, 0xB8: 3,  # invoke
                 0xB9: 5,  # invokeinterface
                 0xBB: 3,  # new
-                0xBD: 3,  # anewarray
                 0xC0: 3, 0xC1: 3,  # checkcast, instanceof
                 0xC6: 3, 0xC7: 3,  # ifnull, ifnonnull
             }
@@ -1415,6 +1462,22 @@ def pack_pjvm(class_data_list, verbose=False, v2=False, pin_hints=None,
         extracted = _extract_const_arrays(cls, cls.cp, static_field_base.get(name, 0),
                                           verbose=verbose)
         for fname, etype, vals, (bstart, bend) in extracted:
+            if etype == PJVM_ELEM_STRING_REF:
+                string_indices = []
+                for v in vals:
+                    if v is None:
+                        string_indices.append(PJVM_CONST_NULL_REF)
+                    else:
+                        if v in string_constant_dedup:
+                            sc_idx = string_constant_dedup[v]
+                        else:
+                            sc_idx = len(global_string_constants)
+                            global_string_constants.append(v.encode("utf-8"))
+                            string_constant_dedup[v] = sc_idx
+                        if sc_idx >= PJVM_CONST_NULL_REF:
+                            raise ValueError("String constant index collides with @Const null sentinel")
+                        string_indices.append(sc_idx)
+                vals = string_indices
             const_arrays.append((fname, etype, vals, name))
             const_nop_ranges.setdefault(name, []).append((bstart, bend))
 
@@ -1792,7 +1855,7 @@ def pack_pjvm(class_data_list, verbose=False, v2=False, pin_hints=None,
             if etype == 0:  # byte
                 for v in vals:
                     out.append(v & 0xFF)
-            elif etype in (1, 2):  # char/short (2 bytes each)
+            elif etype in (1, 2, PJVM_ELEM_STRING_REF):  # char/short/string-ref (2 bytes each)
                 for v in vals:
                     out.extend(struct.pack("<H", v & 0xFFFF))
             elif etype == 3:  # int (4 bytes each)
@@ -1820,7 +1883,7 @@ def pack_pjvm(class_data_list, verbose=False, v2=False, pin_hints=None,
             print(f"  const_data: {len(const_arrays)} arrays, "
                   f"{len(out) - cd_start} bytes")
             for i, (fname, etype, vals, cname) in enumerate(const_arrays):
-                tnames = ['byte', 'char', 'short', 'int']
+                tnames = ['byte', 'char', 'short', 'int', 'string']
                 print(f"    [{i}] {cname}.{fname}: {tnames[etype]}[{len(vals)}]")
 
     if verbose:

@@ -43,6 +43,9 @@
 #ifndef PJVM_USE_OP_WIDE
 #define PJVM_USE_OP_WIDE PJVM_ENABLE_V4
 #endif
+#ifndef PJVM_USE_CONST_STRING_ARRAYS
+#define PJVM_USE_CONST_STRING_ARRAYS 0
+#endif
 #if PJVM_ENABLE_V4 && defined(PJVM_ASM_HELPERS)
 #error "PJVM_ENABLE_V4 changes PJVMCtx layout; disable 8085 ASM helpers for v4 builds"
 #endif
@@ -114,6 +117,8 @@ typedef uint16_t pjvm_rbo_t;
 #define PJVM_ELEM_CHAR    1
 #define PJVM_ELEM_SHORT   2
 #define PJVM_ELEM_INT     3
+#define PJVM_ELEM_STRING_REF 4
+#define PJVM_CONST_NULL_REF 0xFFFFu
 
 /* object/array memory layout */
 #define PJVM_OBJ_HEADER   4     /* bytes before element data in arrays */

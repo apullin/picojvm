@@ -587,6 +587,9 @@ test-gc-exact: $(GC_EXACT_TEST)
 test-v4: $(PICOJVM_LARGE)
 	$(PYTHON) tests/run_v4_tests.py --picojvm $(abspath $(PICOJVM_LARGE))
 
+test-pjvmpack-package: tests/Fib.class tests/ConstTest.class tests/ConstStringArrayTest.class tests/InterfaceTest.pjvm tests/ExceptionTest.pjvm
+	$(PYTHON) tests/run_pjvmpack_package_tests.py
+
 test-alloc-heavy: $(PICOJVM) tests/AllocHeavyTest.pjvm
 	$(MAKE) --no-print-directory test-AllocHeavyTest
 
@@ -717,6 +720,6 @@ clean:
 .PHONY: FORCE
 .PHONY: all test test-paged test-paged-stress clean sim
 .PHONY: gc-demo-manual gc-demo-allocfail gc-demo-watermark75 gc-demo-return gc-demo-random
-.PHONY: gc-policy-test test-gc-collect test-gc-fragment test-gc-exact test-v4 test-alloc-heavy test-paged-alloc-heavy test-gc-alloc-heavy
+.PHONY: gc-policy-test test-gc-collect test-gc-fragment test-gc-exact test-v4 test-pjvmpack-package test-alloc-heavy test-paged-alloc-heavy test-gc-alloc-heavy
 .PHONY: test-gc-graph test-gc-host-compat test-gc-host-suite test-sim-smoke test-sim-gc-smoke
 .PHONY: test-sim-gc-alloc-heavy test-gc-sim-suite test-gc-suite

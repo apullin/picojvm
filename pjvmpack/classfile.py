@@ -43,6 +43,9 @@ class ClassReader:
         self.pos += 4
         return v
 
+    def skip_u2(self, count=1):
+        self.pos += 2 * count
+
     def read(self, n):
         v = self.data[self.pos:self.pos + n]
         self.pos += n
@@ -56,8 +59,7 @@ def _skip_annotation_value(r):
                ord("J"), ord("S"), ord("Z"), ord("s"), ord("c")):
         r.u2()
     elif tag == ord("e"):
-        r.u2()
-        r.u2()
+        r.skip_u2(2)
     elif tag == ord("@"):
         r.u2()
         npairs = r.u2()
@@ -76,8 +78,7 @@ def parse_class(data):
     magic = r.u4()
     if magic != 0xCAFEBABE:
         raise PackError(f"Bad magic: 0x{magic:08X}")
-    r.u2()
-    r.u2()
+    r.skip_u2(2)
 
     cp_count = r.u2()
     cp = [None]
@@ -129,13 +130,13 @@ def parse_class(data):
             raise PackError(f"Unknown CP tag {tag} at index {i}")
         i += 1
 
-    r.u2()
+    r.skip_u2()
     this_class = r.u2()
     super_class = r.u2()
 
     interfaces_count = r.u2()
     for _ in range(interfaces_count):
-        r.u2()
+        r.skip_u2()
 
     # Field parsing keeps only data needed by the linker plus @Const markers.
     fields = []
@@ -155,7 +156,7 @@ def parse_class(data):
                 for _ in range(ar.u2()):
                     type_desc = cp[ar.u2()][1]
                     for _ in range(ar.u2()):
-                        ar.u2()
+                        ar.skip_u2()
                         _skip_annotation_value(ar)
                     if type_desc == "LConst;" or type_desc.endswith("/Const;"):
                         is_const = True

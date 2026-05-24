@@ -57,6 +57,341 @@ from .model import ClassInfo
 from .resolve import resolve_class_name, resolve_method_name, topological_sort
 
 
+# Standard exception hierarchy synthesized when bytecode references exceptions
+# without shipping full classfiles for them.
+EXCEPTION_HIERARCHY = {
+    "java/lang/Throwable": "java/lang/Object",
+    "java/lang/Exception": "java/lang/Throwable",
+    "java/lang/RuntimeException": "java/lang/Exception",
+    "java/lang/ArithmeticException": "java/lang/RuntimeException",
+    "java/lang/NullPointerException": "java/lang/RuntimeException",
+    "java/lang/ArrayIndexOutOfBoundsException": "java/lang/RuntimeException",
+    "java/lang/IndexOutOfBoundsException": "java/lang/RuntimeException",
+    "java/lang/ClassCastException": "java/lang/RuntimeException",
+    "java/lang/IllegalArgumentException": "java/lang/RuntimeException",
+    "java/lang/StackOverflowError": "java/lang/Throwable",
+}
+
+
+def _exception_classes_needed(classes, class_order):
+    """Return synthetic exception class names referenced by parsed classes."""
+    needed = set()
+    for name in class_order:
+        cls = classes[name]
+        for _m_access, _m_name_idx, _m_desc_idx, code_data in cls.methods_raw:
+            if code_data is None:
+                continue
+            cr = ClassReader(code_data)
+            cr.skip_u2(2)
+            code_length = cr.u4()
+            cr.read(code_length)
+            exc_count = cr.u2()
+            for _ in range(exc_count):
+                cr.skip_u2(3)
+                catch_type = cr.u2()
+                if catch_type != 0:
+                    cname = resolve_class_name(cls.cp, catch_type)
+                    if cname and cname not in classes:
+                        needed.add(cname)
+
+        for cp_idx in range(1, len(cls.cp)):
+            entry = cls.cp[cp_idx]
+            if entry and entry[0] == "Class":
+                cname = cls.cp[entry[1]][1]
+                if cname in EXCEPTION_HIERARCHY and cname not in classes:
+                    needed.add(cname)
+    return needed
+
+
+def _with_exception_parents(classes, exc_classes_needed):
+    """Include parent exception classes required by synthetic exceptions."""
+    needed = set(exc_classes_needed)
+    to_add = set(exc_classes_needed)
+    while to_add:
+        next_add = set()
+        for ename in to_add:
+            parent = EXCEPTION_HIERARCHY.get(ename)
+            if parent and parent != "java/lang/Object" and parent not in classes and parent not in needed:
+                needed.add(parent)
+                next_add.add(parent)
+        to_add = next_add
+    return needed
+
+
+def _sort_synthetic_exceptions(classes, exc_classes_needed):
+    """Sort synthetic exception names so parents precede children."""
+    sorted_exc = []
+    added = set(classes.keys())
+    remaining = set(exc_classes_needed)
+    while remaining:
+        progress = False
+        for ename in list(remaining):
+            parent = EXCEPTION_HIERARCHY.get(ename, "java/lang/Object")
+            if parent == "java/lang/Object" or parent in added:
+                sorted_exc.append(ename)
+                added.add(ename)
+                remaining.discard(ename)
+                progress = True
+        if not progress:
+            sorted_exc.extend(remaining)
+            break
+    return sorted_exc
+
+
+def _synthesize_exception_classes(classes, class_order, verbose=False):
+    """Append minimal synthetic exception classes to classes/class_order."""
+    exc_classes_needed = _with_exception_parents(
+        classes, _exception_classes_needed(classes, class_order))
+    for ename in _sort_synthetic_exceptions(classes, exc_classes_needed):
+        parent = EXCEPTION_HIERARCHY.get(ename, "java/lang/Object")
+        cid = len(class_order)
+        cls = ClassInfo(ename, parent, [], [], [])
+        cls.class_id = cid
+        if parent in classes:
+            cls.parent_class_id = classes[parent].class_id
+        else:
+            cls.parent_class_id = PJVM_NO_CLASS
+        classes[ename] = cls
+        class_order.append(ename)
+        if verbose:
+            print(f"  Synthetic exception class #{cid}: {ename} "
+                  f"(parent_id={cls.parent_class_id})")
+
+    for name in class_order:
+        cls = classes[name]
+        if cls.parent_class_id == PJVM_NO_CLASS and cls.parent_name and cls.parent_name in classes:
+            cls.parent_class_id = classes[cls.parent_name].class_id
+
+
+def _v3_needs_wide(classes, class_order, method_table, main_index,
+                   global_int_constants, global_string_constants,
+                   global_exc_table, cp_bytes, total_vtable_entries):
+    """Return True when selected program metadata cannot fit v3 ids/counts."""
+    if len(method_table) > PJVM_MAX_U8 or main_index > PJVM_MAX_REAL_ID:
+        return True
+    if len(global_int_constants) > PJVM_MAX_U8:
+        return True
+    if len(class_order) > PJVM_MAX_U8:
+        return True
+    if len(global_string_constants) > PJVM_MAX_U8:
+        return True
+    if cp_bytes > PJVM_MAX_U16:
+        return True
+    if total_vtable_entries > PJVM_MAX_VTABLE_ENTRIES_V3:
+        return True
+    for cname in class_order:
+        cls = classes[cname]
+        if cls.parent_class_id != PJVM_NO_CLASS and cls.parent_class_id > PJVM_MAX_REAL_ID:
+            return True
+        if len(cls.all_instance_fields) > PJVM_MAX_U8:
+            return True
+        if len(cls.vtable) > PJVM_MAX_U8:
+            return True
+        if cls.clinit_mi != PJVM_NO_CLINIT and cls.clinit_mi > PJVM_MAX_REAL_ID:
+            return True
+        if any(vt_entry > PJVM_MAX_REAL_ID for vt_entry in cls.vtable):
+            return True
+    for mt in method_table:
+        if mt["max_locals"] > PJVM_MAX_U8 or mt["max_stack"] > PJVM_MAX_U8:
+            return True
+        if mt["arg_count"] > PJVM_MAX_U8:
+            return True
+        if mt["cp_base"] > PJVM_MAX_U16:
+            return True
+        if mt["vtable_slot"] != PJVM_NO_VTABLE and mt["vtable_slot"] > PJVM_MAX_REAL_ID:
+            return True
+        if mt.get("vmid", PJVM_NO_VTABLE) != PJVM_NO_VTABLE and mt["vmid"] > PJVM_MAX_REAL_ID:
+            return True
+        if mt["exc_count"] > PJVM_MAX_U8 or mt["exc_offset_idx"] > PJVM_MAX_U8:
+            return True
+    return any(catch_cid != PJVM_NO_CLASS and catch_cid > PJVM_MAX_REAL_ID
+               for (_start, _end, _handler, catch_cid) in global_exc_table)
+
+
+def _select_format(pjvm_format, pack_method_table, needs_v4):
+    """Resolve user format request into the actual emitted format."""
+    if pjvm_format not in ("auto", "v3", "v4"):
+        raise PackError(f"Unknown .pjvm format: {pjvm_format}")
+    if pjvm_format == "auto":
+        emit_v4 = needs_v4
+    elif pjvm_format == "v4":
+        emit_v4 = True
+    else:
+        if needs_v4:
+            raise PackError(".pjvm v3 limits exceeded; use --format v4")
+        emit_v4 = False
+    if pack_method_table and not emit_v4:
+        raise PackError("packed method tables require .pjvm v4")
+    return emit_v4
+
+
+def _validate_class_limits(classes, class_order, emit_v4):
+    """Validate class-table values against selected format width."""
+    for name in class_order:
+        cls = classes[name]
+        if emit_v4:
+            if cls.parent_class_id != PJVM_NO_CLASS:
+                require_real_id_v4(f"{name} parent class id", cls.parent_class_id)
+            require_u16(f"{name} instance field count", len(cls.all_instance_fields))
+            require_u16(f"{name} vtable size", len(cls.vtable))
+            if cls.clinit_mi != PJVM_NO_CLINIT:
+                require_real_id_v4(f"{name} <clinit> method index", cls.clinit_mi)
+            for vt_entry in cls.vtable:
+                require_real_id_v4(f"{name} vtable method index", vt_entry)
+        else:
+            if cls.parent_class_id != PJVM_NO_CLASS:
+                require_real_id(f"{name} parent class id", cls.parent_class_id)
+            require_u8(f"{name} instance field count", len(cls.all_instance_fields))
+            require_u8(f"{name} vtable size", len(cls.vtable))
+            if cls.clinit_mi != PJVM_NO_CLINIT:
+                require_real_id(f"{name} <clinit> method index", cls.clinit_mi)
+            for vt_entry in cls.vtable:
+                require_real_id(f"{name} vtable method index", vt_entry)
+
+
+def _validate_method_limits(method_table, emit_v4):
+    """Validate method-table values against selected format width."""
+    for i, mt in enumerate(method_table):
+        if emit_v4:
+            require_u16(f"method #{i} max_locals", mt["max_locals"])
+            require_u16(f"method #{i} max_stack", mt["max_stack"])
+            require_u16(f"method #{i} arg_count", mt["arg_count"])
+        else:
+            require_u8(f"method #{i} max_locals", mt["max_locals"])
+            require_u8(f"method #{i} max_stack", mt["max_stack"])
+            require_u8(f"method #{i} arg_count", mt["arg_count"])
+        flags = 0
+        if mt["is_native"]:
+            flags = 1 | (mt["native_id"] << 1)
+        if emit_v4:
+            require_u16(f"method #{i} flags", flags)
+            require_u16(f"method #{i} vtable slot",
+                        0 if mt["vtable_slot"] == PJVM_NO_VTABLE else mt["vtable_slot"])
+            require_u16(f"method #{i} virtual method id",
+                        0 if mt.get("vmid", PJVM_NO_VTABLE) == PJVM_NO_VTABLE else mt["vmid"])
+            require_u16(f"method #{i} exception count", mt["exc_count"])
+            require_u16(f"method #{i} exception offset", mt["exc_offset_idx"])
+        else:
+            require_u8(f"method #{i} flags", flags)
+            require_u16(f"method #{i} cp_base", mt["cp_base"])
+            if mt["vtable_slot"] != PJVM_NO_VTABLE:
+                require_real_id(f"method #{i} vtable slot", mt["vtable_slot"])
+            if mt.get("vmid", PJVM_NO_VTABLE) != PJVM_NO_VTABLE:
+                require_real_id(f"method #{i} virtual method id", mt["vmid"])
+            require_u8(f"method #{i} exception count", mt["exc_count"])
+            require_u8(f"method #{i} exception offset", mt["exc_offset_idx"])
+
+
+def _validate_exception_limits(global_exc_table, emit_v4):
+    """Validate exception catch class ids against selected format width."""
+    for i, (_start, _end, _handler, catch_cid) in enumerate(global_exc_table):
+        if catch_cid != PJVM_NO_CLASS:
+            if emit_v4:
+                require_real_id_v4(f"exception #{i} catch class id", catch_cid)
+            else:
+                require_real_id(f"exception #{i} catch class id", catch_cid)
+
+
+def _validate_and_select_format(pjvm_format, pack_method_table, classes,
+                                class_order, method_table, main_index,
+                                global_int_constants, global_string_constants,
+                                global_cp_resolve, global_exc_table,
+                                total_static_fields):
+    """Check format limits and return ``(emit_v4, cp_bytes)``."""
+    cp_bytes = len(global_cp_resolve) * 2
+    total_vtable_entries = sum(len(classes[name].vtable) for name in class_order)
+    if len(global_int_constants) > 0x8000:
+        raise PackError("Integer constant count exceeds 16-bit CP entry tagging limit")
+    if len(global_string_constants) > 0x8000:
+        raise PackError("String constant count exceeds 16-bit CP entry tagging limit")
+    for i, val in enumerate(global_cp_resolve):
+        require_u16(f"CP resolution entry #{i}", val)
+
+    needs_v4 = _v3_needs_wide(
+        classes, class_order, method_table, main_index,
+        global_int_constants, global_string_constants, global_exc_table,
+        cp_bytes, total_vtable_entries) or pack_method_table
+    emit_v4 = _select_format(pjvm_format, pack_method_table, needs_v4)
+
+    require_u16("static field count", total_static_fields)
+    if emit_v4:
+        if total_vtable_entries > PJVM_MAX_VTABLE_ENTRIES_V4:
+            raise PackError("Total vtable entries exceed .pjvm v4 runtime base limit")
+    elif total_vtable_entries > PJVM_MAX_VTABLE_ENTRIES_V3:
+        raise PackError("Total vtable entries exceed .pjvm v3 runtime base limit")
+
+    _validate_class_limits(classes, class_order, emit_v4)
+    _validate_method_limits(method_table, emit_v4)
+    _validate_exception_limits(global_exc_table, emit_v4)
+    return emit_v4, cp_bytes
+
+
+def _intern_const_string_refs(vals, global_string_constants, string_constant_dedup):
+    """Convert extracted String[] values to const-data string indices."""
+    string_indices = []
+    for value in vals:
+        if value is None:
+            string_indices.append(PJVM_CONST_NULL_REF)
+            continue
+        if value in string_constant_dedup:
+            string_index = string_constant_dedup[value]
+        else:
+            string_index = len(global_string_constants)
+            global_string_constants.append(value.encode("utf-8"))
+            string_constant_dedup[value] = string_index
+        if string_index >= PJVM_CONST_NULL_REF:
+            raise PackError("String constant index collides with @Const null sentinel")
+        string_indices.append(string_index)
+    return string_indices
+
+
+def _extract_program_const_arrays(classes, class_order, static_field_base,
+                                  global_string_constants, string_constant_dedup,
+                                  verbose=False):
+    """Extract all supported @Const arrays and return NOP ranges."""
+    const_arrays = []
+    const_nop_ranges = {}
+    for name in class_order:
+        cls = classes[name]
+        if not cls.const_fields:
+            continue
+        extracted = _extract_const_arrays(cls, cls.cp, static_field_base.get(name, 0),
+                                          verbose=verbose)
+        for fname, etype, vals, (bstart, bend) in extracted:
+            if etype == PJVM_ELEM_STRING_REF:
+                vals = _intern_const_string_refs(
+                    vals, global_string_constants, string_constant_dedup)
+            const_arrays.append((fname, etype, vals, name))
+            const_nop_ranges.setdefault(name, []).append((bstart, bend))
+    return const_arrays, const_nop_ranges
+
+
+def _nop_const_initializers(classes, method_table, const_nop_ranges):
+    """Replace extracted const-array initializer bytecode with NOPs."""
+    for name, ranges in const_nop_ranges.items():
+        cls = classes[name]
+        for mt in method_table:
+            if mt["class_id"] == cls.class_id and mt["name"] == "<clinit>":
+                bc_arr = bytearray(mt["bytecode"])
+                for start, end in ranges:
+                    for offset in range(start, end):
+                        bc_arr[offset] = 0x00
+                mt["bytecode"] = bytes(bc_arr)
+                break
+
+
+def _build_bytecode_section(method_table):
+    """Concatenate non-native method bytecode and assign code offsets."""
+    bytecode_section = bytearray()
+    for mt in method_table:
+        if mt["is_native"]:
+            mt["code_offset"] = 0
+        else:
+            mt["code_offset"] = len(bytecode_section)
+            bytecode_section.extend(mt["bytecode"])
+    return bytecode_section
+
+
 def pack_pjvm(class_data_list, verbose=False, v2=False, pin_hints=None,
               compact_cp=True, pjvm_format="auto",
               pack_method_table=False):  # v2 ignored, v3/v4 only
@@ -90,99 +425,7 @@ def pack_pjvm(class_data_list, verbose=False, v2=False, pin_hints=None,
             print(f"  Class #{cls.class_id}: {name} {parent}")
 
     # Synthesize minimal exception classes referenced by bytecode.
-    # Standard exception hierarchy (parent → child)
-    EXCEPTION_HIERARCHY = {
-        "java/lang/Throwable": "java/lang/Object",
-        "java/lang/Exception": "java/lang/Throwable",
-        "java/lang/RuntimeException": "java/lang/Exception",
-        "java/lang/ArithmeticException": "java/lang/RuntimeException",
-        "java/lang/NullPointerException": "java/lang/RuntimeException",
-        "java/lang/ArrayIndexOutOfBoundsException": "java/lang/RuntimeException",
-        "java/lang/IndexOutOfBoundsException": "java/lang/RuntimeException",
-        "java/lang/ClassCastException": "java/lang/RuntimeException",
-        "java/lang/IllegalArgumentException": "java/lang/RuntimeException",
-        "java/lang/StackOverflowError": "java/lang/Throwable",
-    }
-
-    # Collect all exception class names referenced in exception tables and athrow
-    exc_classes_needed = set()
-    for name in class_order:
-        cls = classes[name]
-        for m_access, m_name_idx, m_desc_idx, code_data in cls.methods_raw:
-            if code_data is None:
-                continue
-            cr = ClassReader(code_data)
-            cr.u2(); cr.u2()  # skip max_stack, max_locals
-            code_length = cr.u4()
-            cr.read(code_length)
-            ec = cr.u2()
-            for _ in range(ec):
-                cr.u2(); cr.u2(); cr.u2()  # start, end, handler
-                catch_type = cr.u2()
-                if catch_type != 0:
-                    cname = resolve_class_name(cls.cp, catch_type)
-                    if cname and cname not in classes:
-                        exc_classes_needed.add(cname)
-
-        # Also check for 'new' of exception classes (for throw new X())
-        for cp_idx in range(1, len(cls.cp)):
-            entry = cls.cp[cp_idx]
-            if entry and entry[0] == "Class":
-                cname = cls.cp[entry[1]][1]
-                if cname in EXCEPTION_HIERARCHY and cname not in classes:
-                    exc_classes_needed.add(cname)
-
-    # Add parent chain classes.
-    to_add = set(exc_classes_needed)
-    while to_add:
-        next_add = set()
-        for ename in to_add:
-            parent = EXCEPTION_HIERARCHY.get(ename)
-            if parent and parent != "java/lang/Object" and parent not in classes and parent not in exc_classes_needed:
-                exc_classes_needed.add(parent)
-                next_add.add(parent)
-        to_add = next_add
-
-    # Create synthetic class entries in dependency order
-    if exc_classes_needed:
-        # Sort so parents come before children
-        sorted_exc = []
-        added = set(classes.keys())
-        remaining = set(exc_classes_needed)
-        while remaining:
-            progress = False
-            for ename in list(remaining):
-                parent = EXCEPTION_HIERARCHY.get(ename, "java/lang/Object")
-                if parent == "java/lang/Object" or parent in added:
-                    sorted_exc.append(ename)
-                    added.add(ename)
-                    remaining.discard(ename)
-                    progress = True
-            if not progress:
-                # Break cycles by just adding remaining
-                sorted_exc.extend(remaining)
-                break
-
-        for ename in sorted_exc:
-            parent = EXCEPTION_HIERARCHY.get(ename, "java/lang/Object")
-            cid = len(class_order)
-            cls = ClassInfo(ename, parent, [], [], [])
-            cls.class_id = cid
-            if parent in classes:
-                cls.parent_class_id = classes[parent].class_id
-            else:
-                cls.parent_class_id = PJVM_NO_CLASS
-            classes[ename] = cls
-            class_order.append(ename)
-            if verbose:
-                print(f"  Synthetic exception class #{cid}: {ename} "
-                      f"(parent_id={cls.parent_class_id})")
-
-    # Re-resolve parent_class_ids now that synthetic classes exist
-    for name in class_order:
-        cls = classes[name]
-        if cls.parent_class_id == PJVM_NO_CLASS and cls.parent_name and cls.parent_name in classes:
-            cls.parent_class_id = classes[cls.parent_name].class_id
+    _synthesize_exception_classes(classes, class_order, verbose=verbose)
 
     # Build instance/static field layouts.
     for name in class_order:
@@ -702,187 +945,19 @@ def pack_pjvm(class_data_list, verbose=False, v2=False, pin_hints=None,
             print(f"    [{i}] start={s} end={e} handler={h} {ct_str}")
 
     # Extract supported @Const arrays from <clinit>.
-    const_arrays = []    # list of (field_name, elem_type, values, class_name)
-    const_nop_ranges = {}  # class_name -> list of (start, end) byte ranges
-    for name in class_order:
-        cls = classes[name]
-        if not cls.const_fields:
-            continue
-        extracted = _extract_const_arrays(cls, cls.cp, static_field_base.get(name, 0),
-                                          verbose=verbose)
-        for fname, etype, vals, (bstart, bend) in extracted:
-            if etype == PJVM_ELEM_STRING_REF:
-                string_indices = []
-                for v in vals:
-                    if v is None:
-                        string_indices.append(PJVM_CONST_NULL_REF)
-                    else:
-                        if v in string_constant_dedup:
-                            sc_idx = string_constant_dedup[v]
-                        else:
-                            sc_idx = len(global_string_constants)
-                            global_string_constants.append(v.encode("utf-8"))
-                            string_constant_dedup[v] = sc_idx
-                        if sc_idx >= PJVM_CONST_NULL_REF:
-                            raise PackError("String constant index collides with @Const null sentinel")
-                        string_indices.append(sc_idx)
-                vals = string_indices
-            const_arrays.append((fname, etype, vals, name))
-            const_nop_ranges.setdefault(name, []).append((bstart, bend))
-
-    # NOP out extracted const init sequences in <clinit> bytecode.
-    if const_nop_ranges:
-        for name, ranges in const_nop_ranges.items():
-            cls = classes[name]
-            for mt in method_table:
-                if mt["class_id"] == cls.class_id and mt["name"] == "<clinit>":
-                    bc_arr = bytearray(mt["bytecode"])
-                    for (s, e) in ranges:
-                        for k in range(s, e):
-                            bc_arr[k] = 0x00  # NOP
-                    mt["bytecode"] = bytes(bc_arr)
-                    break
+    const_arrays, const_nop_ranges = _extract_program_const_arrays(
+        classes, class_order, static_field_base, global_string_constants,
+        string_constant_dedup, verbose=verbose)
+    _nop_const_initializers(classes, method_table, const_nop_ranges)
 
     # Concatenate final method bytecode streams.
-    bytecode_section = bytearray()
-    for mt in method_table:
-        if mt["is_native"]:
-            mt["code_offset"] = 0
-        else:
-            mt["code_offset"] = len(bytecode_section)
-            bytecode_section.extend(mt["bytecode"])
+    bytecode_section = _build_bytecode_section(method_table)
 
     # Validate selected format limits before emitting bytes.
-    if pjvm_format not in ("auto", "v3", "v4"):
-        raise PackError(f"Unknown .pjvm format: {pjvm_format}")
-
-    cp_bytes = len(global_cp_resolve) * 2
-    total_vtable_entries = sum(len(classes[name].vtable) for name in class_order)
-    if len(global_int_constants) > 0x8000:
-        raise PackError("Integer constant count exceeds 16-bit CP entry tagging limit")
-    if len(global_string_constants) > 0x8000:
-        raise PackError("String constant count exceeds 16-bit CP entry tagging limit")
-    for i, val in enumerate(global_cp_resolve):
-        require_u16(f"CP resolution entry #{i}", val)
-
-    def v3_needs_wide():
-        if len(method_table) > PJVM_MAX_U8 or main_index > PJVM_MAX_REAL_ID:
-            return True
-        if len(global_int_constants) > PJVM_MAX_U8:
-            return True
-        if len(class_order) > PJVM_MAX_U8:
-            return True
-        if len(global_string_constants) > PJVM_MAX_U8:
-            return True
-        if cp_bytes > PJVM_MAX_U16:
-            return True
-        if total_vtable_entries > PJVM_MAX_VTABLE_ENTRIES_V3:
-            return True
-        for cname in class_order:
-            c = classes[cname]
-            if c.parent_class_id != PJVM_NO_CLASS and c.parent_class_id > PJVM_MAX_REAL_ID:
-                return True
-            if len(c.all_instance_fields) > PJVM_MAX_U8:
-                return True
-            if len(c.vtable) > PJVM_MAX_U8:
-                return True
-            if c.clinit_mi != PJVM_NO_CLINIT and c.clinit_mi > PJVM_MAX_REAL_ID:
-                return True
-            if any(vt_entry > PJVM_MAX_REAL_ID for vt_entry in c.vtable):
-                return True
-        for mt in method_table:
-            if mt["max_locals"] > PJVM_MAX_U8 or mt["max_stack"] > PJVM_MAX_U8:
-                return True
-            if mt["arg_count"] > PJVM_MAX_U8:
-                return True
-            if mt["cp_base"] > PJVM_MAX_U16:
-                return True
-            if mt["vtable_slot"] != PJVM_NO_VTABLE and mt["vtable_slot"] > PJVM_MAX_REAL_ID:
-                return True
-            if mt.get("vmid", PJVM_NO_VTABLE) != PJVM_NO_VTABLE and mt["vmid"] > PJVM_MAX_REAL_ID:
-                return True
-            if mt["exc_count"] > PJVM_MAX_U8 or mt["exc_offset_idx"] > PJVM_MAX_U8:
-                return True
-        return any(catch_cid != PJVM_NO_CLASS and catch_cid > PJVM_MAX_REAL_ID
-                   for (_start, _end, _handler, catch_cid) in global_exc_table)
-
-    needs_v4 = v3_needs_wide() or pack_method_table
-    if pjvm_format == "auto":
-        emit_v4 = needs_v4
-    elif pjvm_format == "v4":
-        emit_v4 = True
-    else:
-        if needs_v4:
-            raise PackError(".pjvm v3 limits exceeded; use --format v4")
-        emit_v4 = False
-
-    if pack_method_table and not emit_v4:
-        raise PackError("packed method tables require .pjvm v4")
-
-    require_u16("static field count", total_static_fields)
-    if emit_v4:
-        if total_vtable_entries > PJVM_MAX_VTABLE_ENTRIES_V4:
-            raise PackError("Total vtable entries exceed .pjvm v4 runtime base limit")
-    elif total_vtable_entries > PJVM_MAX_VTABLE_ENTRIES_V3:
-        raise PackError("Total vtable entries exceed .pjvm v3 runtime base limit")
-
-    for name in class_order:
-        cls = classes[name]
-        if emit_v4:
-            if cls.parent_class_id != PJVM_NO_CLASS:
-                require_real_id_v4(f"{name} parent class id", cls.parent_class_id)
-            require_u16(f"{name} instance field count", len(cls.all_instance_fields))
-            require_u16(f"{name} vtable size", len(cls.vtable))
-            if cls.clinit_mi != PJVM_NO_CLINIT:
-                require_real_id_v4(f"{name} <clinit> method index", cls.clinit_mi)
-            for vt_entry in cls.vtable:
-                require_real_id_v4(f"{name} vtable method index", vt_entry)
-        else:
-            if cls.parent_class_id != PJVM_NO_CLASS:
-                require_real_id(f"{name} parent class id", cls.parent_class_id)
-            require_u8(f"{name} instance field count", len(cls.all_instance_fields))
-            require_u8(f"{name} vtable size", len(cls.vtable))
-            if cls.clinit_mi != PJVM_NO_CLINIT:
-                require_real_id(f"{name} <clinit> method index", cls.clinit_mi)
-            for vt_entry in cls.vtable:
-                require_real_id(f"{name} vtable method index", vt_entry)
-
-    for i, mt in enumerate(method_table):
-        if emit_v4:
-            require_u16(f"method #{i} max_locals", mt["max_locals"])
-            require_u16(f"method #{i} max_stack", mt["max_stack"])
-            require_u16(f"method #{i} arg_count", mt["arg_count"])
-        else:
-            require_u8(f"method #{i} max_locals", mt["max_locals"])
-            require_u8(f"method #{i} max_stack", mt["max_stack"])
-            require_u8(f"method #{i} arg_count", mt["arg_count"])
-        flags = 0
-        if mt["is_native"]:
-            flags = 1 | (mt["native_id"] << 1)
-        if emit_v4:
-            require_u16(f"method #{i} flags", flags)
-            require_u16(f"method #{i} vtable slot",
-                        0 if mt["vtable_slot"] == PJVM_NO_VTABLE else mt["vtable_slot"])
-            require_u16(f"method #{i} virtual method id",
-                        0 if mt.get("vmid", PJVM_NO_VTABLE) == PJVM_NO_VTABLE else mt["vmid"])
-            require_u16(f"method #{i} exception count", mt["exc_count"])
-            require_u16(f"method #{i} exception offset", mt["exc_offset_idx"])
-        else:
-            require_u8(f"method #{i} flags", flags)
-            require_u16(f"method #{i} cp_base", mt["cp_base"])
-            if mt["vtable_slot"] != PJVM_NO_VTABLE:
-                require_real_id(f"method #{i} vtable slot", mt["vtable_slot"])
-            if mt.get("vmid", PJVM_NO_VTABLE) != PJVM_NO_VTABLE:
-                require_real_id(f"method #{i} virtual method id", mt["vmid"])
-            require_u8(f"method #{i} exception count", mt["exc_count"])
-            require_u8(f"method #{i} exception offset", mt["exc_offset_idx"])
-
-    for i, (_start, _end, _handler, catch_cid) in enumerate(global_exc_table):
-        if catch_cid != PJVM_NO_CLASS:
-            if emit_v4:
-                require_real_id_v4(f"exception #{i} catch class id", catch_cid)
-            else:
-                require_real_id(f"exception #{i} catch class id", catch_cid)
+    emit_v4, cp_bytes = _validate_and_select_format(
+        pjvm_format, pack_method_table, classes, class_order, method_table,
+        main_index, global_int_constants, global_string_constants,
+        global_cp_resolve, global_exc_table, total_static_fields)
 
     out = bytearray()
 

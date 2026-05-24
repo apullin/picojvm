@@ -51,8 +51,7 @@ def extract_const_arrays(cls, cp, _static_field_base_slot=0, verbose=False):
         m_name = cp[m_name_idx][1]
         if m_name == "<clinit>" and code_data is not None:
             cr = ClassReader(code_data)
-            cr.u2()
-            cr.u2()
+            cr.skip_u2(2)
             code_length = cr.u4()
             clinit_code = cr.read(code_length)
             break

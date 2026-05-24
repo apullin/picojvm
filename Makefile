@@ -1,7 +1,7 @@
 CC      = cc
 CFLAGS  = -Wall -Wextra -O2
 HOST_VM_DEBUG = -DPJVM_DEBUG_TOOLS
-HOST_VM_OPTS ?= -DPJVM_USE_CONST_STRING_ARRAYS=1
+HOST_VM_OPTS ?= -DPJVM_USE_CONST_STRING_ARRAYS=1 -DPJVM_USE_CONST_OBJECT_ARRAYS=1
 JAVAC   = javac
 JAVAC8FLAGS ?= -source 8 -target 8
 PYTHON  = python3
@@ -18,7 +18,7 @@ GC_FRAGMENT_TEST  = $(BUILDDIR)/gc-fragment-test
 GC_EXACT_TEST     = $(BUILDDIR)/gc-exact-test
 
 # Single-class tests
-TESTS_SINGLE = Fib HelloWorld BubbleSort Counter StringTest RomStringTest NativeOpsTest StaticInitTest MultiArrayTest StringSwitchTest ConstTest ConstStringArrayTest TermSmoke FilesSmoke PicoJseStdSmoke StringConcatSmoke TarSmoke ZipSmoke ZipDeflateSmoke
+TESTS_SINGLE = Fib HelloWorld BubbleSort Counter StringTest RomStringTest NativeOpsTest StaticInitTest MultiArrayTest StringSwitchTest ConstTest ConstStringArrayTest ConstObjectArrayTest TermSmoke FilesSmoke PicoJseStdSmoke StringConcatSmoke TarSmoke ZipSmoke ZipDeflateSmoke
 TESTS_MULTI  = Shapes Features InterfaceTest ExceptionTest
 TESTS_PAGER  = BigSwitch BigLUT
 ALL_TESTS    = $(TESTS_SINGLE) $(TESTS_MULTI)
@@ -121,6 +121,12 @@ tests/ConstTest.class: tests/ConstTest.java tests/Native.java tests/Const.java
 
 tests/ConstStringArrayTest.class: tests/ConstStringArrayTest.java tests/Native.java tests/Const.java
 	$(JAVAC) -d tests $^
+
+tests/ConstObjectArrayTest.class tests/ConstPoint.class: tests/ConstObjectArrayTest.java tests/Native.java tests/Const.java
+	$(JAVAC) -d tests $^
+
+tests/ConstObjectArrayTest.pjvm: tests/ConstObjectArrayTest.class tests/ConstPoint.class
+	$(PYTHON) pjvmpack.py $^ -o $@ -v
 
 # Pack single-class .pjvm
 tests/%.pjvm: tests/%.class

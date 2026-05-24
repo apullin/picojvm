@@ -20,6 +20,7 @@ PJVM_RF_PACKED_METHOD_TABLE = 0x08
 # CP resolution flags
 PJVM_CP_STR_FLAG = 0x8000
 PJVM_CP_UNRESOLVED = 0xFFFF
+PJVM_REF_ROM_STRING = 0x8000
 
 # Internal sentinels. File-format sentinels are applied only while emitting:
 # v3 uses 0xFF; v4 uses 0xFFFF.
@@ -35,6 +36,7 @@ PJVM_MAX_VTABLE_ENTRIES_V3 = 0x100
 PJVM_MAX_VTABLE_ENTRIES_V4 = 0x10000
 
 # JVM access flags
+ACC_FINAL = 0x0010
 ACC_STATIC = 0x0008
 ACC_NATIVE = 0x0100
 
@@ -44,6 +46,7 @@ PJVM_ELEM_CHAR = 1
 PJVM_ELEM_SHORT = 2
 PJVM_ELEM_INT = 3
 PJVM_ELEM_STRING_REF = 4
+PJVM_ELEM_OBJECT_REF = 5
 PJVM_CONST_NULL_REF = 0xFFFF
 
 # Constant pool tags

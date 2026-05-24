@@ -131,7 +131,17 @@ static uint8_t prog_fetch(uint32_t offset);
 #endif
 #define BC(a) PROG(bc_off + (a))
 #define PROG16(off) ((uint16_t)PROG(off) | ((uint16_t)PROG((off) + 1) << 8))
+#if PJVM_USE_CONST_OBJECT_ARRAYS
 #define ROM_OFF(hi, lo) (((uint32_t)((hi) - 1) << 16) | (lo))
+
+static pjvm_class_id_t pjvm_ref_class_id(uint16_t lo, uint16_t hi) {
+    if (PJVM_REF_IS_ROM_OBJECT(hi))
+        return (pjvm_class_id_t)PROG16(PJVM_ROM_OBJECT_OFF(hi, lo));
+    return (pjvm_class_id_t)r16(lo);
+}
+#else
+#define ROM_OFF(hi, lo) (((uint32_t)((hi) - 1) << 16) | (lo))
+#endif
 
 /* --- paged mode implementation ---------------------------------------- */
 #ifdef PJVM_PAGED
@@ -1061,6 +1071,12 @@ void pjvm_run(PJVMCtx *j) {
             )
                 dsz = (uint16_t)(ne * 2);
             else if (et == 3) dsz = (uint16_t)(ne * 4);
+#if PJVM_USE_CONST_OBJECT_ARRAYS
+            else if (et == PJVM_ELEM_OBJECT_REF) {
+                uint16_t nf = PROG16(p_cd + 2);
+                dsz = (uint16_t)(4 + ne * (uint16_t)(4 + nf * 4));
+            }
+#endif
             p_cd += dsz;
         }
         /* Read init table: n_init entries of (slot:2, lo:2, hi:2) */
@@ -1250,8 +1266,20 @@ static void pjvm_exec(void) {
                     else spush(s, PJVM_REF_ROM_STRING);
                 } else {
 #endif
+#if PJVM_USE_CONST_OBJECT_ARRAYS
+                if (op == OP_AALOAD && PROG(base + 2) == PJVM_ELEM_OBJECT_REF) {
+                    uint16_t nf = PROG16(base + 6);
+                    uint32_t rec = base + 8 + (uint32_t)alo * (uint32_t)(4 + nf * 4);
+                    uint16_t ci = PROG16(rec);
+                    if (ci == PJVM_CONST_NULL_REF) spush(0, 0);
+                    else spush((uint16_t)rec, PJVM_ROM_OBJECT_HI(rec));
+                } else {
+#endif
                     uint32_t off = base + PJVM_OBJ_HEADER + (uint32_t)alo * 4;
                     spush(PROG16(off), PROG16(off + 2));
+#if PJVM_USE_CONST_OBJECT_ARRAYS
+                }
+#endif
 #if PJVM_USE_CONST_STRING_ARRAYS
                 }
 #endif
@@ -1602,14 +1630,34 @@ static void pjvm_exec(void) {
 
         case OP_GETFIELD: {
             uint16_t s = cpread();
+#if PJVM_USE_CONST_OBJECT_ARRAYS
+            SPOP32(alo, ahi);
+            if (PJVM_REF_IS_ROM_OBJECT(ahi)) {
+                uint32_t addr = PJVM_ROM_OBJECT_OFF(ahi, alo) + PJVM_OBJ_HEADER + (uint32_t)s * 4;
+                spush(PROG16(addr), PROG16(addr + 2));
+            } else {
+                uint16_t addr = alo + PJVM_OBJ_HEADER + s * 4;
+                spush(r16(addr), r16((uint16_t)(addr + 2)));
+            }
+#else
             alo = spop_lo();
             uint16_t addr = alo + PJVM_OBJ_HEADER + s * 4;
-            spush(r16(addr), r16((uint16_t)(addr + 2))); break;
+            spush(r16(addr), r16((uint16_t)(addr + 2)));
+#endif
+            break;
         }
         case OP_PUTFIELD: {
             uint16_t s = cpread();
             SPOP32(alo, ahi);
+#if PJVM_USE_CONST_OBJECT_ARRAYS
+            SPOP32(blo, bhi);
+            if (PJVM_REF_IS_ROM_OBJECT(bhi)) {
+                pjvm_platform_trap(OP_PUTFIELD, opc);
+                break;
+            }
+#else
             blo = spop_lo();
+#endif
             uint16_t addr = blo + PJVM_OBJ_HEADER + s * 4;
             w16(addr, alo); w16((uint16_t)(addr + 2), ahi); break;
         }
@@ -1624,8 +1672,13 @@ static void pjvm_exec(void) {
             pjvm_vslot_t vs = m_vs[bmi];
             if (vs == PJVM_NO_VTABLE) { pjvm_inv(bmi); }
             else {
-                uint16_t objref = g_pjvm->stk_lo[g_pjvm->sp - m_ac[bmi]];
-                pjvm_class_id_t ci = (pjvm_class_id_t)r16(objref);
+                uint16_t argi = (uint16_t)(g_pjvm->sp - m_ac[bmi]);
+#if PJVM_USE_CONST_OBJECT_ARRAYS
+                pjvm_class_id_t ci = pjvm_ref_class_id(
+                    g_pjvm->stk_lo[argi], g_pjvm->stk_hi[argi]);
+#else
+                pjvm_class_id_t ci = (pjvm_class_id_t)r16(g_pjvm->stk_lo[argi]);
+#endif
                 pjvm_inv(vt[cls_vb[ci] + vs]);
             }
             break;
@@ -1634,8 +1687,13 @@ static void pjvm_exec(void) {
             pjvm_method_id_t bmi = cpread();
             bcread(); bcread();
             pjvm_vmid_t vid = m_vmid[bmi];
-            uint16_t objref = g_pjvm->stk_lo[g_pjvm->sp - m_ac[bmi]];
-            pjvm_class_id_t ci = (pjvm_class_id_t)r16(objref);
+            uint16_t argi = (uint16_t)(g_pjvm->sp - m_ac[bmi]);
+#if PJVM_USE_CONST_OBJECT_ARRAYS
+            pjvm_class_id_t ci = pjvm_ref_class_id(
+                g_pjvm->stk_lo[argi], g_pjvm->stk_hi[argi]);
+#else
+            pjvm_class_id_t ci = (pjvm_class_id_t)r16(g_pjvm->stk_lo[argi]);
+#endif
             pjvm_method_id_t found = PJVM_NO_VTABLE;
             for (pjvm_count_t k = 0; k < cls_vs[ci]; k++) {
                 if (m_vmid[vt[cls_vb[ci] + k]] == vid) {
@@ -1699,8 +1757,14 @@ static void pjvm_exec(void) {
         case OP_CHECKCAST: {
             pjvm_class_id_t tci = cpread();
             alo = g_pjvm->stk_lo[g_pjvm->sp - 1];
+#if PJVM_USE_CONST_OBJECT_ARRAYS
+            ahi = g_pjvm->stk_hi[g_pjvm->sp - 1];
+            if (alo != 0 || ahi != 0) {
+                pjvm_class_id_t ci = pjvm_ref_class_id(alo, ahi);
+#else
             if (alo != 0) {
                 pjvm_class_id_t ci = (pjvm_class_id_t)r16(alo);
+#endif
                 uint8_t ok = 0;
                 while (ci != PJVM_NO_CLASS) {
                     if (ci == tci) { ok = 1; break; }
@@ -1712,10 +1776,17 @@ static void pjvm_exec(void) {
         }
         case OP_INSTANCEOF: {
             pjvm_class_id_t tci = cpread();
+#if PJVM_USE_CONST_OBJECT_ARRAYS
+            SPOP32(alo, ahi);
+            if (alo == 0 && ahi == 0) { spush(0, 0); }
+            else {
+                pjvm_class_id_t ci = pjvm_ref_class_id(alo, ahi);
+#else
             SPOP_U16(alo);
             if (alo == 0) { spush(0, 0); }
             else {
                 pjvm_class_id_t ci = (pjvm_class_id_t)r16(alo);
+#endif
                 uint8_t match = 0;
                 while (ci != PJVM_NO_CLASS) {
                     if (ci == tci) { match = 1; break; }

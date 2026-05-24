@@ -46,6 +46,9 @@
 #ifndef PJVM_USE_CONST_STRING_ARRAYS
 #define PJVM_USE_CONST_STRING_ARRAYS 0
 #endif
+#ifndef PJVM_USE_CONST_OBJECT_ARRAYS
+#define PJVM_USE_CONST_OBJECT_ARRAYS 0
+#endif
 #if PJVM_ENABLE_V4 && defined(PJVM_ASM_HELPERS)
 #error "PJVM_ENABLE_V4 changes PJVMCtx layout; disable 8085 ASM helpers for v4 builds"
 #endif
@@ -82,8 +85,14 @@
 
 /* Tagged 32-bit refs stored in VM slots.
  * Heap refs use hi=0 and lo=heap address.
- * ROM string refs use hi=0x8000 and lo=string constant index. */
+ * ROM string refs use hi=0x8000 and lo=string constant index.
+ * ROM object refs use hi>=0x8001 and lo/hi encode a program offset. */
 #define PJVM_REF_ROM_STRING  0x8000
+#define PJVM_REF_ROM_OBJECT_BASE 0x8001
+#define PJVM_REF_IS_ROM_OBJECT(hi) ((hi) >= PJVM_REF_ROM_OBJECT_BASE)
+#define PJVM_ROM_OBJECT_HI(off) ((uint16_t)(PJVM_REF_ROM_OBJECT_BASE + ((off) >> 16)))
+#define PJVM_ROM_OBJECT_OFF(hi, lo) \
+    ((((uint32_t)((hi) - PJVM_REF_ROM_OBJECT_BASE)) << 16) | (lo))
 
 /* sentinel values */
 #if PJVM_ENABLE_V4
@@ -118,6 +127,7 @@ typedef uint16_t pjvm_rbo_t;
 #define PJVM_ELEM_SHORT   2
 #define PJVM_ELEM_INT     3
 #define PJVM_ELEM_STRING_REF 4
+#define PJVM_ELEM_OBJECT_REF 5
 #define PJVM_CONST_NULL_REF 0xFFFFu
 
 /* object/array memory layout */

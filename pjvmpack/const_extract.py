@@ -2,14 +2,42 @@
 
 import struct
 
+from .bytecode import (
+    FIXED_OPCODE_LENGTHS,
+    OP_AASTORE,
+    OP_ACONST_NULL,
+    OP_ANEWARRAY,
+    OP_BASTORE,
+    OP_BIPUSH,
+    OP_CASTORE,
+    OP_DUP,
+    OP_ICONST_0,
+    OP_ICONST_5,
+    OP_ICONST_M1,
+    OP_IASTORE,
+    OP_LDC,
+    OP_LDC_W,
+    OP_NEW,
+    OP_NEWARRAY,
+    OP_NOP,
+    OP_PUTSTATIC,
+    OP_RETURN,
+    OP_SASTORE,
+    OP_SIPUSH,
+    OP_INVOKESPECIAL,
+)
 from .classfile import ClassReader
 from .constants import (
     PJVM_ELEM_BYTE,
     PJVM_ELEM_CHAR,
     PJVM_ELEM_INT,
+    PJVM_ELEM_OBJECT_REF,
     PJVM_ELEM_SHORT,
     PJVM_ELEM_STRING_REF,
 )
+from .descriptors import argument_descriptors
+from .errors import PackError
+from .resolve import resolve_method_name
 
 _ATYPE = {4: "Z", 5: "C", 6: "F", 7: "D", 8: "B", 9: "S", 10: "I", 11: "J"}
 _ELEM_TYPE = {
@@ -32,8 +60,9 @@ def _resolve_fieldref(cp, cp_idx):
     entry = cp[cp_idx]
     if entry and entry[0] == "Fieldref":
         nat = cp[entry[2]]
-        return cp[nat[1]][1], cp[nat[2]][1]
-    return None, None
+        class_name = _resolve_classref(cp, entry[1])
+        return class_name, cp[nat[1]][1], cp[nat[2]][1]
+    return None, None, None
 
 
 def extract_const_arrays(cls, cp, _static_field_base_slot=0, verbose=False):
@@ -66,33 +95,34 @@ def extract_const_arrays(cls, cp, _static_field_base_slot=0, verbose=False):
     pending = {}
     stack = []
     last_push_start = None
+    next_new_id = 0
 
     while i < n:
         op = bc[i]
 
-        if op == 0x00:
+        if op == OP_NOP:
             i += 1
-        elif op == 0x02:
+        elif op == OP_ICONST_M1:
             last_push_start = i
             stack.append(-1)
             i += 1
-        elif op == 0x01:
+        elif op == OP_ACONST_NULL:
             last_push_start = i
             stack.append(("null",))
             i += 1
-        elif 0x03 <= op <= 0x08:
+        elif OP_ICONST_0 <= op <= OP_ICONST_5:
             last_push_start = i
-            stack.append(op - 0x03)
+            stack.append(op - OP_ICONST_0)
             i += 1
-        elif op == 0x10:
+        elif op == OP_BIPUSH:
             last_push_start = i
             stack.append(struct.unpack_from(">b", bc, i + 1)[0])
             i += 2
-        elif op == 0x11:
+        elif op == OP_SIPUSH:
             last_push_start = i
             stack.append(struct.unpack_from(">h", bc, i + 1)[0])
             i += 3
-        elif op == 0x12:
+        elif op == OP_LDC:
             last_push_start = i
             cp_idx = bc[i + 1]
             entry = cp[cp_idx]
@@ -103,7 +133,7 @@ def extract_const_arrays(cls, cp, _static_field_base_slot=0, verbose=False):
             else:
                 stack.append(("opaque",))
             i += 2
-        elif op == 0x13:
+        elif op == OP_LDC_W:
             last_push_start = i
             cp_idx = (bc[i + 1] << 8) | bc[i + 2]
             entry = cp[cp_idx]
@@ -114,7 +144,7 @@ def extract_const_arrays(cls, cp, _static_field_base_slot=0, verbose=False):
             else:
                 stack.append(("opaque",))
             i += 3
-        elif op == 0xBC:
+        elif op == OP_NEWARRAY:
             atype = bc[i + 1]
             size = stack.pop() if stack else 0
             type_char = _ATYPE.get(atype, "?")
@@ -129,7 +159,7 @@ def extract_const_arrays(cls, cp, _static_field_base_slot=0, verbose=False):
             stack.append(("array", arr_id))
             pending[arr_id] = arr
             i += 2
-        elif op == 0xBD:
+        elif op == OP_ANEWARRAY:
             cp_idx = (bc[i + 1] << 8) | bc[i + 2]
             class_name = _resolve_classref(cp, cp_idx)
             size = stack.pop() if stack else 0
@@ -138,6 +168,19 @@ def extract_const_arrays(cls, cp, _static_field_base_slot=0, verbose=False):
             if class_name == "java/lang/String" and isinstance(size, int):
                 arr = {
                     "type": "Ljava/lang/String;",
+                    "class_name": class_name,
+                    "kind": "string",
+                    "size": size,
+                    "values": [None] * size,
+                    "start": seq_start,
+                }
+                stack.append(("array", arr_id))
+                pending[arr_id] = arr
+            elif class_name and isinstance(size, int):
+                arr = {
+                    "type": f"L{class_name};",
+                    "class_name": class_name,
+                    "kind": "object",
                     "size": size,
                     "values": [None] * size,
                     "start": seq_start,
@@ -147,11 +190,39 @@ def extract_const_arrays(cls, cp, _static_field_base_slot=0, verbose=False):
             else:
                 stack.append(("opaque",))
             i += 3
-        elif op == 0x59:
+        elif op == OP_DUP:
             if stack:
                 stack.append(stack[-1])
             i += 1
-        elif op in (0x4F, 0x54, 0x55, 0x56):
+        elif op == OP_NEW:
+            cp_idx = (bc[i + 1] << 8) | bc[i + 2]
+            class_name = _resolve_classref(cp, cp_idx)
+            stack.append(("new", class_name, next_new_id))
+            next_new_id += 1
+            i += 3
+        elif op == OP_INVOKESPECIAL:
+            cp_idx = (bc[i + 1] << 8) | bc[i + 2]
+            method_class, method_name, method_desc = resolve_method_name(cp, cp_idx)
+            args = []
+            try:
+                arg_descs = argument_descriptors(method_desc)
+            except PackError:
+                arg_descs = None
+            if method_name == "<init>" and arg_descs is not None:
+                for _ in arg_descs:
+                    args.append(stack.pop() if stack else ("opaque",))
+                args.reverse()
+                objref = stack.pop() if stack else None
+                if (isinstance(objref, tuple) and objref[0] == "new" and
+                        objref[1] == method_class):
+                    obj = ("object", method_class, method_desc, tuple(args))
+                    stack = [obj if item == objref else item for item in stack]
+                else:
+                    stack.clear()
+            else:
+                stack.clear()
+            i += 3
+        elif op in (OP_IASTORE, OP_BASTORE, OP_CASTORE, OP_SASTORE):
             val = stack.pop() if stack else 0
             idx = stack.pop() if stack else 0
             aref = stack.pop() if stack else None
@@ -160,39 +231,53 @@ def extract_const_arrays(cls, cp, _static_field_base_slot=0, verbose=False):
                 if arr and isinstance(idx, int) and isinstance(val, int):
                     if 0 <= idx < arr["size"]:
                         mask = {
-                            0x4F: 0xFFFFFFFF,
-                            0x54: 0xFF,
-                            0x55: 0xFFFF,
-                            0x56: 0xFFFF,
+                            OP_IASTORE: 0xFFFFFFFF,
+                            OP_BASTORE: 0xFF,
+                            OP_CASTORE: 0xFFFF,
+                            OP_SASTORE: 0xFFFF,
                         }[op]
                         arr["values"][idx] = val & mask
             i += 1
-        elif op == 0x53:
+        elif op == OP_AASTORE:
             val = stack.pop() if stack else None
             idx = stack.pop() if stack else 0
             aref = stack.pop() if stack else None
             if isinstance(aref, tuple) and aref[0] == "array":
                 arr = pending.get(aref[1])
-                if arr and arr["type"] == "Ljava/lang/String;" and isinstance(idx, int):
+                if arr and arr["kind"] == "string" and isinstance(idx, int):
                     if 0 <= idx < arr["size"] and (
                             isinstance(val, tuple) and val[0] in ("string", "null")):
                         arr["values"][idx] = None if val[0] == "null" else val[1]
+                elif arr and arr["kind"] == "object" and isinstance(idx, int):
+                    if 0 <= idx < arr["size"]:
+                        if isinstance(val, tuple) and val[0] == "null":
+                            arr["values"][idx] = None
+                        elif (isinstance(val, tuple) and val[0] == "object" and
+                              val[1] == arr["class_name"]):
+                            arr["values"][idx] = {
+                                "class_name": val[1],
+                                "constructor": val[2],
+                                "args": list(val[3]),
+                            }
             i += 1
-        elif op == 0xB3:
+        elif op == OP_PUTSTATIC:
             cp_idx = (bc[i + 1] << 8) | bc[i + 2]
-            field_name, field_desc = _resolve_fieldref(cp, cp_idx)
+            _field_class, field_name, field_desc = _resolve_fieldref(cp, cp_idx)
             val = stack.pop() if stack else None
             if (field_name and field_name in cls.const_fields and
                     isinstance(val, tuple) and val[0] == "array"):
                 arr = pending.pop(val[1], None)
                 if arr:
                     etype = _ELEM_TYPE.get(arr["type"])
-                    if arr["type"] == "Ljava/lang/String;" and field_desc == "[Ljava/lang/String;":
+                    if arr.get("kind") == "string" and field_desc == "[Ljava/lang/String;":
                         etype = PJVM_ELEM_STRING_REF
+                    elif arr.get("kind") == "object" and field_desc == f"[{arr['type']}":
+                        etype = PJVM_ELEM_OBJECT_REF
                     if etype is not None:
                         end_off = i + 3
+                        values = arr if etype == PJVM_ELEM_OBJECT_REF else arr["values"]
                         results.append(
-                            (field_name, etype, arr["values"], (arr["start"], end_off))
+                            (field_name, etype, values, (arr["start"], end_off))
                         )
                         if verbose:
                             print(
@@ -201,22 +286,10 @@ def extract_const_arrays(cls, cp, _static_field_base_slot=0, verbose=False):
                                 f"({end_off - arr['start']}B clinit code)"
                             )
             i += 3
-        elif op == 0xB1:
+        elif op == OP_RETURN:
             i += 1
         else:
-            op_len = {
-                0x15: 2, 0x19: 2, 0x36: 2, 0x3A: 2, 0x84: 3,
-                0xA7: 3,
-                0x99: 3, 0x9A: 3, 0x9B: 3, 0x9C: 3, 0x9D: 3, 0x9E: 3,
-                0x9F: 3, 0xA0: 3, 0xA1: 3, 0xA2: 3, 0xA3: 3, 0xA4: 3,
-                0xB2: 3, 0xB4: 3, 0xB5: 3,
-                0xB6: 3, 0xB7: 3, 0xB8: 3,
-                0xB9: 5,
-                0xBB: 3,
-                0xC0: 3, 0xC1: 3,
-                0xC6: 3, 0xC7: 3,
-            }.get(op, 1)
             stack.clear()
-            i += op_len
+            i += FIXED_OPCODE_LENGTHS[op]
 
     return results

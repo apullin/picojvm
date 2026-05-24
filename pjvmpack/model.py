@@ -67,6 +67,7 @@ class ClassInfo:
     const_fields: set = field(default_factory=set)
     own_instance_fields: list = field(default_factory=list)
     all_instance_fields: list = field(default_factory=list)
+    all_instance_field_descs: list = field(default_factory=list)
     all_instance_field_is_ref: list = field(default_factory=list)
     vtable: list = field(default_factory=list)
     method_vtable_slots: dict = field(default_factory=dict)

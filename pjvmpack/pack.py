@@ -3,7 +3,16 @@
 import struct
 
 from .bytecode import (
+    OP_ALOAD,
+    OP_ALOAD_0,
+    OP_ALOAD_3,
+    OP_ILOAD,
+    OP_ILOAD_0,
+    OP_ILOAD_3,
+    OP_INVOKESPECIAL,
     OP_LDC,
+    OP_PUTFIELD,
+    OP_RETURN,
     add_ordered_cp_use,
     bytecode_cp_operands,
     rewrite_bytecode_cp_indices,
@@ -11,6 +20,7 @@ from .bytecode import (
 from .classfile import ClassReader, parse_class
 from .const_extract import extract_const_arrays as _extract_const_arrays
 from .constants import (
+    ACC_FINAL,
     ACC_NATIVE,
     ACC_STATIC,
     NATIVE_IDS,
@@ -18,7 +28,9 @@ from .constants import (
     PJVM_CONST_NULL_REF,
     PJVM_CP_STR_FLAG,
     PJVM_CP_UNRESOLVED,
+    PJVM_ELEM_OBJECT_REF,
     PJVM_ELEM_STRING_REF,
+    PJVM_REF_ROM_STRING,
     PJVM_ET_ENTRY,
     PJVM_ET_ENTRY_V4,
     PJVM_HDR_SIZE_V3,
@@ -42,7 +54,7 @@ from .constants import (
     PJVM_VERSION_V4,
     STRING_NATIVE_IDS,
 )
-from .descriptors import count_args, is_ref_descriptor
+from .descriptors import argument_descriptors, count_args, is_ref_descriptor
 from .emit import (
     require_real_id,
     require_real_id_v4,
@@ -345,6 +357,186 @@ def _intern_const_string_refs(vals, global_string_constants, string_constant_ded
     return string_indices
 
 
+def _code_bytes(code_data):
+    """Return only bytecode bytes from a raw Code attribute body."""
+    cr = ClassReader(code_data)
+    cr.skip_u2(2)
+    code_length = cr.u4()
+    return cr.read(code_length)
+
+
+def _resolve_fieldref_name(cp, cp_idx):
+    entry = cp[cp_idx]
+    if entry is None or entry[0] != "Fieldref":
+        raise PackError(f"CP#{cp_idx} is not a Fieldref")
+    class_name = resolve_class_name(cp, entry[1])
+    nat = cp[entry[2]]
+    return class_name, cp[nat[1]][1], cp[nat[2]][1]
+
+
+def _read_local_load(bc, offset):
+    """Read iload/aload forms used by trivial value constructors."""
+    op = bc[offset]
+    if OP_ILOAD_0 <= op <= OP_ILOAD_3:
+        return "I", op - OP_ILOAD_0, offset + 1
+    if OP_ALOAD_0 <= op <= OP_ALOAD_3:
+        return "A", op - OP_ALOAD_0, offset + 1
+    if op == OP_ILOAD:
+        return "I", bc[offset + 1], offset + 2
+    if op == OP_ALOAD:
+        return "A", bc[offset + 1], offset + 2
+    return None, None, offset
+
+
+def _const_object_constructor_layout(cls):
+    """Validate and describe the supported immutable value-object subset."""
+    if cls.parent_name not in (None, "java/lang/Object"):
+        raise PackError(f"@Const object {cls.name}: superclass is not Object")
+
+    own_fields = []
+    for f_access, f_name_idx, f_desc_idx, _f_is_const in cls.fields_raw:
+        if f_access & ACC_STATIC:
+            continue
+        field_name = cls.cp[f_name_idx][1]
+        field_desc = cls.cp[f_desc_idx][1]
+        if not (f_access & ACC_FINAL):
+            raise PackError(f"@Const object {cls.name}.{field_name}: field is not final")
+        if field_desc not in ("I", "B", "S", "C", "Z", "Ljava/lang/String;"):
+            raise PackError(f"@Const object {cls.name}.{field_name}: unsupported field {field_desc}")
+        own_fields.append((field_name, field_desc))
+
+    ctors = []
+    for _m_access, m_name_idx, m_desc_idx, code_data in cls.methods_raw:
+        if cls.cp[m_name_idx][1] == "<init>":
+            ctors.append((cls.cp[m_desc_idx][1], code_data))
+    if len(ctors) != 1:
+        raise PackError(f"@Const object {cls.name}: expected exactly one constructor")
+
+    ctor_desc, code_data = ctors[0]
+    if code_data is None:
+        raise PackError(f"@Const object {cls.name}: constructor has no bytecode")
+    arg_descs = argument_descriptors(ctor_desc)
+
+    arg_for_local = {}
+    local = 1
+    for arg_idx, arg_desc in enumerate(arg_descs):
+        arg_for_local[local] = arg_idx
+        local += 2 if arg_desc in ("J", "D") else 1
+
+    bc = _code_bytes(code_data)
+    i = 0
+    kind, local_idx, i = _read_local_load(bc, i)
+    if kind != "A" or local_idx != 0 or i + 3 > len(bc) or bc[i] != OP_INVOKESPECIAL:
+        raise PackError(f"@Const object {cls.name}: constructor is not trivial")
+    init_class, init_name, init_desc = resolve_method_name(
+        cls.cp, (bc[i + 1] << 8) | bc[i + 2])
+    if (init_class, init_name, init_desc) != ("java/lang/Object", "<init>", "()V"):
+        raise PackError(f"@Const object {cls.name}: constructor does not call Object.<init>")
+    i += 3
+
+    field_args = {}
+    while i < len(bc):
+        if bc[i] == OP_RETURN:
+            i += 1
+            break
+        kind, local_idx, i = _read_local_load(bc, i)
+        if kind != "A" or local_idx != 0:
+            raise PackError(f"@Const object {cls.name}: constructor has non-field side effects")
+        load_kind, value_local, i = _read_local_load(bc, i)
+        if load_kind not in ("I", "A") or i + 3 > len(bc) or bc[i] != OP_PUTFIELD:
+            raise PackError(f"@Const object {cls.name}: constructor has unsupported assignment")
+        field_class, field_name, field_desc = _resolve_fieldref_name(
+            cls.cp, (bc[i + 1] << 8) | bc[i + 2])
+        i += 3
+        if field_class != cls.name:
+            raise PackError(f"@Const object {cls.name}: constructor assigns inherited field")
+        if value_local not in arg_for_local:
+            raise PackError(f"@Const object {cls.name}: constructor does not assign from an argument")
+        arg_idx = arg_for_local[value_local]
+        if arg_descs[arg_idx] != field_desc:
+            raise PackError(f"@Const object {cls.name}.{field_name}: constructor arg type mismatch")
+        if field_name in field_args:
+            raise PackError(f"@Const object {cls.name}.{field_name}: assigned more than once")
+        field_args[field_name] = arg_idx
+
+    if i != len(bc):
+        raise PackError(f"@Const object {cls.name}: constructor has trailing bytecode")
+
+    field_arg_indices = []
+    for field_name, _field_desc in own_fields:
+        if field_name not in field_args:
+            raise PackError(f"@Const object {cls.name}.{field_name}: not assigned by constructor")
+        field_arg_indices.append(field_args[field_name])
+
+    return {
+        "descriptor": ctor_desc,
+        "fields": own_fields,
+        "field_arg_indices": field_arg_indices,
+    }
+
+
+def _const_object_slot(field_desc, value, global_string_constants, string_constant_dedup):
+    """Encode one final field value as a normal VM 32-bit slot."""
+    if field_desc == "Ljava/lang/String;":
+        if isinstance(value, tuple) and value[0] == "null":
+            return 0, 0
+        if not (isinstance(value, tuple) and value[0] == "string"):
+            raise PackError("@Const object String field is not a literal string/null")
+        string_idx = _intern_const_string_refs(
+            [value[1]], global_string_constants, string_constant_dedup)[0]
+        return string_idx, PJVM_REF_ROM_STRING
+
+    if not isinstance(value, int):
+        raise PackError(f"@Const object primitive field is not a literal int: {value!r}")
+    if field_desc == "Z":
+        value = 1 if value else 0
+    raw = value & 0xFFFFFFFF
+    return raw & 0xFFFF, (raw >> 16) & 0xFFFF
+
+
+def _build_const_object_array(arr, classes, global_string_constants, string_constant_dedup):
+    """Convert an extracted object array into packed fixed-width records."""
+    class_name = arr["class_name"]
+    if class_name not in classes:
+        raise PackError(f"@Const object array uses unpacked class {class_name}")
+    value_cls = classes[class_name]
+    layout = _const_object_constructor_layout(value_cls)
+    n_fields = len(layout["fields"])
+    records = []
+
+    for obj in arr["values"]:
+        if obj is None:
+            records.append(None)
+            continue
+        if obj["class_name"] != class_name:
+            raise PackError(f"@Const object array {class_name}: subclass elements are unsupported")
+        if obj["constructor"] != layout["descriptor"]:
+            raise PackError(f"@Const object array {class_name}: constructor descriptor mismatch")
+
+        slots = []
+        for (field_name, field_desc), arg_idx in zip(
+                layout["fields"], layout["field_arg_indices"]):
+            try:
+                arg_value = obj["args"][arg_idx]
+            except IndexError as exc:
+                raise PackError(
+                    f"@Const object array {class_name}.{field_name}: missing argument") from exc
+            slots.append(_const_object_slot(
+                field_desc, arg_value, global_string_constants, string_constant_dedup))
+        records.append(slots)
+
+    return {
+        "class_name": class_name,
+        "class_id": value_cls.class_id,
+        "n_fields": n_fields,
+        "records": records,
+    }
+
+
+def _const_array_length(etype, vals):
+    return len(vals["records"]) if etype == PJVM_ELEM_OBJECT_REF else len(vals)
+
+
 def _extract_program_const_arrays(classes, class_order, static_field_base,
                                   global_string_constants, string_constant_dedup,
                                   verbose=False):
@@ -361,6 +553,9 @@ def _extract_program_const_arrays(classes, class_order, static_field_base,
             if etype == PJVM_ELEM_STRING_REF:
                 vals = _intern_const_string_refs(
                     vals, global_string_constants, string_constant_dedup)
+            elif etype == PJVM_ELEM_OBJECT_REF:
+                vals = _build_const_object_array(
+                    vals, classes, global_string_constants, string_constant_dedup)
             const_arrays.append((fname, etype, vals, name))
             const_nop_ranges.setdefault(name, []).append((bstart, bend))
     return const_arrays, const_nop_ranges
@@ -434,9 +629,11 @@ def pack_pjvm(class_data_list, verbose=False, v2=False, pin_hints=None,
 
         if parent:
             cls.all_instance_fields = list(parent.all_instance_fields)
+            cls.all_instance_field_descs = list(parent.all_instance_field_descs)
             cls.all_instance_field_is_ref = list(parent.all_instance_field_is_ref)
         else:
             cls.all_instance_fields = []
+            cls.all_instance_field_descs = []
             cls.all_instance_field_is_ref = []
 
         for f_access, f_name_idx, f_desc_idx, f_is_const in cls.fields_raw:
@@ -450,6 +647,7 @@ def pack_pjvm(class_data_list, verbose=False, v2=False, pin_hints=None,
                 slot = len(cls.all_instance_fields)
                 cls.own_instance_fields.append((field_name, slot))
                 cls.all_instance_fields.append(field_name)
+                cls.all_instance_field_descs.append(field_desc)
                 cls.all_instance_field_is_ref.append(is_ref_descriptor(field_desc))
 
         if verbose and cls.all_instance_fields:
@@ -579,6 +777,24 @@ def pack_pjvm(class_data_list, verbose=False, v2=False, pin_hints=None,
             break
     if main_index is None:
         raise PackError("No main method found")
+
+    # Static field offsets per class (into global static_fields array)
+    static_field_base = {}
+    total_static_fields = 0
+    for name in class_order:
+        cls = classes[name]
+        static_field_base[name] = total_static_fields
+        total_static_fields += len(cls.static_fields)
+
+    global_string_constants = []  # list of UTF-8 byte strings
+    string_constant_dedup = {}   # utf8_text -> index
+
+    # Extract and erase supported @Const initializers before CP compaction so
+    # removed setup bytecode does not keep dead constant-pool entries alive.
+    const_arrays, const_nop_ranges = _extract_program_const_arrays(
+        classes, class_order, static_field_base, global_string_constants,
+        string_constant_dedup, verbose=verbose)
+    _nop_const_initializers(classes, method_table, const_nop_ranges)
 
     # Record exactly which original classfile CP indices are referenced from
     # executable bytecode.  Compact mode remaps only these entries into a dense
@@ -738,16 +954,6 @@ def pack_pjvm(class_data_list, verbose=False, v2=False, pin_hints=None,
     # Build compact per-class CP resolution slices.
     global_cp_resolve = []  # list of uint16 values (v3: 16-bit CP entries)
     global_int_constants = []
-    global_string_constants = []  # list of UTF-8 byte strings
-    string_constant_dedup = {}   # utf8_text -> index
-
-    # Static field offsets per class (into global static_fields array)
-    static_field_base = {}
-    total_static_fields = 0
-    for name in class_order:
-        cls = classes[name]
-        static_field_base[name] = total_static_fields
-        total_static_fields += len(cls.static_fields)
 
     cp_bases = {}  # class_name -> cp_base offset
     cp_old_entries = 0
@@ -944,12 +1150,6 @@ def pack_pjvm(class_data_list, verbose=False, v2=False, pin_hints=None,
             ct_str = "catch-all" if ct == PJVM_NO_CLASS else f"class#{ct}"
             print(f"    [{i}] start={s} end={e} handler={h} {ct_str}")
 
-    # Extract supported @Const arrays from <clinit>.
-    const_arrays, const_nop_ranges = _extract_program_const_arrays(
-        classes, class_order, static_field_base, global_string_constants,
-        string_constant_dedup, verbose=verbose)
-    _nop_const_initializers(classes, method_table, const_nop_ranges)
-
     # Concatenate final method bytecode streams.
     bytecode_section = _build_bytecode_section(method_table)
 
@@ -1109,7 +1309,7 @@ def pack_pjvm(class_data_list, verbose=False, v2=False, pin_hints=None,
 
         for fname, etype, vals, cname in const_arrays:
             entry_offset = len(out)  # file offset of this entry's header
-            n_elem = len(vals)
+            n_elem = _const_array_length(etype, vals)
             out.extend(struct.pack("<H", n_elem))  # n_elements
             out.append(etype)                       # elem_type
             out.append(0)                           # reserved
@@ -1123,6 +1323,14 @@ def pack_pjvm(class_data_list, verbose=False, v2=False, pin_hints=None,
             elif etype == 3:  # int (4 bytes each)
                 for v in vals:
                     out.extend(struct.pack("<I", v & 0xFFFFFFFF))
+            elif etype == PJVM_ELEM_OBJECT_REF:
+                out.extend(struct.pack("<HH", vals["class_id"], vals["n_fields"]))
+                for record in vals["records"]:
+                    class_id = PJVM_CONST_NULL_REF if record is None else vals["class_id"]
+                    out.extend(struct.pack("<HH", class_id, vals["n_fields"]))
+                    slots = record if record is not None else [(0, 0)] * vals["n_fields"]
+                    for lo, hi in slots:
+                        out.extend(struct.pack("<HH", lo, hi))
 
             # Compute ROM reference for this entry
             lo = entry_offset & 0xFFFF
@@ -1145,8 +1353,9 @@ def pack_pjvm(class_data_list, verbose=False, v2=False, pin_hints=None,
             print(f"  const_data: {len(const_arrays)} arrays, "
                   f"{len(out) - cd_start} bytes")
             for i, (fname, etype, vals, cname) in enumerate(const_arrays):
-                tnames = ['byte', 'char', 'short', 'int', 'string']
-                print(f"    [{i}] {cname}.{fname}: {tnames[etype]}[{len(vals)}]")
+                tnames = ['byte', 'char', 'short', 'int', 'string', 'object']
+                print(f"    [{i}] {cname}.{fname}: "
+                      f"{tnames[etype]}[{_const_array_length(etype, vals)}]")
 
     if verbose:
         fmt_name = "v4" if emit_v4 else "v3"

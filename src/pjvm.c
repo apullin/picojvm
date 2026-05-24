@@ -55,6 +55,7 @@ enum {
     OP_NEW = 0xBB, OP_NEWARRAY = 0xBC, OP_ANEWARRAY = 0xBD,
     OP_ARRAYLENGTH = 0xBE,
     OP_CHECKCAST = 0xC0, OP_INSTANCEOF = 0xC1,
+    OP_WIDE = 0xC4,
     OP_MULTIANEWARRAY = 0xC5,
     OP_IFNULL = 0xC6, OP_IFNONNULL = 0xC7,
 };
@@ -86,7 +87,8 @@ enum {
 /* --- globals (extern-declared in pjvm.h) ------------------------------ */
 uint8_t *pjvm_prog;
 uint32_t pjvm_prog_size;
-uint8_t  n_methods, main_mi, n_classes;
+pjvm_method_id_t n_methods, main_mi;
+pjvm_class_id_t n_classes;
 uint32_t bytecodes_size;
 uint32_t bc_off, cpr_off, ic_off, sc_off, et_off, cd_off;
 PJVMCtx *g_pjvm;
@@ -103,18 +105,22 @@ uint8_t *sc;
 
 /* --- internal globals (file-scope) ------------------------------------ */
 static uint16_t n_static_fields;
-static uint8_t  n_int_constants, n_string_constants;
+static pjvm_count_t n_int_constants, n_string_constants;
 uint8_t  region_flags;  /* byte 9: bit0=pin_hints, bit1=ref bitmaps, bit2=const_data */
-static uint8_t  m_ml[PJVM_METHOD_CAP], m_ac[PJVM_METHOD_CAP];
-static uint8_t  m_fl[PJVM_METHOD_CAP], m_vs[PJVM_METHOD_CAP], m_vmid[PJVM_METHOD_CAP];
-static uint8_t  m_ec[PJVM_METHOD_CAP], m_eo[PJVM_METHOD_CAP];
+static uint8_t pjvm_format_v4;
+static pjvm_count_t m_ml[PJVM_METHOD_CAP], m_ac[PJVM_METHOD_CAP];
+static pjvm_flags_t m_fl[PJVM_METHOD_CAP];
+static pjvm_vslot_t m_vs[PJVM_METHOD_CAP];
+static pjvm_vmid_t m_vmid[PJVM_METHOD_CAP];
+static pjvm_count_t m_ec[PJVM_METHOD_CAP], m_eo[PJVM_METHOD_CAP];
 static uint32_t m_co[PJVM_METHOD_CAP];
-static uint16_t m_cb[PJVM_METHOD_CAP];
-static uint8_t  cls_pid[PJVM_CLASS_CAP];
-uint8_t  cls_nf[PJVM_CLASS_CAP];
-static uint8_t  cls_vb[PJVM_CLASS_CAP], cls_vs[PJVM_CLASS_CAP], cls_ci[PJVM_CLASS_CAP];
-uint16_t cls_rbo[PJVM_CLASS_CAP];
-static uint8_t  vt[PJVM_VTABLE_CAP];
+static pjvm_cpbase_t m_cb[PJVM_METHOD_CAP];
+static pjvm_class_id_t cls_pid[PJVM_CLASS_CAP];
+pjvm_count_t cls_nf[PJVM_CLASS_CAP];
+static pjvm_count_t cls_vb[PJVM_CLASS_CAP], cls_vs[PJVM_CLASS_CAP];
+static pjvm_method_id_t cls_ci[PJVM_CLASS_CAP];
+pjvm_rbo_t cls_rbo[PJVM_CLASS_CAP];
+static pjvm_method_id_t vt[PJVM_VTABLE_CAP];
 
 /* --- program image access macro --------------------------------------- */
 #ifdef PJVM_PAGED
@@ -235,6 +241,20 @@ NI static void lload(uint8_t slot) {
 }
 
 NI static void lstore(uint8_t slot) {
+    uint16_t i = g_pjvm->cur_lb + slot;
+    g_pjvm->sp--;
+    g_pjvm->loc_lo[i] = g_pjvm->stk_lo[g_pjvm->sp];
+    g_pjvm->loc_hi[i] = g_pjvm->stk_hi[g_pjvm->sp];
+}
+#endif
+
+#if PJVM_USE_OP_WIDE
+NI static void lload_w(uint16_t slot) {
+    uint16_t i = g_pjvm->cur_lb + slot;
+    spush(g_pjvm->loc_lo[i], g_pjvm->loc_hi[i]);
+}
+
+NI static void lstore_w(uint16_t slot) {
     uint16_t i = g_pjvm->cur_lb + slot;
     g_pjvm->sp--;
     g_pjvm->loc_lo[i] = g_pjvm->stk_lo[g_pjvm->sp];
@@ -381,14 +401,17 @@ static uint16_t pjvm_make_main_args(PJVMCtx *j) {
     return a;
 }
 
-/* --- .pjvm loader (v3 only) ------------------------------------------ */
-void pjvm_parse(uint8_t *data) {
-    /* v1/v2 support removed — only v3 (0x4C) accepted.  See git history. */
-    if (data[1] != PJVM_VERSION_V3) {
-        pjvm_platform_trap(PJVM_TRAP_BAD_VERSION, data[1]);
-        return;
-    }
+/* --- .pjvm loader ----------------------------------------------------- */
+static uint8_t pjvm_check_caps(void) {
+    if ((uint32_t)n_methods > (uint32_t)PJVM_METHOD_CAP ||
+        (uint32_t)n_classes > (uint32_t)PJVM_CLASS_CAP ||
+        (uint32_t)n_static_fields > (uint32_t)PJVM_STATIC_CAP)
+        return 0;
+    return 1;
+}
 
+static void pjvm_parse_v3(uint8_t *data) {
+    pjvm_format_v4 = 0;
     n_methods = data[2];
     main_mi = data[3];
     n_static_fields = RD16LE(data + 4);
@@ -397,31 +420,44 @@ void pjvm_parse(uint8_t *data) {
     n_string_constants = data[8];
     region_flags = data[9];
     bytecodes_size = RD32LE(data + 10);
+    if (!pjvm_check_caps()) {
+        pjvm_platform_trap(PJVM_TRAP_CAPACITY, data[1]);
+        return;
+    }
 
     uint8_t *p = data + PJVM_HDR_SIZE_V3;
-    uint8_t vo = 0;
+    uint32_t vo = 0;
 
-    for (uint8_t i = 0; i < n_classes; i++) {
-        cls_pid[i] = *p++;
+    for (pjvm_class_id_t i = 0; i < n_classes; i++) {
+        uint8_t pid = *p++;
+        cls_pid[i] = pid == 0xFFu ? PJVM_NO_CLASS : pid;
         cls_nf[i] = *p++;
         cls_vs[i] = *p++;
-        cls_ci[i] = *p++;
-        cls_vb[i] = vo;
-        for (uint8_t jj = 0; jj < cls_vs[i]; jj++)
+        {
+            uint8_t ci = *p++;
+            cls_ci[i] = ci == 0xFFu ? PJVM_NO_CLINIT : ci;
+        }
+        if ((uint32_t)vo + cls_vs[i] > PJVM_VTABLE_CAP) {
+            pjvm_platform_trap(PJVM_TRAP_CAPACITY, data[1]);
+            return;
+        }
+        cls_vb[i] = (pjvm_count_t)vo;
+        for (pjvm_count_t jj = 0; jj < cls_vs[i]; jj++)
             vt[vo++] = *p++;
         if (region_flags & PJVM_RF_REF_BITMAPS) {
-            cls_rbo[i] = (uint16_t)(p - data);
-            p += (uint8_t)((cls_nf[i] + 7u) >> 3);
+            cls_rbo[i] = (pjvm_rbo_t)(p - data);
+            p += (uint16_t)((cls_nf[i] + 7u) >> 3);
         } else {
             cls_rbo[i] = 0;
         }
     }
 
-    for (uint8_t i = 0; i < n_methods; i++) {
+    for (pjvm_method_id_t i = 0; i < n_methods; i++) {
         m_ml[i] = p[0]; m_ac[i] = p[2]; m_fl[i] = p[3];
         m_co[i] = RD32LE(p + 4);
         m_cb[i] = RD16LE(p + 8);
-        m_vs[i] = p[10]; m_vmid[i] = p[11];
+        m_vs[i] = p[10] == 0xFFu ? PJVM_NO_VTABLE : p[10];
+        m_vmid[i] = p[11] == 0xFFu ? PJVM_NO_VTABLE : p[11];
         m_ec[i] = p[12]; m_eo[i] = p[13]; p += PJVM_MT_ENTRY;
     }
 
@@ -430,7 +466,7 @@ void pjvm_parse(uint8_t *data) {
     cpr_off = (uint32_t)(p - data); p += cpc;
     ic_off  = (uint32_t)(p - data); p += (uint16_t)n_int_constants * 4;
     sc_off  = (uint32_t)(p - data);
-    for (uint8_t i = 0; i < n_string_constants; i++) {
+    for (pjvm_count_t i = 0; i < n_string_constants; i++) {
         uint16_t slen = RD16LE(p);
         p += 2 + slen;
     }
@@ -440,8 +476,8 @@ void pjvm_parse(uint8_t *data) {
     /* Skip past exception table and optional pin hints to find const_data */
     {
         /* Count exception entries: sum of m_ec[] */
-        uint16_t n_exc = 0;
-        for (uint8_t i = 0; i < n_methods; i++) n_exc += m_ec[i];
+        uint32_t n_exc = 0;
+        for (pjvm_method_id_t i = 0; i < n_methods; i++) n_exc += m_ec[i];
         p += n_exc * PJVM_ET_ENTRY;
 
         /* Skip pin hints if present (1 byte per method) */
@@ -466,14 +502,189 @@ void pjvm_parse(uint8_t *data) {
 #endif
 }
 
+#if PJVM_ENABLE_V4
+static uint32_t pjvm_read_uleb(uint8_t **pp) {
+    uint32_t v = 0;
+    uint8_t shift = 0;
+
+    for (;;) {
+        uint8_t b = *(*pp)++;
+        v |= (uint32_t)(b & 0x7Fu) << shift;
+        if ((b & 0x80u) == 0)
+            return v;
+        shift += 7;
+    }
+}
+
+static void pjvm_parse_v4(uint8_t *data) {
+    pjvm_format_v4 = 1;
+    n_methods = RD16LE(data + 2);
+    main_mi = RD16LE(data + 4);
+    n_static_fields = RD16LE(data + 6);
+    n_int_constants = RD16LE(data + 8);
+    n_classes = RD16LE(data + 10);
+    n_string_constants = RD16LE(data + 12);
+    region_flags = (uint8_t)RD16LE(data + 14);
+    bytecodes_size = RD32LE(data + 16);
+    if (!pjvm_check_caps()) {
+        pjvm_platform_trap(PJVM_TRAP_CAPACITY, data[1]);
+        return;
+    }
+
+    uint8_t *p = data + PJVM_HDR_SIZE_V4;
+    uint32_t vo = 0;
+
+    for (pjvm_class_id_t i = 0; i < n_classes; i++) {
+        uint16_t pid = RD16LE(p); p += 2;
+        cls_pid[i] = pid == 0xFFFFu ? PJVM_NO_CLASS : pid;
+        cls_nf[i] = RD16LE(p); p += 2;
+        cls_vs[i] = RD16LE(p); p += 2;
+        {
+            uint16_t ci = RD16LE(p); p += 2;
+            cls_ci[i] = ci == 0xFFFFu ? PJVM_NO_CLINIT : ci;
+        }
+        if ((uint32_t)vo + cls_vs[i] > PJVM_VTABLE_CAP) {
+            pjvm_platform_trap(PJVM_TRAP_CAPACITY, data[1]);
+            return;
+        }
+        cls_vb[i] = (pjvm_count_t)vo;
+        for (pjvm_count_t jj = 0; jj < cls_vs[i]; jj++) {
+            vt[vo++] = RD16LE(p);
+            p += 2;
+        }
+        if (region_flags & PJVM_RF_REF_BITMAPS) {
+            cls_rbo[i] = (pjvm_rbo_t)(p - data);
+            p += (uint16_t)((cls_nf[i] + 7u) >> 3);
+        } else {
+            cls_rbo[i] = 0;
+        }
+    }
+
+    if (region_flags & PJVM_RF_PACKED_METHOD_TABLE) {
+        uint8_t *mt_end = p + 4 + RD32LE(p);
+        uint32_t prev_code_offset = 0;
+        uint32_t prev_cp_base = 0;
+        uint16_t prev_exc_offset = 0;
+        uint8_t have_prev_cp = 0;
+        uint8_t have_prev_exc = 0;
+        p += 4;
+
+        for (pjvm_method_id_t i = 0; i < n_methods; i++) {
+            uint32_t vs_code, vmid_code;
+            m_ml[i] = (pjvm_count_t)pjvm_read_uleb(&p);
+            (void)pjvm_read_uleb(&p); /* max_stack is not needed after parse */
+            m_ac[i] = (pjvm_count_t)pjvm_read_uleb(&p);
+            m_fl[i] = (pjvm_flags_t)pjvm_read_uleb(&p);
+            vs_code = pjvm_read_uleb(&p);
+            vmid_code = pjvm_read_uleb(&p);
+            m_vs[i] = vs_code == 0 ? PJVM_NO_VTABLE : (pjvm_vslot_t)(vs_code - 1u);
+            m_vmid[i] = vmid_code == 0 ? PJVM_NO_VTABLE : (pjvm_vmid_t)(vmid_code - 1u);
+
+            if (m_fl[i] & 1) {
+                m_co[i] = 0;
+                m_cb[i] = 0;
+                m_ec[i] = 0;
+                m_eo[i] = 0;
+            } else {
+                uint32_t cp_code, exc_code;
+                prev_code_offset += pjvm_read_uleb(&p);
+                m_co[i] = prev_code_offset;
+
+                cp_code = pjvm_read_uleb(&p);
+                if (cp_code == 0 && have_prev_cp) {
+                    m_cb[i] = (pjvm_cpbase_t)prev_cp_base;
+                } else {
+                    prev_cp_base = cp_code - 1u;
+                    have_prev_cp = 1;
+                    m_cb[i] = (pjvm_cpbase_t)prev_cp_base;
+                }
+
+                m_ec[i] = (pjvm_count_t)pjvm_read_uleb(&p);
+                exc_code = pjvm_read_uleb(&p);
+                if (exc_code == 0 && have_prev_exc) {
+                    m_eo[i] = (pjvm_count_t)prev_exc_offset;
+                } else {
+                    prev_exc_offset = (uint16_t)(exc_code - 1u);
+                    have_prev_exc = 1;
+                    m_eo[i] = (pjvm_count_t)prev_exc_offset;
+                }
+            }
+        }
+        p = mt_end;
+    } else {
+        for (pjvm_method_id_t i = 0; i < n_methods; i++) {
+            m_ml[i] = RD16LE(p);
+            m_ac[i] = RD16LE(p + 4);
+            m_fl[i] = RD16LE(p + 6);
+            m_co[i] = RD32LE(p + 8);
+            m_cb[i] = RD32LE(p + 12);
+            {
+                uint16_t vs = RD16LE(p + 16);
+                uint16_t vmid = RD16LE(p + 18);
+                m_vs[i] = vs == 0xFFFFu ? PJVM_NO_VTABLE : vs;
+                m_vmid[i] = vmid == 0xFFFFu ? PJVM_NO_VTABLE : vmid;
+            }
+            m_ec[i] = RD16LE(p + 20);
+            m_eo[i] = RD16LE(p + 22);
+            p += PJVM_MT_ENTRY_V4;
+        }
+    }
+
+    uint32_t cpc = RD32LE(p);
+    p += 4;
+    cpr_off = (uint32_t)(p - data); p += cpc;
+    ic_off  = (uint32_t)(p - data); p += (uint32_t)n_int_constants * 4u;
+    sc_off  = (uint32_t)(p - data);
+    for (pjvm_count_t i = 0; i < n_string_constants; i++) {
+        uint16_t slen = RD16LE(p);
+        p += 2 + slen;
+    }
+    bc_off = (uint32_t)(p - data); p += bytecodes_size;
+    et_off = (uint32_t)(p - data);
+
+    {
+        uint32_t n_exc = 0;
+        for (pjvm_method_id_t i = 0; i < n_methods; i++) n_exc += m_ec[i];
+        p += n_exc * PJVM_ET_ENTRY_V4;
+        if (region_flags & PJVM_RF_PIN_HINTS)
+            p += n_methods;
+        cd_off = (region_flags & PJVM_RF_CONST_DATA) ? (uint32_t)(p - data) : 0;
+    }
+
+#if PJVM_USE_ASM_CPREAD
+    cpr = data + cpr_off;
+#endif
+#if PJVM_USE_ASM_FETCH_HELPERS || PJVM_USE_ASM_CPREAD
+    bc  = data + bc_off;
+#endif
+#if PJVM_USE_ASM_ROM_STRING_DATA || PJVM_USE_ASM_STRING_LEN || PJVM_USE_ASM_STRING_BYTE
+    sc  = data + sc_off;
+#endif
+}
+#endif
+
+void pjvm_parse(uint8_t *data) {
+    if (data[1] == PJVM_VERSION_V3) {
+        pjvm_parse_v3(data);
+        return;
+    }
+#if PJVM_ENABLE_V4
+    if (data[1] == PJVM_VERSION_V4) {
+        pjvm_parse_v4(data);
+        return;
+    }
+#endif
+    pjvm_platform_trap(PJVM_TRAP_BAD_VERSION, data[1]);
+}
+
 /* --- invoke / return -------------------------------------------------- */
 static void pjvm_exec(void);
 
-static void pjvm_inv(uint8_t mi) {
+static void pjvm_inv(pjvm_method_id_t mi) {
     uint16_t alo, ahi, blo, bhi;
 
     if (m_fl[mi] & 1) {
-        uint8_t nid = m_fl[mi] >> 1;
+        uint8_t nid = (uint8_t)(m_fl[mi] >> 1);
         switch (nid) {
         case NATIVE_PUTCHAR:
             alo = spop_lo();
@@ -722,12 +933,12 @@ static void pjvm_inv(uint8_t mi) {
     g_pjvm->lt += m_ml[mi];
     if (g_pjvm->lt > g_pjvm->lt_max) g_pjvm->lt_max = g_pjvm->lt;
 #if PJVM_GC_ENABLED
-    for (uint8_t i = 0; i < m_ml[mi]; i++) {
+    for (pjvm_count_t i = 0; i < m_ml[mi]; i++) {
         g_pjvm->loc_lo[nb + i] = 0;
         g_pjvm->loc_hi[nb + i] = 0;
     }
 #endif
-    for (int8_t i = m_ac[mi] - 1; i >= 0; i--) {
+    for (int32_t i = (int32_t)m_ac[mi] - 1; i >= 0; i--) {
         g_pjvm->sp--;
         g_pjvm->loc_lo[nb + i] = g_pjvm->stk_lo[g_pjvm->sp];
         g_pjvm->loc_hi[nb + i] = g_pjvm->stk_hi[g_pjvm->sp];
@@ -756,27 +967,34 @@ static void pjvm_ret(uint8_t has_val) {
 }
 
 static void pjvm_throw(uint16_t exc_ref, uint32_t throw_pc) {
-    uint8_t ci = (uint8_t)r16(exc_ref);
+    pjvm_class_id_t ci = (pjvm_class_id_t)r16(exc_ref);
 
     for (;;) {
-        uint8_t count = m_ec[g_pjvm->cur_mi];
-        uint8_t base = m_eo[g_pjvm->cur_mi];
+        pjvm_count_t count = m_ec[g_pjvm->cur_mi];
+        pjvm_count_t base = m_eo[g_pjvm->cur_mi];
         uint32_t rel_pc = throw_pc - m_co[g_pjvm->cur_mi];
 
-        for (uint8_t i = 0; i < count; i++) {
-            uint32_t eoff = et_off + (uint16_t)(base + i) * 7;
+        for (pjvm_count_t i = 0; i < count; i++) {
+            uint32_t eoff = et_off + (uint32_t)(base + i) *
+                (pjvm_format_v4 ? PJVM_ET_ENTRY_V4 : PJVM_ET_ENTRY);
             uint16_t e_start = PROG16(eoff);
             uint16_t e_end   = PROG16(eoff + 2);
             uint16_t e_handler = PROG16(eoff + 4);
-            uint8_t  e_catch  = PROG(eoff + 6);
+            pjvm_class_id_t e_catch;
+#if PJVM_ENABLE_V4
+            if (pjvm_format_v4)
+                e_catch = PROG16(eoff + 6);
+            else
+#endif
+                e_catch = PROG(eoff + 6) == 0xFFu ? PJVM_NO_CLASS : PROG(eoff + 6);
 
             if (rel_pc >= e_start && rel_pc < e_end) {
                 uint8_t match = 0;
-                if (e_catch == 0xFF) {
+                if (e_catch == PJVM_NO_CLASS) {
                     match = 1;
                 } else {
-                    uint8_t walk = ci;
-                    while (walk != 0xFF) {
+                    pjvm_class_id_t walk = ci;
+                    while (walk != PJVM_NO_CLASS) {
                         if (walk == e_catch) { match = 1; break; }
                         walk = cls_pid[walk];
                     }
@@ -856,14 +1074,14 @@ void pjvm_run(PJVMCtx *j) {
     j->sp_max = 0; j->lt_max = 0; j->fdepth_max = 0;
 
     /* Run static initializers (<clinit>) */
-    for (uint8_t ci = 0; ci < n_classes; ci++) {
+    for (pjvm_class_id_t ci = 0; ci < n_classes; ci++) {
         if (cls_ci[ci] == PJVM_NO_CLINIT) continue;
-        uint8_t mi = cls_ci[ci];
+        pjvm_method_id_t mi = cls_ci[ci];
         j->cur_mi = mi; j->cur_lb = 0; j->cur_cb = m_cb[mi];
         j->lt = m_ml[mi]; j->pc = m_co[mi];
         j->fdepth = 0; j->sp = 0;
 #if PJVM_GC_ENABLED
-        for (uint8_t i = 0; i < m_ml[mi]; i++) {
+        for (pjvm_count_t i = 0; i < m_ml[mi]; i++) {
             j->loc_lo[i] = 0;
             j->loc_hi[i] = 0;
         }
@@ -877,7 +1095,7 @@ void pjvm_run(PJVMCtx *j) {
     j->lt = m_ml[main_mi]; j->pc = m_co[main_mi];
     j->fdepth = 0; j->sp = 0;
 #if PJVM_GC_ENABLED
-    for (uint8_t i = 0; i < m_ml[main_mi]; i++) {
+    for (pjvm_count_t i = 0; i < m_ml[main_mi]; i++) {
         j->loc_lo[i] = 0;
         j->loc_hi[i] = 0;
     }
@@ -898,7 +1116,7 @@ uint8_t  pjvm_trace_enabled;
 #define TRACE_BUF_SIZE 32
 uint32_t trace_pc[TRACE_BUF_SIZE];
 uint8_t  trace_op[TRACE_BUF_SIZE];
-uint8_t  trace_mi[TRACE_BUF_SIZE];
+pjvm_method_id_t trace_mi[TRACE_BUF_SIZE];
 uint8_t  trace_sp[TRACE_BUF_SIZE];
 uint16_t trace_stk0[TRACE_BUF_SIZE];
 uint32_t trace_idx;
@@ -1210,6 +1428,31 @@ static void pjvm_exec(void) {
             break;
         }
 
+#if PJVM_USE_OP_WIDE
+        case OP_WIDE: {
+            uint8_t wop = bcread();
+            uint16_t idx = (uint16_t)bread();
+            if (wop == OP_ILOAD || wop == OP_ALOAD) {
+                lload_w(idx);
+            } else if (wop == OP_ISTORE || wop == OP_ASTORE) {
+                lstore_w(idx);
+            } else if (wop == OP_IINC) {
+                int16_t v = bread();
+                uint16_t i = g_pjvm->cur_lb + idx;
+                uint16_t old = g_pjvm->loc_lo[i];
+                uint16_t inc = (uint16_t)v;
+                uint16_t nlo = old + inc;
+                uint16_t carry = (nlo < old) ? 1 : 0;
+                g_pjvm->loc_lo[i] = nlo;
+                g_pjvm->loc_hi[i] += SIGN16_HI(v) + carry;
+            } else {
+                pjvm_platform_trap(op, opc);
+                return;
+            }
+            break;
+        }
+#endif
+
         case OP_IMUL:  BINOP32(a * b)
         case OP_IDIV:  BINOP32(a / b)
         case OP_IREM:  BINOP32(a % b)
@@ -1357,41 +1600,41 @@ static void pjvm_exec(void) {
 
         /* --- invocation --------------------------------------------------- */
         case OP_INVOKESTATIC: case OP_INVOKESPECIAL: {
-            uint16_t mi = cpread();
+            pjvm_method_id_t mi = cpread();
             pjvm_inv(mi); break;
         }
         case OP_INVOKEVIRTUAL: {
-            uint16_t bmi = cpread();
-            uint8_t vs = m_vs[bmi];
-            if (vs == 0xFF) { pjvm_inv(bmi); }
+            pjvm_method_id_t bmi = cpread();
+            pjvm_vslot_t vs = m_vs[bmi];
+            if (vs == PJVM_NO_VTABLE) { pjvm_inv(bmi); }
             else {
                 uint16_t objref = g_pjvm->stk_lo[g_pjvm->sp - m_ac[bmi]];
-                uint8_t ci = (uint8_t)r16(objref);
+                pjvm_class_id_t ci = (pjvm_class_id_t)r16(objref);
                 pjvm_inv(vt[cls_vb[ci] + vs]);
             }
             break;
         }
         case OP_INVOKEINTERFACE: {
-            uint16_t bmi = cpread();
+            pjvm_method_id_t bmi = cpread();
             bcread(); bcread();
-            uint8_t vid = m_vmid[bmi];
+            pjvm_vmid_t vid = m_vmid[bmi];
             uint16_t objref = g_pjvm->stk_lo[g_pjvm->sp - m_ac[bmi]];
-            uint8_t ci = (uint8_t)r16(objref);
-            uint8_t found = 0xFF;
-            for (uint8_t k = 0; k < cls_vs[ci]; k++) {
+            pjvm_class_id_t ci = (pjvm_class_id_t)r16(objref);
+            pjvm_method_id_t found = PJVM_NO_VTABLE;
+            for (pjvm_count_t k = 0; k < cls_vs[ci]; k++) {
                 if (m_vmid[vt[cls_vb[ci] + k]] == vid) {
                     found = vt[cls_vb[ci] + k]; break;
                 }
             }
-            if (found != 0xFF) pjvm_inv(found);
+            if (found != PJVM_NO_VTABLE) pjvm_inv(found);
             else pjvm_platform_trap(0xB9, g_pjvm->pc);
             break;
         }
 
         /* --- object creation & type --------------------------------------- */
         case OP_NEW: {
-            uint16_t ci = cpread();
-            uint8_t nf = ci < n_classes ? cls_nf[ci] : 0;
+            pjvm_class_id_t ci = cpread();
+            pjvm_count_t nf = ci < n_classes ? cls_nf[ci] : 0;
             uint16_t a = heap_alloc(g_pjvm, (uint16_t)(PJVM_OBJ_HEADER + nf * 4),
                                     PJVM_HEAP_KIND_OBJECT);
             w16(a, ci); w16((uint16_t)(a + 2), 0);
@@ -1438,12 +1681,12 @@ static void pjvm_exec(void) {
         }
 
         case OP_CHECKCAST: {
-            uint16_t tci = cpread();
+            pjvm_class_id_t tci = cpread();
             alo = g_pjvm->stk_lo[g_pjvm->sp - 1];
             if (alo != 0) {
-                uint8_t ci = (uint8_t)r16(alo);
+                pjvm_class_id_t ci = (pjvm_class_id_t)r16(alo);
                 uint8_t ok = 0;
-                while (ci != 0xFF) {
+                while (ci != PJVM_NO_CLASS) {
                     if (ci == tci) { ok = 1; break; }
                     ci = cls_pid[ci];
                 }
@@ -1452,13 +1695,13 @@ static void pjvm_exec(void) {
             break;
         }
         case OP_INSTANCEOF: {
-            uint16_t tci = cpread();
+            pjvm_class_id_t tci = cpread();
             SPOP_U16(alo);
             if (alo == 0) { spush(0, 0); }
             else {
-                uint8_t ci = (uint8_t)r16(alo);
+                pjvm_class_id_t ci = (pjvm_class_id_t)r16(alo);
                 uint8_t match = 0;
-                while (ci != 0xFF) {
+                while (ci != PJVM_NO_CLASS) {
                     if (ci == tci) { match = 1; break; }
                     ci = cls_pid[ci];
                 }

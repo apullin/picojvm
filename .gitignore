@@ -1,5 +1,9 @@
 picojvm
+picojvm-large
+picojvm-paged
 build/
+__pycache__/
+*.pyc
 tests/*.class
 tests/*.pjvm
 tests/*.pjvmmap

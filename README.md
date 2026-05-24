@@ -248,11 +248,23 @@ make test-gc-suite
 
 picoJVM uses a custom binary format that pre-resolves the Java constant
 pool at pack time. The interpreter never parses class file structures at
-runtime — all symbolic references are flattened to byte-indexed lookups.
+runtime — all symbolic references are flattened to resolved lookup entries.
+`pjvmpack.py` also compacts each class's resolution slice by remapping CP
+operands in bytecode to dense local indices without changing instruction
+sizes or branch offsets.
 
 Sections (in order): header, class table, method table, constant pool
 resolution table, integer constants, string constants, bytecodes,
 exception table. All multi-byte values are little-endian.
+
+`pjvmpack.py` emits compact v3 images by default and auto-selects v4 when
+8-bit metadata limits are exceeded. Use `--format v3` or `--format v4` to
+force a version. The normal `picojvm` host/target build is intentionally
+v3-only; `make ./picojvm-large` builds a host VM with `PJVM_ENABLE_V4=1` and
+larger capacity tables for large-program experiments. v4-capable builds also
+enable the JVM `wide` prefix for local variable indexes above 255. Passing
+`--pack-method-table` to `pjvmpack.py` enables the compact v4 method-table
+encoding for large method-count images.
 
 See [PICOJVM_JAVAC_SPEC.md](PICOJVM_JAVAC_SPEC.md) for the full format
 specification.

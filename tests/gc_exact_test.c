@@ -54,6 +54,9 @@ void pjvm_platform_trap(uint8_t op, uint16_t pc) {
     failed = 1;
 }
 void pjvm_platform_out(uint16_t port, uint16_t val) { (void)port; (void)val; }
+int32_t pjvm_platform_key_read(void) { return -1; }
+int32_t pjvm_platform_term_info(uint16_t code) { (void)code; return 0; }
+int32_t pjvm_platform_ticks(void) { return 0; }
 int32_t pjvm_platform_file_open(const uint8_t *name, uint8_t nameLen, uint8_t mode) {
     (void)name; (void)nameLen; (void)mode; return -1;
 }

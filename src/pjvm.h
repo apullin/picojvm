@@ -37,6 +37,15 @@
 #ifndef PJVM_MAX_FRAMES
 #define PJVM_MAX_FRAMES 64
 #endif
+#ifndef PJVM_ENABLE_V4
+#define PJVM_ENABLE_V4 0
+#endif
+#ifndef PJVM_USE_OP_WIDE
+#define PJVM_USE_OP_WIDE PJVM_ENABLE_V4
+#endif
+#if PJVM_ENABLE_V4 && defined(PJVM_ASM_HELPERS)
+#error "PJVM_ENABLE_V4 changes PJVMCtx layout; disable 8085 ASM helpers for v4 builds"
+#endif
 
 #define PJVM_PC_HALT 0xFFFFFFFFu
 
@@ -44,19 +53,25 @@
 #define PJVM_TRAP_BAD_VERSION  0xFD
 #define PJVM_TRAP_STEP_LIMIT   0xFE
 #define PJVM_TRAP_BAD_NATIVE   0xFF
+#define PJVM_TRAP_CAPACITY     0xFC
 
-/* --- .pjvm v3 binary format constants -------------------------------- */
+/* --- .pjvm binary format constants ----------------------------------- */
 #define PJVM_MAGIC        0x85
 #define PJVM_VERSION_V3   0x4C
+#define PJVM_VERSION_V4   0x4D
 
 #define PJVM_HDR_SIZE_V3  16
-#define PJVM_MT_ENTRY     14   /* method table entry size */
-#define PJVM_ET_ENTRY     7    /* exception table entry size */
+#define PJVM_HDR_SIZE_V4  24
+#define PJVM_MT_ENTRY     14   /* v3 method table entry size */
+#define PJVM_MT_ENTRY_V4  24   /* v4 method table entry size */
+#define PJVM_ET_ENTRY     7    /* v3 exception table entry size */
+#define PJVM_ET_ENTRY_V4  8    /* v4 exception table entry size */
 
 /* region_flags (header byte 9) */
 #define PJVM_RF_PIN_HINTS  0x01   /* bit 0: pin hints present */
 #define PJVM_RF_REF_BITMAPS 0x02  /* bit 1: per-class ref bitmaps present */
 #define PJVM_RF_CONST_DATA 0x04   /* bit 2: const_data section present */
+#define PJVM_RF_PACKED_METHOD_TABLE 0x08 /* bit 3: v4 ULEB method table */
 
 /* CP resolution string flag / mask (16-bit) */
 #define PJVM_CP_STR_FLAG_16  0x8000
@@ -68,9 +83,31 @@
 #define PJVM_REF_ROM_STRING  0x8000
 
 /* sentinel values */
-#define PJVM_NO_CLASS     0xFF   /* parent_class_id / class_id = none */
-#define PJVM_NO_VTABLE    0xFF   /* vtable_slot = not virtual */
-#define PJVM_NO_CLINIT    0xFF   /* clinit_mi = no <clinit> */
+#if PJVM_ENABLE_V4
+typedef uint16_t pjvm_method_id_t;
+typedef uint16_t pjvm_class_id_t;
+typedef uint16_t pjvm_vslot_t;
+typedef uint16_t pjvm_vmid_t;
+typedef uint16_t pjvm_count_t;
+typedef uint16_t pjvm_flags_t;
+typedef uint32_t pjvm_cpbase_t;
+typedef uint32_t pjvm_rbo_t;
+#define PJVM_NO_CLASS     0xFFFFu /* parent_class_id / class_id = none */
+#define PJVM_NO_VTABLE    0xFFFFu /* vtable_slot = not virtual */
+#define PJVM_NO_CLINIT    0xFFFFu /* clinit_mi = no <clinit> */
+#else
+typedef uint8_t pjvm_method_id_t;
+typedef uint8_t pjvm_class_id_t;
+typedef uint8_t pjvm_vslot_t;
+typedef uint8_t pjvm_vmid_t;
+typedef uint8_t pjvm_count_t;
+typedef uint8_t pjvm_flags_t;
+typedef uint16_t pjvm_cpbase_t;
+typedef uint16_t pjvm_rbo_t;
+#define PJVM_NO_CLASS     0xFFu   /* parent_class_id / class_id = none */
+#define PJVM_NO_VTABLE    0xFFu   /* vtable_slot = not virtual */
+#define PJVM_NO_CLINIT    0xFFu   /* clinit_mi = no <clinit> */
+#endif
 
 /* const_data elem_type codes */
 #define PJVM_ELEM_BYTE    0
@@ -102,10 +139,10 @@
 /* --- per-execution context -------------------------------------------- */
 typedef struct {
     uint32_t pc;
-    uint16_t cb;
+    pjvm_cpbase_t cb;
     uint16_t lb;
     uint16_t so;
-    uint8_t  mi;
+    pjvm_method_id_t mi;
 } PJVMFrame;
 
 #ifdef PJVM_PAGED
@@ -140,9 +177,9 @@ typedef struct {
     uint16_t sf_lo[PJVM_STATIC_CAP], sf_hi[PJVM_STATIC_CAP];
     PJVMFrame frames[PJVM_MAX_FRAMES];
     uint32_t pc;
-    uint16_t cur_cb;
+    pjvm_cpbase_t cur_cb;
     uint16_t sp, lt, cur_lb;
-    uint8_t  cur_mi;
+    pjvm_method_id_t cur_mi;
     int8_t   fdepth;
     uint16_t heap_ptr;
     uint16_t heap_base;
@@ -163,13 +200,14 @@ typedef struct {
 /* --- globals (defined in core.c, readable by platform) ---------------- */
 extern uint8_t *pjvm_prog;
 extern uint32_t pjvm_prog_size;
-extern uint8_t  n_methods, main_mi, n_classes;
+extern pjvm_method_id_t n_methods, main_mi;
+extern pjvm_class_id_t n_classes;
 extern uint32_t bytecodes_size;
 extern uint32_t bc_off, cpr_off, ic_off, sc_off, et_off, cd_off;
 extern PJVMCtx *g_pjvm;
 extern uint8_t  region_flags;
-extern uint8_t  cls_nf[PJVM_CLASS_CAP];
-extern uint16_t cls_rbo[PJVM_CLASS_CAP];
+extern pjvm_count_t cls_nf[PJVM_CLASS_CAP];
+extern pjvm_rbo_t cls_rbo[PJVM_CLASS_CAP];
 
 #ifdef PJVM_ASM_HELPERS
 /* 8085 ASM helpers need direct pointers (non-paged target only) */

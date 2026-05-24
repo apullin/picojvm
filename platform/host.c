@@ -293,7 +293,8 @@ void pjvm_platform_trap(uint8_t op, uint16_t pc) {
         extern uint8_t pjvm_trace_enabled;
         extern uint32_t trace_idx;
         extern uint32_t trace_pc[];
-        extern uint8_t trace_op[], trace_mi[], trace_sp[];
+        extern uint8_t trace_op[], trace_sp[];
+        extern pjvm_method_id_t trace_mi[];
         extern uint16_t trace_stk0[];
         fprintf(stderr, "STEP LIMIT hit at pc=%u, mi=%u, sp=%u, fdepth=%d\n",
                 (unsigned)pc, (unsigned)g_pjvm->cur_mi,
@@ -391,8 +392,16 @@ static void load_pjvm(const char *path) {
     fclose(f);
 #endif
 
-    if (prog_data[0] != 0x85 || (prog_data[1] != 0x4A && prog_data[1] != 0x4B && prog_data[1] != 0x4C)) {
+    if (prog_data[0] != PJVM_MAGIC) {
         fprintf(stderr, "Bad .pjvm magic\n");
+        exit(1);
+    }
+    if (prog_data[1] != PJVM_VERSION_V3
+#if PJVM_ENABLE_V4
+        && prog_data[1] != PJVM_VERSION_V4
+#endif
+    ) {
+        fprintf(stderr, "Bad .pjvm version 0x%02X\n", (unsigned)prog_data[1]);
         exit(1);
     }
 

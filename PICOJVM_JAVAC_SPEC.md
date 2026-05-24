@@ -260,86 +260,144 @@ compiler and runtime.
 
 ### 3.1 Header
 
-**v1 header** (10 bytes):
-```
-Offset  Size  Field            Description
-0       1     magic_hi         0x85
-1       1     magic_lo         0x4A (v1)
-2       1     n_methods        Total method count (all classes)
-3       1     main_mi          Method index of main()
-4       1     n_static         Total static field count
-5       1     n_integers       Number of integer constants in CP
-6       1     n_classes        Number of classes
-7       1     n_strings        Number of string constants
-8       2     bytecodes_size   Total bytecode section size (16-bit LE)
-```
+The current runtime accepts v3 (`0x4C`) by default. v4 (`0x4D`) is a
+large-program extension compiled in with `PJVM_ENABLE_V4=1`.
 
-**v2 header** (14 bytes) — used when bytecode exceeds 64KB:
+**v3 header** (16 bytes):
 ```
 Offset  Size  Field            Description
-0       1     magic_hi         0x85
-1       1     magic_lo         0x4B (v2)
+0       1     magic            0x85
+1       1     version          0x4C
 2       1     n_methods        Total method count
 3       1     main_mi          Method index of main()
-4       1     n_static         Total static field count
-5       1     n_integers       Number of integer constants
-6       1     n_classes        Number of classes
-7       1     n_strings        Number of string constants
-8       4     bytecodes_size   Total bytecode size (32-bit LE)
-12      1     pager_flags      Bit 0: pin hints; bits 1-3: page_shift
-13      1     reserved         Must be 0
+4       2     n_static         Total static field count
+6       1     n_integers       Number of integer constants
+7       1     n_classes        Number of classes
+8       1     n_strings        Number of string constants
+9       1     region_flags     Pin hints / ref bitmaps / const_data flags
+10      4     bytecodes_size   Total bytecode section size
+14      2     reserved         Must be 0
 ```
 
-For picojc, v1 is sufficient unless compiling very large programs.
+**v4 header** (24 bytes):
+```
+Offset  Size  Field            Description
+0       1     magic            0x85
+1       1     version          0x4D
+2       2     n_methods        Total method count
+4       2     main_mi          Method index of main()
+6       2     n_static         Total static field count
+8       2     n_integers       Number of integer constants
+10      2     n_classes        Number of classes
+12      2     n_strings        Number of string constants
+14      2     region_flags     Same bits as v3
+16      4     bytecodes_size   Total bytecode section size
+20      4     reserved         Must be 0
+```
+
+`pjvmpack.py --format auto` emits v3 while all v3 limits fit and emits v4
+otherwise. Current picojc output remains v3.
+
+Runtime v4 support is enabled with `PJVM_ENABLE_V4=1`; those builds also enable
+the JVM `wide` prefix so bytecode can address local variable slots above 255.
+
+`region_flags` bits:
+
+```
+Bit 0  pin hints present
+Bit 1  exact-GC reference bitmaps present
+Bit 2  const_data section present
+Bit 3  v4 method table uses packed ULEB encoding
+```
 
 ### 3.2 Class Table
 
 Immediately follows header.  For each of `n_classes` (variable-length entries):
 
 ```
-Offset  Size        Field            Description
-0       1           parent_id        Parent class ID (0xFF = Object/root)
-1       1           n_instance_flds  Number of instance fields
-2       1           vtable_size      Number of vtable entries
-3       1           clinit_mi        <clinit> method index (0xFF = none)
-4       vtable_size vtable[]         Array of method indices
+Offset  Size             Field            Description
+0       id               parent_id        Parent class ID (sentinel = Object/root)
+id      count            n_instance_flds  Number of instance fields
+...     count            vtable_size      Number of vtable entries
+...     id               clinit_mi        <clinit> method index (sentinel = none)
+...     vtable_size*id   vtable[]         Array of method indices
+...     bitmap bytes     ref_bitmap       Optional exact-GC field bitmap
 ```
+
+For v3, `id` and `count` are 1 byte and the sentinel is `0xFF`. For v4,
+`id` and `count` are 2 bytes and the sentinel is `0xFFFF`.
 
 ### 3.3 Method Table
 
-For each of `n_methods` (12 bytes per entry in v1):
+For each of `n_methods`:
 
 ```
-Offset  Size  Field       Description
-0       1     max_locals  Max local variable slots needed
-1       1     max_stack   Max operand stack depth needed
-2       1     arg_count   Argument count (incl. 'this' for instance methods)
-3       1     flags       Bit 0: is_native; bits 1-7: native_id (if native)
-4       2     code_offset Bytecode offset (16-bit LE, v1)
-6       2     cp_base     This method's CP resolution table base offset
-8       1     vtable_slot Virtual method slot (0xFF = non-virtual)
-9       1     vmid        Virtual method ID for interface dispatch (0xFF = none)
-10      1     exc_count   Number of exception table entries
-11      1     exc_off_idx Exception table base index
+Field        v3 size  v4 size  Description
+max_locals   1        2        Max local variable slots needed
+max_stack    1        2        Max operand stack depth needed
+arg_count    1        2        Argument count, including this for instance methods
+flags        1        2        Bit 0: native; remaining bits: native_id
+code_offset  4        4        Bytecode offset
+cp_base      2        4        This method's CP resolution table byte base
+vtable_slot  1        2        Virtual method slot (sentinel = non-virtual)
+vmid         1        2        Virtual method ID for interface dispatch
+exc_count    1        2        Number of exception table entries
+exc_off_idx  1        2        Exception table base index
 ```
+
+The fixed entry size is 14 bytes in v3 and 24 bytes in v4.
+
+If v4 `region_flags` bit 3 is set, the method table is packed instead:
+
+```
+u32 packed_method_table_size
+method_entry[n_methods]
+```
+
+Each packed method entry is ULEB128 fields:
+
+```
+max_locals
+max_stack
+arg_count
+flags
+vtable_slot_plus_one      0 means no vtable slot
+vmid_plus_one             0 means no interface vmid
+```
+
+For non-native methods (`flags & 1 == 0`), these fields follow:
+
+```
+code_offset_delta         added to previous non-native code_offset
+cp_base_plus_one_or_zero  0 means same cp_base as previous non-native method
+exc_count
+exc_off_idx_plus_one_or_zero  0 means same exception base as previous non-native method
+```
+
+Native methods omit code/CP/exception fields. The runtime expands this packed
+form into the same in-memory arrays used by fixed v4 tables during
+`pjvm_parse_v4()`.
 
 ### 3.4 Constant Pool Resolution Table
 
 ```
 Offset  Size      Field     Description
-0       2         cp_size   Size of resolution array (16-bit LE)
-2       cp_size   entries[] Pre-resolved values (1 byte each):
-                            - Methodref: resolved method index (u8)
+0       2/4       cp_size   Size of resolution array in bytes (v3 u16, v4 u32)
+...     cp_size   entries[] Pre-resolved values (16-bit LE):
+                            - Methodref: resolved method index
                             - Fieldref (static): static field slot
                             - Fieldref (instance): instance field slot
-                            - String: 0x80 | string_index
+                            - String: 0x8000 | string_index
                             - Class: class_id
-                            - Unresolved: 0xFF
+                            - Unresolved: 0xFFFF
 ```
 
 This is the key optimization in .pjvm: the Java constant pool (complex, multi-
-level indirection) is flattened into a simple byte-indexed lookup table at pack
+level indirection) is flattened into a simple resolved lookup table at pack
 time.  The interpreter never parses constant pool structures at runtime.
+`pjvmpack.py` compacts this table by remapping bytecode CP operands to dense
+per-class indices; instruction sizes do not change, so branch offsets and
+exception PCs remain valid.
 
 ### 3.5 Integer Constants
 
@@ -361,7 +419,8 @@ No null terminator.
 
 Raw JVM bytecode stream, `bytecodes_size` bytes.  All methods' bytecodes
 concatenated.  Each method's `code_offset` in the method table points into this
-section.
+section. v4-capable runtimes support the `wide` prefix for `iload`, `aload`,
+`istore`, `astore`, and `iinc`; v3-only builds may omit that handler.
 
 ### 3.8 Exception Table
 
@@ -589,14 +648,14 @@ generate any code.
 6. Assign method indices (global flat array)
 7. Build CP resolution index:
    - For each symbolic reference (method call, field access, class reference),
-     assign a CP index resolving to the concrete method/field/class
+     assign a compact CP index resolving to the concrete method/field/class
 8. Assign interface method vmids for invokeinterface
 9. Determine max_locals and max_stack per method (requires light parsing of
    method body to count local declarations and estimate stack depth)
 
 **Output**: Fully resolved symbol table with:
 - Class IDs, field slots, method indices, vtable contents
-- CP resolution entries (one byte each)
+- CP resolution entries (16-bit in v3)
 - Per-method: code_offset (to be filled in Pass 3), cp_base, max_locals,
   max_stack, exc_count
 
@@ -632,9 +691,9 @@ time).
 **Goal**: Assemble the final .pjvm binary.
 
 **Algorithm**:
-1. Write header (10 or 14 bytes)
+1. Write header (16 bytes for v3, 24 bytes for v4)
 2. Write class table (variable-length, includes vtables)
-3. Write method table (12 bytes per method)
+3. Write method table (14 bytes per v3 method, 24 bytes per v4 method)
 4. Write CP resolution table
 5. Write integer constants
 6. Write string constants
@@ -707,8 +766,8 @@ entire source.
 The `.pjvm` output is written to storage sequentially.  Since Pass 4 (Link) has
 a defined section order, the output is written section-by-section.  The only
 wrinkle: method table entries need `code_offset` values from Pass 3, so the
-method table must be held in RAM until Pass 4 writes it.  At 12 bytes × 64
-methods = 768 bytes, this is fine.
+method table must be held in RAM until Pass 4 writes it.  At 14 bytes × 64
+methods = 896 bytes for v3, this is fine.
 
 ---
 
@@ -904,7 +963,9 @@ it during Pass 2-3.
 
 Each method has a contiguous range of CP entries starting at its `cp_base`.
 When the method's bytecode uses a 2-byte CP index (e.g., in INVOKEVIRTUAL),
-that index maps into this range.
+that index maps into this range.  In `pjvmpack.py` output, CP operands are
+not required to match the original classfile CP indices; the packer rewrites
+them to dense local indices and emits only the referenced entries.
 
 | Entry Type | Resolved Value |
 |-----------|---------------|
@@ -2449,14 +2510,14 @@ public class Fib {
 
 ```
 Bytes       Section
-[0..15]     Header (16 bytes, v3)
-[16..]      Class table (variable)
-[..]        Method table (n_methods × 14 bytes)
-[..]        CP resolution table (variable, 16-bit entries in v3)
+[..]        Header (16 bytes v3, 24 bytes v4)
+[..]        Class table (variable; 8-bit ids in v3, 16-bit ids in v4)
+[..]        Method table (n_methods × 14 bytes v3, × 24 bytes v4)
+[..]        CP resolution table (u16 byte length in v3, u32 byte length in v4)
 [..]        Integer constants (n_integers × 4 bytes)
 [..]        String constants (variable)
 [..]        Bytecode section (bytecodes_size bytes)
-[..]        Exception table (Σ exc_count × 7 bytes)
+[..]        Exception table (Σ exc_count × 7 bytes v3, × 8 bytes v4)
 [..]        Constant data section (optional, see D.9)
 ```
 
@@ -2574,8 +2635,9 @@ indicated by a flag in the header:
 
 **Header field** (v3, byte 9 `region_flags`):
 - Bit 0: pin hints present (existing)
-- Bit 1: reserved (existing)
+- Bit 1: exact-GC reference bitmaps present
 - **Bit 2**: `const_data` section present
+- Bit 3: v4 packed method table present
 
 **Section layout**:
 ```

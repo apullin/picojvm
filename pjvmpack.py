@@ -5,7 +5,8 @@ pjvmpack.py — Convert Java .class files to .pjvm format for picoJVM.
 Supports multiple classes with inheritance, vtable dispatch, and object fields.
 The .pjvm format pre-resolves all constant pool references so the 8085
 interpreter never needs to parse a class file. Bytecode streams are
-preserved unmodified (branch offsets intact).
+preserved except that CP index operands are remapped to dense per-class
+resolution slices (instruction sizes and branch offsets stay intact).
 
 Usage:
     javac Fib.java
@@ -22,23 +23,39 @@ import os
 # --- .pjvm format constants (must be kept in sync with pjvm.h) ---
 PJVM_MAGIC        = 0x85
 PJVM_VERSION_V3   = 0x4C
+PJVM_VERSION_V4   = 0x4D
 PJVM_HDR_SIZE_V3  = 16
-PJVM_MT_ENTRY  = 14      # method table entry size (v2+)
+PJVM_HDR_SIZE_V4  = 24
+PJVM_MT_ENTRY     = 14      # v3 method table entry size
+PJVM_MT_ENTRY_V4  = 24
 PJVM_ET_ENTRY     = 7       # exception table entry size
+PJVM_ET_ENTRY_V4  = 8
 
 # region_flags (header byte 9)
 PJVM_RF_PIN_HINTS  = 0x01   # bit 0: pin hints present
 PJVM_RF_REF_BITMAPS = 0x02  # bit 1: per-class ref bitmaps present
 PJVM_RF_CONST_DATA = 0x04   # bit 2: const_data section present
+PJVM_RF_PACKED_METHOD_TABLE = 0x08  # bit 3: v4 method table is ULEB-packed
 
 # CP resolution flags
 PJVM_CP_STR_FLAG   = 0x8000 # v3: string constant flag
 PJVM_CP_UNRESOLVED = 0xFFFF # unresolved CP entry
 
-# sentinel values
-PJVM_NO_CLASS  = 0xFF       # no parent class / no class_id
-PJVM_NO_VTABLE = 0xFF       # not a virtual method
-PJVM_NO_CLINIT = 0xFF       # no <clinit> method
+# Internal sentinels. File-format sentinels are applied only while emitting:
+# v3 uses 0xFF; v4 uses 0xFFFF.
+PJVM_NO_CLASS  = -1         # no parent class / no class_id
+PJVM_NO_VTABLE = -1         # not a virtual method
+PJVM_NO_CLINIT = -1         # no <clinit> method
+
+# v3 still uses one-byte ids/counts for classes, methods, vtable slots, and
+# several constant sections.  Real class/method ids must stay below 0xFF
+# because 0xFF is also used as the sentinel value in the runtime format.
+PJVM_MAX_U8 = 0xFF
+PJVM_MAX_REAL_ID = 0xFE
+PJVM_MAX_U16 = 0xFFFF
+PJVM_MAX_REAL_ID_V4 = 0xFFFE
+PJVM_MAX_VTABLE_ENTRIES_V3 = 0x100
+PJVM_MAX_VTABLE_ENTRIES_V4 = 0x10000
 
 # JVM access flags
 ACC_STATIC = 0x0008
@@ -65,6 +82,62 @@ CP_NAME_AND_TYPE = 12
 CP_METHOD_HANDLE = 15
 CP_METHOD_TYPE = 16
 CP_INVOKE_DYNAMIC = 18
+
+# Bytecodes whose operands contain constant-pool indices.
+OP_LDC = 0x12
+OP_LDC_W = 0x13
+OP_LDC2_W = 0x14
+OP_GETSTATIC = 0xB2
+OP_PUTSTATIC = 0xB3
+OP_GETFIELD = 0xB4
+OP_PUTFIELD = 0xB5
+OP_INVOKEVIRTUAL = 0xB6
+OP_INVOKESPECIAL = 0xB7
+OP_INVOKESTATIC = 0xB8
+OP_INVOKEINTERFACE = 0xB9
+OP_INVOKEDYNAMIC = 0xBA
+OP_NEW = 0xBB
+OP_ANEWARRAY = 0xBD
+OP_CHECKCAST = 0xC0
+OP_INSTANCEOF = 0xC1
+OP_MULTIANEWARRAY = 0xC5
+
+CPREF_U1_OPS = {OP_LDC}
+CPREF_U2_OPS = {
+    OP_LDC_W, OP_LDC2_W, OP_GETSTATIC, OP_PUTSTATIC, OP_GETFIELD,
+    OP_PUTFIELD, OP_INVOKEVIRTUAL, OP_INVOKESPECIAL, OP_INVOKESTATIC,
+    OP_INVOKEINTERFACE, OP_INVOKEDYNAMIC, OP_NEW, OP_ANEWARRAY,
+    OP_CHECKCAST, OP_INSTANCEOF, OP_MULTIANEWARRAY,
+}
+
+FIXED_OPCODE_LENGTHS = [1] * 256
+for _op in range(0x10, 0x12):
+    FIXED_OPCODE_LENGTHS[_op] = _op - 0x0E  # bipush=2, sipush=3
+FIXED_OPCODE_LENGTHS[0x12] = 2
+FIXED_OPCODE_LENGTHS[0x13] = 3
+FIXED_OPCODE_LENGTHS[0x14] = 3
+for _op in range(0x15, 0x1A):  # iload..aload
+    FIXED_OPCODE_LENGTHS[_op] = 2
+for _op in range(0x36, 0x3B):  # istore..astore
+    FIXED_OPCODE_LENGTHS[_op] = 2
+FIXED_OPCODE_LENGTHS[0x84] = 3  # iinc
+for _op in range(0x99, 0xA9):  # if*, goto, jsr
+    FIXED_OPCODE_LENGTHS[_op] = 3
+FIXED_OPCODE_LENGTHS[0xA9] = 2  # ret
+for _op in range(0xB2, 0xB9):  # get/put/invoke/new refs through invokestatic
+    FIXED_OPCODE_LENGTHS[_op] = 3
+FIXED_OPCODE_LENGTHS[0xB9] = 5  # invokeinterface
+FIXED_OPCODE_LENGTHS[0xBA] = 5  # invokedynamic
+FIXED_OPCODE_LENGTHS[0xBB] = 3  # new
+FIXED_OPCODE_LENGTHS[0xBC] = 2  # newarray
+FIXED_OPCODE_LENGTHS[0xBD] = 3  # anewarray
+FIXED_OPCODE_LENGTHS[0xC0] = 3  # checkcast
+FIXED_OPCODE_LENGTHS[0xC1] = 3  # instanceof
+FIXED_OPCODE_LENGTHS[0xC5] = 4  # multianewarray
+FIXED_OPCODE_LENGTHS[0xC6] = 3  # ifnull
+FIXED_OPCODE_LENGTHS[0xC7] = 3  # ifnonnull
+FIXED_OPCODE_LENGTHS[0xC8] = 5  # goto_w
+FIXED_OPCODE_LENGTHS[0xC9] = 5  # jsr_w
 
 # --- Native method IDs ---
 NATIVE_IDS = {
@@ -164,6 +237,44 @@ def is_ref_descriptor(descriptor):
     return descriptor.startswith("L") or descriptor.startswith("[")
 
 
+def require_u8(label, value):
+    if value < 0 or value > PJVM_MAX_U8:
+        raise ValueError(f"{label} {value} exceeds .pjvm u8 limit ({PJVM_MAX_U8})")
+
+
+def require_u16(label, value):
+    if value < 0 or value > PJVM_MAX_U16:
+        raise ValueError(f"{label} {value} exceeds .pjvm u16 limit ({PJVM_MAX_U16})")
+
+
+def require_real_id(label, value):
+    if value < 0 or value > PJVM_MAX_REAL_ID:
+        raise ValueError(
+            f"{label} {value} exceeds .pjvm id limit ({PJVM_MAX_REAL_ID}; 0xFF is reserved)"
+        )
+
+
+def require_real_id_v4(label, value):
+    if value < 0 or value > PJVM_MAX_REAL_ID_V4:
+        raise ValueError(
+            f"{label} {value} exceeds .pjvm v4 id limit ({PJVM_MAX_REAL_ID_V4}; 0xFFFF is reserved)"
+        )
+
+
+def write_uleb(value):
+    if value < 0:
+        raise ValueError(f"negative ULEB value: {value}")
+    out = bytearray()
+    while True:
+        b = value & 0x7F
+        value >>= 7
+        if value:
+            out.append(b | 0x80)
+        else:
+            out.append(b)
+            return bytes(out)
+
+
 def _skip_annotation_value(r):
     """Skip a single annotation element_value (JVM spec §4.7.16.1)."""
     tag = r.u1()
@@ -182,6 +293,96 @@ def _skip_annotation_value(r):
         nvals = r.u2()
         for _ in range(nvals):
             _skip_annotation_value(r)
+
+
+def _read_s4_be(buf, off):
+    return struct.unpack_from(">i", buf, off)[0]
+
+
+def bytecode_cp_operands(bytecode):
+    """Yield (operand_offset, width, opcode, cp_index) for CP-index operands.
+
+    The scanner understands full Java 8 instruction lengths so compacting CP
+    indices does not accidentally parse bytes inside tableswitch/lookupswitch
+    payloads as opcodes.
+    """
+    i = 0
+    n = len(bytecode)
+    while i < n:
+        op = bytecode[i]
+        if op in CPREF_U1_OPS:
+            if i + 1 >= n:
+                raise ValueError(f"Truncated bytecode at opcode 0x{op:02X}")
+            yield i + 1, 1, op, bytecode[i + 1]
+            i += 2
+        elif op in CPREF_U2_OPS:
+            if i + 2 >= n:
+                raise ValueError(f"Truncated bytecode at opcode 0x{op:02X}")
+            cp_idx = (bytecode[i + 1] << 8) | bytecode[i + 2]
+            yield i + 1, 2, op, cp_idx
+            i += FIXED_OPCODE_LENGTHS[op]
+        elif op == 0xAA:  # tableswitch
+            j = i + 1
+            while j & 3:
+                j += 1
+            if j + 12 > n:
+                raise ValueError("Truncated tableswitch")
+            low = _read_s4_be(bytecode, j + 4)
+            high = _read_s4_be(bytecode, j + 8)
+            count = high - low + 1
+            if count < 0:
+                raise ValueError("Invalid tableswitch range")
+            i = j + 12 + count * 4
+            if i > n:
+                raise ValueError("Truncated tableswitch entries")
+        elif op == 0xAB:  # lookupswitch
+            j = i + 1
+            while j & 3:
+                j += 1
+            if j + 8 > n:
+                raise ValueError("Truncated lookupswitch")
+            npairs = _read_s4_be(bytecode, j + 4)
+            if npairs < 0:
+                raise ValueError("Invalid lookupswitch npairs")
+            i = j + 8 + npairs * 8
+            if i > n:
+                raise ValueError("Truncated lookupswitch pairs")
+        elif op == 0xC4:  # wide
+            if i + 1 >= n:
+                raise ValueError("Truncated wide opcode")
+            i += 6 if bytecode[i + 1] == 0x84 else 4
+            if i > n:
+                raise ValueError("Truncated wide operands")
+        else:
+            i += FIXED_OPCODE_LENGTHS[op]
+
+
+def rewrite_bytecode_cp_indices(bytecode, cp_index_map):
+    """Return bytecode with all CP operands rewritten through cp_index_map."""
+    out = bytearray(bytecode)
+    for off, width, op, old_idx in bytecode_cp_operands(bytecode):
+        if old_idx not in cp_index_map:
+            raise ValueError(f"Missing compact CP mapping for index {old_idx}")
+        new_idx = cp_index_map[old_idx]
+        if width == 1:
+            if new_idx > 0xFF:
+                raise ValueError(f"Compacted ldc index {new_idx} exceeds u8")
+            out[off] = new_idx
+        else:
+            if new_idx > 0xFFFF:
+                raise ValueError(f"Compacted CP index {new_idx} exceeds u16")
+            out[off] = (new_idx >> 8) & 0xFF
+            out[off + 1] = new_idx & 0xFF
+    return bytes(out)
+
+
+def add_ordered_cp_use(uses, cp_idx, is_ldc):
+    if cp_idx not in uses["all_set"]:
+        uses["all_set"].add(cp_idx)
+        uses["all"].append(cp_idx)
+    if is_ldc and cp_idx not in uses["ldc_set"]:
+        uses["ldc_set"].add(cp_idx)
+        uses["ldc"].append(cp_idx)
 
 
 def parse_class(data):
@@ -560,7 +761,9 @@ def topological_sort(classes):
     return order
 
 
-def pack_pjvm(class_data_list, verbose=False, v2=False, pin_hints=None):  # v2 ignored, always v3
+def pack_pjvm(class_data_list, verbose=False, v2=False, pin_hints=None,
+              compact_cp=True, pjvm_format="auto",
+              pack_method_table=False):  # v2 ignored, v3/v4 only
     """Pack one or more .class files into a single .pjvm binary."""
 
     # --- Step 1: Parse all classes ---
@@ -838,12 +1041,38 @@ def pack_pjvm(class_data_list, verbose=False, v2=False, pin_hints=None):  # v2 i
     if main_index is None:
         raise ValueError("No main method found")
 
+    # Record exactly which original classfile CP indices are referenced from
+    # executable bytecode.  Compact mode remaps only these entries into a dense
+    # per-class .pjvm resolution slice.
+    class_by_id = {}
+    for name in class_order:
+        class_by_id[classes[name].class_id] = name
+    class_cp_uses = {}
+    for name in class_order:
+        class_cp_uses[name] = {
+            "all": [],
+            "all_set": set(),
+            "ldc": [],
+            "ldc_set": set(),
+        }
+    for mt in method_table:
+        cid = mt["class_id"]
+        if mt["is_native"] or cid == PJVM_NO_CLASS:
+            continue
+        cname = class_by_id[cid]
+        uses = class_cp_uses[cname]
+        for _off, _width, op, cp_idx in bytecode_cp_operands(mt["bytecode"]):
+            add_ordered_cp_use(uses, cp_idx, op == OP_LDC)
+
     # --- Step 6: Add native/external methods ---
     native_cache = {}  # (class, name, desc) -> global method index
 
     for name in class_order:
         cls = classes[name]
-        for cp_idx in range(1, len(cls.cp)):
+        cp_scan = class_cp_uses[name]["all"] if compact_cp else range(1, len(cls.cp))
+        for cp_idx in cp_scan:
+            if cp_idx <= 0 or cp_idx >= len(cls.cp):
+                raise ValueError(f"{name}: bytecode references invalid CP index {cp_idx}")
             entry = cls.cp[cp_idx]
             if entry is None or entry[0] != "Methodref":
                 continue
@@ -932,7 +1161,10 @@ def pack_pjvm(class_data_list, verbose=False, v2=False, pin_hints=None):  # v2 i
     # --- Step 6b: Add interface method stubs ---
     for name in class_order:
         cls = classes[name]
-        for cp_idx in range(1, len(cls.cp)):
+        cp_scan = class_cp_uses[name]["all"] if compact_cp else range(1, len(cls.cp))
+        for cp_idx in cp_scan:
+            if cp_idx <= 0 or cp_idx >= len(cls.cp):
+                raise ValueError(f"{name}: bytecode references invalid CP index {cp_idx}")
             entry = cls.cp[cp_idx]
             if entry is None or entry[0] != "InterfaceMethodref":
                 continue
@@ -979,17 +1211,27 @@ def pack_pjvm(class_data_list, verbose=False, v2=False, pin_hints=None):  # v2 i
         total_static_fields += len(cls.static_fields)
 
     cp_bases = {}  # class_name -> cp_base offset
+    cp_old_entries = 0
+    cp_new_entries = 0
 
     for name in class_order:
         cls = classes[name]
         cp = cls.cp
+        cp_old_entries += len(cp)
+        if compact_cp:
+            cp_indices = class_cp_uses[name]["all"]
+            for cp_idx in cp_indices:
+                if cp_idx <= 0 or cp_idx >= len(cp):
+                    raise ValueError(f"{name}: bytecode references invalid CP index {cp_idx}")
+        else:
+            cp_indices = range(1, len(cp))
         cp_base = len(global_cp_resolve) * 2  # byte offset (2 bytes per entry)
         cp_bases[name] = cp_base
 
         cp_resolve = [PJVM_CP_UNRESOLVED] * len(cp)
 
         # Resolve Methodrefs
-        for cp_idx in range(1, len(cp)):
+        for cp_idx in cp_indices:
             entry = cp[cp_idx]
             if entry is None or entry[0] != "Methodref":
                 continue
@@ -1021,7 +1263,7 @@ def pack_pjvm(class_data_list, verbose=False, v2=False, pin_hints=None):  # v2 i
                       f"{ref_class}.{ref_method}{ref_desc}")
 
         # Resolve InterfaceMethodrefs
-        for cp_idx in range(1, len(cp)):
+        for cp_idx in cp_indices:
             entry = cp[cp_idx]
             if entry is None or entry[0] != "InterfaceMethodref":
                 continue
@@ -1031,7 +1273,7 @@ def pack_pjvm(class_data_list, verbose=False, v2=False, pin_hints=None):  # v2 i
                 cp_resolve[cp_idx] = native_cache[nkey]
 
         # Resolve Fieldrefs
-        for cp_idx in range(1, len(cp)):
+        for cp_idx in cp_indices:
             entry = cp[cp_idx]
             if entry is None or entry[0] != "Fieldref":
                 continue
@@ -1072,7 +1314,7 @@ def pack_pjvm(class_data_list, verbose=False, v2=False, pin_hints=None):  # v2 i
                     walk = tc.parent_name
 
         # Resolve Integer constants
-        for cp_idx in range(1, len(cp)):
+        for cp_idx in cp_indices:
             entry = cp[cp_idx]
             if entry is None or entry[0] != "Integer":
                 continue
@@ -1081,7 +1323,7 @@ def pack_pjvm(class_data_list, verbose=False, v2=False, pin_hints=None):  # v2 i
             cp_resolve[cp_idx] = ic_idx
 
         # Resolve String constants → 0x80 | string_index
-        for cp_idx in range(1, len(cp)):
+        for cp_idx in cp_indices:
             entry = cp[cp_idx]
             if entry is None or entry[0] != "String":
                 continue
@@ -1095,7 +1337,7 @@ def pack_pjvm(class_data_list, verbose=False, v2=False, pin_hints=None):  # v2 i
             cp_resolve[cp_idx] = PJVM_CP_STR_FLAG | sc_idx
 
         # Resolve Class refs → class_id (for 'new' and 'anewarray')
-        for cp_idx in range(1, len(cp)):
+        for cp_idx in cp_indices:
             entry = cp[cp_idx]
             if entry is None or entry[0] != "Class":
                 continue
@@ -1103,7 +1345,24 @@ def pack_pjvm(class_data_list, verbose=False, v2=False, pin_hints=None):  # v2 i
             if ref_name in classes:
                 cp_resolve[cp_idx] = classes[ref_name].class_id
 
-        global_cp_resolve.extend(cp_resolve)
+        if compact_cp:
+            uses = class_cp_uses[name]
+            ldc_order = [idx for idx in uses["ldc"] if idx in uses["all_set"]]
+            if len(ldc_order) > 256:
+                raise ValueError(f"{name}: too many distinct ldc CP references")
+            ldc_set = set(ldc_order)
+            cp_order = ldc_order + [idx for idx in uses["all"] if idx not in ldc_set]
+            cp_index_map = {old_idx: new_idx for new_idx, old_idx in enumerate(cp_order)}
+            global_cp_resolve.extend(cp_resolve[old_idx] for old_idx in cp_order)
+            cp_new_entries += len(cp_order)
+
+            for mt in method_table:
+                if mt["is_native"] or mt["class_id"] != cls.class_id:
+                    continue
+                mt["bytecode"] = rewrite_bytecode_cp_indices(mt["bytecode"], cp_index_map)
+        else:
+            global_cp_resolve.extend(cp_resolve)
+            cp_new_entries += len(cp_resolve)
 
     # Set cp_base on all method entries
     for mt in method_table:
@@ -1124,7 +1383,7 @@ def pack_pjvm(class_data_list, verbose=False, v2=False, pin_hints=None):  # v2 i
                 catch_cid = PJVM_NO_CLASS  # catch-all (finally)
             else:
                 # Resolve CP index to class name, then to class_id
-                cid = mt.get("class_id", 0xFF)
+                cid = mt.get("class_id", PJVM_NO_CLASS)
                 catch_cid = PJVM_NO_CLASS
                 # Find the class whose CP owns this method
                 if cid != PJVM_NO_CLASS:
@@ -1182,38 +1441,258 @@ def pack_pjvm(class_data_list, verbose=False, v2=False, pin_hints=None):  # v2 i
             bytecode_section.extend(mt["bytecode"])
 
     # --- Step 9: Emit .pjvm binary ---
+    if pjvm_format not in ("auto", "v3", "v4"):
+        raise ValueError(f"Unknown .pjvm format: {pjvm_format}")
+
+    cp_bytes = len(global_cp_resolve) * 2
+    total_vtable_entries = sum(len(classes[name].vtable) for name in class_order)
+    if len(global_int_constants) > 0x8000:
+        raise ValueError("Integer constant count exceeds 16-bit CP entry tagging limit")
+    if len(global_string_constants) > 0x8000:
+        raise ValueError("String constant count exceeds 16-bit CP entry tagging limit")
+    for i, val in enumerate(global_cp_resolve):
+        require_u16(f"CP resolution entry #{i}", val)
+
+    def v3_needs_wide():
+        if len(method_table) > PJVM_MAX_U8 or main_index > PJVM_MAX_REAL_ID:
+            return True
+        if len(global_int_constants) > PJVM_MAX_U8:
+            return True
+        if len(class_order) > PJVM_MAX_U8:
+            return True
+        if len(global_string_constants) > PJVM_MAX_U8:
+            return True
+        if cp_bytes > PJVM_MAX_U16:
+            return True
+        if total_vtable_entries > PJVM_MAX_VTABLE_ENTRIES_V3:
+            return True
+        for cname in class_order:
+            c = classes[cname]
+            if c.parent_class_id != PJVM_NO_CLASS and c.parent_class_id > PJVM_MAX_REAL_ID:
+                return True
+            if len(c.all_instance_fields) > PJVM_MAX_U8:
+                return True
+            if len(c.vtable) > PJVM_MAX_U8:
+                return True
+            if c.clinit_mi != PJVM_NO_CLINIT and c.clinit_mi > PJVM_MAX_REAL_ID:
+                return True
+            if any(vt_entry > PJVM_MAX_REAL_ID for vt_entry in c.vtable):
+                return True
+        for mt in method_table:
+            if mt["max_locals"] > PJVM_MAX_U8 or mt["max_stack"] > PJVM_MAX_U8:
+                return True
+            if mt["arg_count"] > PJVM_MAX_U8:
+                return True
+            if mt["cp_base"] > PJVM_MAX_U16:
+                return True
+            if mt["vtable_slot"] != PJVM_NO_VTABLE and mt["vtable_slot"] > PJVM_MAX_REAL_ID:
+                return True
+            if mt.get("vmid", PJVM_NO_VTABLE) != PJVM_NO_VTABLE and mt["vmid"] > PJVM_MAX_REAL_ID:
+                return True
+            if mt["exc_count"] > PJVM_MAX_U8 or mt["exc_offset_idx"] > PJVM_MAX_U8:
+                return True
+        return any(catch_cid != PJVM_NO_CLASS and catch_cid > PJVM_MAX_REAL_ID
+                   for (_start, _end, _handler, catch_cid) in global_exc_table)
+
+    needs_v4 = v3_needs_wide() or pack_method_table
+    if pjvm_format == "auto":
+        emit_v4 = needs_v4
+    elif pjvm_format == "v4":
+        emit_v4 = True
+    else:
+        if needs_v4:
+            raise ValueError(".pjvm v3 limits exceeded; use --format v4")
+        emit_v4 = False
+
+    if pack_method_table and not emit_v4:
+        raise ValueError("packed method tables require .pjvm v4")
+
+    require_u16("static field count", total_static_fields)
+    if emit_v4:
+        if total_vtable_entries > PJVM_MAX_VTABLE_ENTRIES_V4:
+            raise ValueError("Total vtable entries exceed .pjvm v4 runtime base limit")
+    elif total_vtable_entries > PJVM_MAX_VTABLE_ENTRIES_V3:
+        raise ValueError("Total vtable entries exceed .pjvm v3 runtime base limit")
+
+    for name in class_order:
+        cls = classes[name]
+        if emit_v4:
+            if cls.parent_class_id != PJVM_NO_CLASS:
+                require_real_id_v4(f"{name} parent class id", cls.parent_class_id)
+            require_u16(f"{name} instance field count", len(cls.all_instance_fields))
+            require_u16(f"{name} vtable size", len(cls.vtable))
+            if cls.clinit_mi != PJVM_NO_CLINIT:
+                require_real_id_v4(f"{name} <clinit> method index", cls.clinit_mi)
+            for vt_entry in cls.vtable:
+                require_real_id_v4(f"{name} vtable method index", vt_entry)
+        else:
+            if cls.parent_class_id != PJVM_NO_CLASS:
+                require_real_id(f"{name} parent class id", cls.parent_class_id)
+            require_u8(f"{name} instance field count", len(cls.all_instance_fields))
+            require_u8(f"{name} vtable size", len(cls.vtable))
+            if cls.clinit_mi != PJVM_NO_CLINIT:
+                require_real_id(f"{name} <clinit> method index", cls.clinit_mi)
+            for vt_entry in cls.vtable:
+                require_real_id(f"{name} vtable method index", vt_entry)
+
+    for i, mt in enumerate(method_table):
+        if emit_v4:
+            require_u16(f"method #{i} max_locals", mt["max_locals"])
+            require_u16(f"method #{i} max_stack", mt["max_stack"])
+            require_u16(f"method #{i} arg_count", mt["arg_count"])
+        else:
+            require_u8(f"method #{i} max_locals", mt["max_locals"])
+            require_u8(f"method #{i} max_stack", mt["max_stack"])
+            require_u8(f"method #{i} arg_count", mt["arg_count"])
+        flags = 0
+        if mt["is_native"]:
+            flags = 1 | (mt["native_id"] << 1)
+        if emit_v4:
+            require_u16(f"method #{i} flags", flags)
+            require_u16(f"method #{i} vtable slot",
+                        0 if mt["vtable_slot"] == PJVM_NO_VTABLE else mt["vtable_slot"])
+            require_u16(f"method #{i} virtual method id",
+                        0 if mt.get("vmid", PJVM_NO_VTABLE) == PJVM_NO_VTABLE else mt["vmid"])
+            require_u16(f"method #{i} exception count", mt["exc_count"])
+            require_u16(f"method #{i} exception offset", mt["exc_offset_idx"])
+        else:
+            require_u8(f"method #{i} flags", flags)
+            require_u16(f"method #{i} cp_base", mt["cp_base"])
+            if mt["vtable_slot"] != PJVM_NO_VTABLE:
+                require_real_id(f"method #{i} vtable slot", mt["vtable_slot"])
+            if mt.get("vmid", PJVM_NO_VTABLE) != PJVM_NO_VTABLE:
+                require_real_id(f"method #{i} virtual method id", mt["vmid"])
+            require_u8(f"method #{i} exception count", mt["exc_count"])
+            require_u8(f"method #{i} exception offset", mt["exc_offset_idx"])
+
+    for i, (_start, _end, _handler, catch_cid) in enumerate(global_exc_table):
+        if catch_cid != PJVM_NO_CLASS:
+            if emit_v4:
+                require_real_id_v4(f"exception #{i} catch class id", catch_cid)
+            else:
+                require_real_id(f"exception #{i} catch class id", catch_cid)
+
     out = bytearray()
 
-    # v3 Header (16 bytes): 16-bit CP entries, 16-bit n_static_fields
-    hdr_size = PJVM_HDR_SIZE_V3
-    mt_entry_size = PJVM_MT_ENTRY
     region_flags = 0
     if pin_hints:
         region_flags |= PJVM_RF_PIN_HINTS
     region_flags |= PJVM_RF_REF_BITMAPS
     if const_arrays:
         region_flags |= PJVM_RF_CONST_DATA
-    out.append(PJVM_MAGIC)     # [0] magic
-    out.append(PJVM_VERSION_V3)  # [1] v3
-    out.append(len(method_table))  # [2]
-    out.append(main_index)     # [3]
-    out.extend(struct.pack("<H", total_static_fields))  # [4..5] 16-bit
-    out.append(len(global_int_constants))   # [6]
-    out.append(len(class_order))            # [7]
-    out.append(len(global_string_constants))# [8]
-    out.append(region_flags)   # [9]
-    out.extend(struct.pack("<I", len(bytecode_section)))  # [10..13] 32-bit
-    out.extend(struct.pack("<H", 0))  # [14..15] reserved
+    if pack_method_table and emit_v4:
+        region_flags |= PJVM_RF_PACKED_METHOD_TABLE
+
+    def emit_id_v3(value):
+        if value == PJVM_NO_CLASS or value == PJVM_NO_VTABLE or value == PJVM_NO_CLINIT:
+            return 0xFF
+        require_real_id("v3 id", value)
+        return value
+
+    def emit_id_v4(value):
+        if value == PJVM_NO_CLASS or value == PJVM_NO_VTABLE or value == PJVM_NO_CLINIT:
+            return 0xFFFF
+        require_real_id_v4("v4 id", value)
+        return value
+
+    def emit_packed_id(value):
+        if value == PJVM_NO_CLASS or value == PJVM_NO_VTABLE or value == PJVM_NO_CLINIT:
+            return 0
+        require_real_id_v4("packed v4 id", value)
+        return value + 1
+
+    def encode_v4_method_table_packed():
+        blob = bytearray()
+        prev_code_offset = 0
+        prev_cp_base = None
+        prev_exc_offset = None
+
+        for mt in method_table:
+            flags = 0
+            if mt["is_native"]:
+                flags = 1 | (mt["native_id"] << 1)
+
+            blob.extend(write_uleb(mt["max_locals"]))
+            blob.extend(write_uleb(mt["max_stack"]))
+            blob.extend(write_uleb(mt["arg_count"]))
+            blob.extend(write_uleb(flags))
+            blob.extend(write_uleb(emit_packed_id(mt["vtable_slot"])))
+            blob.extend(write_uleb(emit_packed_id(mt.get("vmid", PJVM_NO_VTABLE))))
+
+            if mt["is_native"]:
+                continue
+
+            code_delta = mt["code_offset"] - prev_code_offset
+            if code_delta < 0:
+                raise ValueError("non-native method code offsets are not monotonic")
+            blob.extend(write_uleb(code_delta))
+            prev_code_offset = mt["code_offset"]
+
+            cp_base = mt["cp_base"]
+            if prev_cp_base is not None and cp_base == prev_cp_base:
+                blob.extend(write_uleb(0))
+            else:
+                blob.extend(write_uleb(cp_base + 1))
+                prev_cp_base = cp_base
+
+            blob.extend(write_uleb(mt["exc_count"]))
+            exc_offset = mt["exc_offset_idx"]
+            if prev_exc_offset is not None and exc_offset == prev_exc_offset:
+                blob.extend(write_uleb(0))
+            else:
+                blob.extend(write_uleb(exc_offset + 1))
+                prev_exc_offset = exc_offset
+
+        return bytes(blob)
+
+    if emit_v4:
+        # v4 Header (24 bytes): 16-bit ids/counts and 32-bit CP section size.
+        hdr_size = PJVM_HDR_SIZE_V4
+        mt_entry_size = PJVM_MT_ENTRY_V4
+        out.append(PJVM_MAGIC)
+        out.append(PJVM_VERSION_V4)
+        out.extend(struct.pack("<H", len(method_table)))
+        out.extend(struct.pack("<H", main_index))
+        out.extend(struct.pack("<H", total_static_fields))
+        out.extend(struct.pack("<H", len(global_int_constants)))
+        out.extend(struct.pack("<H", len(class_order)))
+        out.extend(struct.pack("<H", len(global_string_constants)))
+        out.extend(struct.pack("<H", region_flags))
+        out.extend(struct.pack("<I", len(bytecode_section)))
+        out.extend(struct.pack("<I", 0))  # reserved
+    else:
+        # v3 Header (16 bytes): 8-bit ids/counts, 16-bit static count.
+        hdr_size = PJVM_HDR_SIZE_V3
+        mt_entry_size = PJVM_MT_ENTRY
+        out.append(PJVM_MAGIC)
+        out.append(PJVM_VERSION_V3)
+        out.append(len(method_table))
+        out.append(main_index)
+        out.extend(struct.pack("<H", total_static_fields))
+        out.append(len(global_int_constants))
+        out.append(len(class_order))
+        out.append(len(global_string_constants))
+        out.append(region_flags)
+        out.extend(struct.pack("<I", len(bytecode_section)))
+        out.extend(struct.pack("<H", 0))  # reserved
 
     # Class table (variable length)
     for name in class_order:
         cls = classes[name]
-        out.append(cls.parent_class_id)
-        out.append(len(cls.all_instance_fields))
-        out.append(len(cls.vtable))
-        out.append(cls.clinit_mi)
-        for vt_entry in cls.vtable:
-            out.append(vt_entry)
+        if emit_v4:
+            out.extend(struct.pack("<H", emit_id_v4(cls.parent_class_id)))
+            out.extend(struct.pack("<H", len(cls.all_instance_fields)))
+            out.extend(struct.pack("<H", len(cls.vtable)))
+            out.extend(struct.pack("<H", emit_id_v4(cls.clinit_mi)))
+            for vt_entry in cls.vtable:
+                out.extend(struct.pack("<H", emit_id_v4(vt_entry)))
+        else:
+            out.append(emit_id_v3(cls.parent_class_id))
+            out.append(len(cls.all_instance_fields))
+            out.append(len(cls.vtable))
+            out.append(emit_id_v3(cls.clinit_mi))
+            for vt_entry in cls.vtable:
+                out.append(emit_id_v3(vt_entry))
         n_bitmap = (len(cls.all_instance_field_is_ref) + 7) // 8
         for byte_idx in range(n_bitmap):
             bits = 0
@@ -1224,24 +1703,45 @@ def pack_pjvm(class_data_list, verbose=False, v2=False, pin_hints=None):  # v2 i
             out.append(bits)
 
     # Method table
-    for mt in method_table:
-        flags = 0
-        if mt["is_native"]:
-            flags = 1 | (mt["native_id"] << 1)
-        out.append(mt["max_locals"])
-        out.append(mt["max_stack"])
-        out.append(mt["arg_count"])
-        out.append(flags)
-        out.extend(struct.pack("<I", mt["code_offset"]))  # 32-bit
-        out.extend(struct.pack("<H", mt["cp_base"]))
-        out.append(mt["vtable_slot"])
-        out.append(mt.get("vmid", PJVM_NO_VTABLE))
-        out.append(mt["exc_count"])
-        out.append(mt["exc_offset_idx"])
+    if emit_v4 and pack_method_table:
+        method_table_blob = encode_v4_method_table_packed()
+        out.extend(struct.pack("<I", len(method_table_blob)))
+        out.extend(method_table_blob)
+        method_table_size = 4 + len(method_table_blob)
+    else:
+        method_table_size = len(method_table) * mt_entry_size
+        for mt in method_table:
+            flags = 0
+            if mt["is_native"]:
+                flags = 1 | (mt["native_id"] << 1)
+            if emit_v4:
+                out.extend(struct.pack("<H", mt["max_locals"]))
+                out.extend(struct.pack("<H", mt["max_stack"]))
+                out.extend(struct.pack("<H", mt["arg_count"]))
+                out.extend(struct.pack("<H", flags))
+                out.extend(struct.pack("<I", mt["code_offset"]))
+                out.extend(struct.pack("<I", mt["cp_base"]))
+                out.extend(struct.pack("<H", emit_id_v4(mt["vtable_slot"])))
+                out.extend(struct.pack("<H", emit_id_v4(mt.get("vmid", PJVM_NO_VTABLE))))
+                out.extend(struct.pack("<H", mt["exc_count"]))
+                out.extend(struct.pack("<H", mt["exc_offset_idx"]))
+            else:
+                out.append(mt["max_locals"])
+                out.append(mt["max_stack"])
+                out.append(mt["arg_count"])
+                out.append(flags)
+                out.extend(struct.pack("<I", mt["code_offset"]))
+                out.extend(struct.pack("<H", mt["cp_base"]))
+                out.append(emit_id_v3(mt["vtable_slot"]))
+                out.append(emit_id_v3(mt.get("vmid", PJVM_NO_VTABLE)))
+                out.append(mt["exc_count"])
+                out.append(mt["exc_offset_idx"])
 
     # CP resolution table (16-bit LE entries)
-    cp_bytes = len(global_cp_resolve) * 2
-    out.extend(struct.pack("<H", cp_bytes))
+    if emit_v4:
+        out.extend(struct.pack("<I", cp_bytes))
+    else:
+        out.extend(struct.pack("<H", cp_bytes))
     for val in global_cp_resolve:
         out.extend(struct.pack("<H", val))
 
@@ -1257,12 +1757,16 @@ def pack_pjvm(class_data_list, verbose=False, v2=False, pin_hints=None):  # v2 i
     # Bytecode section
     out.extend(bytecode_section)
 
-    # Exception table section (7 bytes per entry)
+    # Exception table section
     for (e_start, e_end, e_handler, e_catch_cid) in global_exc_table:
-        out.extend(struct.pack("<H", e_start))
-        out.extend(struct.pack("<H", e_end))
-        out.extend(struct.pack("<H", e_handler))
-        out.append(e_catch_cid)
+        if emit_v4:
+            out.extend(struct.pack("<HHHH", e_start, e_end, e_handler,
+                                   emit_id_v4(e_catch_cid)))
+        else:
+            out.extend(struct.pack("<H", e_start))
+            out.extend(struct.pack("<H", e_end))
+            out.extend(struct.pack("<H", e_handler))
+            out.append(emit_id_v3(e_catch_cid))
 
     # Pin hints (one byte per method, after exception table)
     if pin_hints:
@@ -1320,15 +1824,30 @@ def pack_pjvm(class_data_list, verbose=False, v2=False, pin_hints=None):  # v2 i
                 print(f"    [{i}] {cname}.{fname}: {tnames[etype]}[{len(vals)}]")
 
     if verbose:
-        print(f"\n.pjvm output (v3): {len(out)} bytes")
+        fmt_name = "v4" if emit_v4 else "v3"
+        print(f"\n.pjvm output ({fmt_name}): {len(out)} bytes")
         print(f"  Header: {hdr_size} bytes")
-        ct_size = sum(4 + len(classes[n].vtable) +
+        class_fixed = 8 if emit_v4 else 4
+        vt_entry_size = 2 if emit_v4 else 1
+        cp_len_size = 4 if emit_v4 else 2
+        et_entry_size = PJVM_ET_ENTRY_V4 if emit_v4 else PJVM_ET_ENTRY
+        ct_size = sum(class_fixed + len(classes[n].vtable) * vt_entry_size +
                       ((len(classes[n].all_instance_field_is_ref) + 7) // 8)
                       for n in class_order)
         print(f"  Class table: {len(class_order)} classes, {ct_size} bytes")
-        print(f"  Method table: {len(method_table)} × {mt_entry_size} = "
-              f"{len(method_table) * mt_entry_size} bytes")
-        print(f"  CP resolution: {cp_bytes + 2} bytes ({len(global_cp_resolve)} entries × 2)")
+        if emit_v4 and pack_method_table:
+            fixed_size = len(method_table) * PJVM_MT_ENTRY_V4
+            print(f"  Method table: packed {method_table_size} bytes "
+                  f"({fixed_size - method_table_size} bytes saved)")
+        else:
+            print(f"  Method table: {len(method_table)} × {mt_entry_size} = "
+                  f"{method_table_size} bytes")
+        print(f"  CP resolution: {cp_bytes + cp_len_size} bytes "
+              f"({len(global_cp_resolve)} entries × 2)")
+        if compact_cp:
+            saved = (cp_old_entries - cp_new_entries) * 2
+            print(f"  CP compact: {cp_old_entries} -> {cp_new_entries} "
+                  f"entries ({saved} bytes saved)")
         print(f"  Int constants: {len(global_int_constants)} × 4 = "
               f"{len(global_int_constants) * 4} bytes")
         sc_size = sum(2 + len(s) for s in global_string_constants)
@@ -1337,8 +1856,8 @@ def pack_pjvm(class_data_list, verbose=False, v2=False, pin_hints=None):  # v2 i
         for i, s in enumerate(global_string_constants):
             print(f"    [{i}] \"{s.decode('utf-8')}\" ({len(s)} bytes)")
         print(f"  Bytecodes: {len(bytecode_section)} bytes")
-        print(f"  Exception table: {len(global_exc_table)} × 7 = "
-              f"{len(global_exc_table) * 7} bytes")
+        print(f"  Exception table: {len(global_exc_table)} × {et_entry_size} = "
+              f"{len(global_exc_table) * et_entry_size} bytes")
         print(f"  Entry point: method #{main_index} "
               f"({method_table[main_index]['name']})")
         for name in class_order:
@@ -1368,6 +1887,8 @@ def emit_map(class_order, method_table):
         u8  n_lines
         [u16 bc_offset, u16 line_number] × n_lines (LE)
     """
+    require_u8("map class count", len(class_order))
+    require_u8("map method count", len(method_table))
     out = bytearray()
     out.append(len(class_order))
     out.append(len(method_table))
@@ -1380,7 +1901,8 @@ def emit_map(class_order, method_table):
         out.extend(encoded)
 
     for mt in method_table:
-        cid = mt["class_id"] if mt["class_id"] != PJVM_NO_CLASS else PJVM_NO_CLASS
+        cid = 0xFF if mt["class_id"] == PJVM_NO_CLASS else mt["class_id"]
+        require_u8("map class id", cid)
         out.append(cid)
         encoded = mt["name"].encode("utf-8")
         out.append(len(encoded))
@@ -1409,9 +1931,15 @@ def main():
     parser.add_argument("--emit-map", action="store_true",
                         help="Emit .pjvmmap sidecar for exception trace decoding")
     parser.add_argument("--v2", action="store_true",
-                        help="Emit v2 format (32-bit code offsets, 32-bit bytecodes_size)")
+                        help="Deprecated; ignored (use --format)")
+    parser.add_argument("--format", choices=("auto", "v3", "v4"), default="auto",
+                        help="Output format: auto-select v3/v4, or force one")
     parser.add_argument("--pin-hints",
-                        help="Comma-separated method indices to recommend pinning (v2 only)")
+                        help="Comma-separated method indices to recommend pinning")
+    parser.add_argument("--no-cp-compact", action="store_true",
+                        help="Emit legacy per-class CP resolution slices")
+    parser.add_argument("--pack-method-table", action="store_true",
+                        help="Use compact v4 method-table encoding")
     args = parser.parse_args()
 
     class_data_list = []
@@ -1422,14 +1950,14 @@ def main():
     pin_hints = None
     if args.pin_hints:
         pin_hints = [int(x) for x in args.pin_hints.split(",")]
-        if not args.v2:
-            print("WARNING: --pin-hints requires --v2, ignoring", file=sys.stderr)
-            pin_hints = None
 
     pjvm, class_order, method_table = pack_pjvm(class_data_list,
                                                 verbose=args.verbose,
                                                 v2=args.v2,
-                                                pin_hints=pin_hints)
+                                                pin_hints=pin_hints,
+                                                compact_cp=not args.no_cp_compact,
+                                                pjvm_format=args.format,
+                                                pack_method_table=args.pack_method_table)
 
     out_path = args.output
     if not out_path:

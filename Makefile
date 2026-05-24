@@ -6,6 +6,7 @@ JAVAC   = javac
 JAVAC8FLAGS ?= -source 8 -target 8
 PYTHON  = python3
 PICOJVM = ./picojvm
+PICOJVM_LARGE = ./picojvm-large
 EXPDIR  = expected
 GC_DEMO_MANUAL    = $(BUILDDIR)/gc-policy-demo-manual
 GC_DEMO_ALLOCFAIL = $(BUILDDIR)/gc-policy-demo-allocfail
@@ -89,6 +90,10 @@ TARGET_HELPER_OBJS =
 endif
 
 PICOJVM_PAGED = ./picojvm-paged
+HOST_VM_LARGE_OPTS ?= -DPJVM_ENABLE_V4=1 -DPJVM_METHOD_CAP=20000 \
+                      -DPJVM_CLASS_CAP=2048 -DPJVM_VTABLE_CAP=20000 \
+                      -DPJVM_STATIC_CAP=12000 -DPJVM_MAX_STACK=4096 \
+                      -DPJVM_MAX_LOCALS=8192 -DPJVM_MAX_FRAMES=512
 
 # Capacity overrides for 8085 target (smaller than host defaults)
 SIM_CAPS = -DPJVM_METHOD_CAP=64 -DPJVM_CLASS_CAP=16 -DPJVM_VTABLE_CAP=128 \
@@ -99,6 +104,9 @@ all: $(PICOJVM)
 
 $(PICOJVM): src/pjvm.c src/pjvm_heap.c src/pjvm_gc.c platform/host.c src/pjvm.h
 	$(CC) $(CFLAGS) $(HOST_VM_DEBUG) $(HOST_VM_OPTS) -DPJVM_MAX_FRAMES=128 -o $@ src/pjvm.c src/pjvm_heap.c src/pjvm_gc.c platform/host.c
+
+$(PICOJVM_LARGE): src/pjvm.c src/pjvm_heap.c src/pjvm_gc.c platform/host.c src/pjvm.h
+	$(CC) $(CFLAGS) $(HOST_VM_DEBUG) $(HOST_VM_OPTS) $(HOST_VM_LARGE_OPTS) -o $@ src/pjvm.c src/pjvm_heap.c src/pjvm_gc.c platform/host.c
 
 $(PICOJVM_PAGED): src/pjvm.c src/pjvm_heap.c src/pjvm_gc.c platform/host.c src/pjvm.h
 	$(CC) $(CFLAGS) $(HOST_VM_DEBUG) $(HOST_VM_OPTS) -DPJVM_PAGED -o $@ src/pjvm.c src/pjvm_heap.c src/pjvm_gc.c platform/host.c
@@ -573,6 +581,9 @@ test-gc-fragment: $(GC_FRAGMENT_TEST)
 test-gc-exact: $(GC_EXACT_TEST)
 	$(GC_EXACT_TEST)
 
+test-v4: $(PICOJVM_LARGE)
+	$(PYTHON) tests/run_v4_tests.py --picojvm $(abspath $(PICOJVM_LARGE))
+
 test-alloc-heavy: $(PICOJVM) tests/AllocHeavyTest.pjvm
 	$(MAKE) --no-print-directory test-AllocHeavyTest
 
@@ -703,6 +714,6 @@ clean:
 .PHONY: FORCE
 .PHONY: all test test-paged test-paged-stress clean sim
 .PHONY: gc-demo-manual gc-demo-allocfail gc-demo-watermark75 gc-demo-return gc-demo-random
-.PHONY: gc-policy-test test-gc-collect test-gc-fragment test-gc-exact test-alloc-heavy test-paged-alloc-heavy test-gc-alloc-heavy
+.PHONY: gc-policy-test test-gc-collect test-gc-fragment test-gc-exact test-v4 test-alloc-heavy test-paged-alloc-heavy test-gc-alloc-heavy
 .PHONY: test-gc-graph test-gc-host-compat test-gc-host-suite test-sim-smoke test-sim-gc-smoke
 .PHONY: test-sim-gc-alloc-heavy test-gc-sim-suite test-gc-suite

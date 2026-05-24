@@ -7,8 +7,8 @@
 
 static int failed;
 uint8_t region_flags;
-uint8_t cls_nf[PJVM_CLASS_CAP];
-uint16_t cls_rbo[PJVM_CLASS_CAP];
+pjvm_count_t cls_nf[PJVM_CLASS_CAP];
+pjvm_rbo_t cls_rbo[PJVM_CLASS_CAP];
 
 uint8_t pjvm_prog_read(uint32_t off) {
     (void)off;

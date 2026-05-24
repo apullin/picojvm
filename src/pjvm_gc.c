@@ -108,13 +108,13 @@ static void pjvm_gc_scan_words(PJVMCtx *j, uint16_t start, uint16_t size) {
 }
 
 static void pjvm_gc_scan_object(PJVMCtx *j, uint16_t payload, uint16_t payload_size) {
-    uint8_t ci;
-    uint8_t nf;
-    uint16_t bitmap_off;
+    pjvm_class_id_t ci;
+    pjvm_count_t nf;
+    pjvm_rbo_t bitmap_off;
 
     if (payload_size <= PJVM_OBJ_HEADER) return;
 
-    ci = (uint8_t)r16(payload);
+    ci = (pjvm_class_id_t)r16(payload);
     if (ci >= n_classes) {
         pjvm_gc_scan_words(j,
                            (uint16_t)(payload + PJVM_OBJ_HEADER),
@@ -131,7 +131,7 @@ static void pjvm_gc_scan_object(PJVMCtx *j, uint16_t payload, uint16_t payload_s
         return;
     }
 
-    for (uint8_t slot = 0; slot < nf; slot++) {
+    for (pjvm_count_t slot = 0; slot < nf; slot++) {
         uint8_t bits = pjvm_prog_read((uint32_t)bitmap_off + (uint32_t)(slot >> 3));
         if ((bits & (uint8_t)(1u << (slot & 7u))) != 0) {
             uint16_t addr = (uint16_t)(payload + PJVM_OBJ_HEADER + (uint16_t)slot * 4u);

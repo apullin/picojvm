@@ -3,16 +3,26 @@
 import struct
 
 from .bytecode import (
+    OP_ACONST_NULL,
     OP_ALOAD,
     OP_ALOAD_0,
     OP_ALOAD_3,
+    OP_ARETURN,
+    OP_BIPUSH,
+    OP_DUP,
+    OP_ICONST_0,
+    OP_ICONST_5,
+    OP_ICONST_M1,
     OP_ILOAD,
     OP_ILOAD_0,
     OP_ILOAD_3,
     OP_INVOKESPECIAL,
     OP_LDC,
+    OP_LDC_W,
+    OP_NEW,
     OP_PUTFIELD,
     OP_RETURN,
+    OP_SIPUSH,
     add_ordered_cp_use,
     bytecode_cp_operands,
     rewrite_bytecode_cp_indices,
@@ -388,6 +398,156 @@ def _read_local_load(bc, offset):
     return None, None, offset
 
 
+def _return_descriptor(descriptor):
+    return descriptor[descriptor.index(")") + 1:]
+
+
+def _arg_local_map(descriptor):
+    """Map JVM local slots to single-slot argument indices/descriptors."""
+    arg_for_local = {}
+    local = 0
+    for arg_idx, arg_desc in enumerate(argument_descriptors(descriptor)):
+        if arg_desc in ("J", "D"):
+            return None
+        arg_for_local[local] = (arg_idx, arg_desc)
+        local += 1
+    return arg_for_local
+
+
+def _is_int_like_descriptor(descriptor):
+    return descriptor in ("I", "B", "S", "C", "Z")
+
+
+def _is_string_descriptor(descriptor):
+    return descriptor == "Ljava/lang/String;"
+
+
+def _read_const_factory_push(cp, bc, offset, arg_for_local):
+    """Read one load/literal push in a trivial const-object factory."""
+    kind, local_idx, next_offset = _read_local_load(bc, offset)
+    if kind in ("I", "A"):
+        arg_info = arg_for_local.get(local_idx)
+        if arg_info is None:
+            return None, offset
+        arg_idx, arg_desc = arg_info
+        if kind == "I" and not _is_int_like_descriptor(arg_desc):
+            return None, offset
+        if kind == "A" and not _is_string_descriptor(arg_desc):
+            return None, offset
+        return ("param", arg_idx), next_offset
+
+    op = bc[offset]
+    if op == OP_ACONST_NULL:
+        return ("null",), offset + 1
+    if op == OP_ICONST_M1:
+        return -1, offset + 1
+    if OP_ICONST_0 <= op <= OP_ICONST_5:
+        return op - OP_ICONST_0, offset + 1
+    if op == OP_BIPUSH:
+        return struct.unpack_from(">b", bc, offset + 1)[0], offset + 2
+    if op == OP_SIPUSH:
+        return struct.unpack_from(">h", bc, offset + 1)[0], offset + 3
+    if op in (OP_LDC, OP_LDC_W):
+        if op == OP_LDC:
+            cp_idx = bc[offset + 1]
+            next_offset = offset + 2
+        else:
+            cp_idx = (bc[offset + 1] << 8) | bc[offset + 2]
+            next_offset = offset + 3
+        entry = cp[cp_idx]
+        if entry and entry[0] == "Integer":
+            return entry[1], next_offset
+        if entry and entry[0] == "String":
+            return ("string", cp[entry[1]][1]), next_offset
+    return None, offset
+
+
+def _const_factory_source_matches(source, target_desc, factory_arg_descs):
+    """Return whether a factory push source can feed a constructor argument."""
+    if isinstance(source, int):
+        return _is_int_like_descriptor(target_desc)
+    if isinstance(source, tuple) and source[0] == "string":
+        return _is_string_descriptor(target_desc)
+    if isinstance(source, tuple) and source[0] == "null":
+        return _is_string_descriptor(target_desc)
+    if isinstance(source, tuple) and source[0] == "param":
+        return factory_arg_descs[source[1]] == target_desc
+    return False
+
+
+def _const_object_factory_layout(cls, method_desc, code_data):
+    """Recognize ``return new T(args...)`` static helper bytecode."""
+    if code_data is None or not _return_descriptor(method_desc).startswith("L"):
+        return None
+
+    arg_for_local = _arg_local_map(method_desc)
+    if arg_for_local is None:
+        return None
+    factory_arg_descs = argument_descriptors(method_desc)
+
+    bc = _code_bytes(code_data)
+    i = 0
+    if i + 3 > len(bc) or bc[i] != OP_NEW:
+        return None
+    class_name = resolve_class_name(cls.cp, (bc[i + 1] << 8) | bc[i + 2])
+    if _return_descriptor(method_desc) != f"L{class_name};":
+        return None
+    i += 3
+
+    if i >= len(bc) or bc[i] != OP_DUP:
+        return None
+    i += 1
+
+    arg_sources = []
+    while i < len(bc) and bc[i] != OP_INVOKESPECIAL:
+        source, next_i = _read_const_factory_push(cls.cp, bc, i, arg_for_local)
+        if source is None or next_i == i:
+            return None
+        arg_sources.append(source)
+        i = next_i
+
+    if i + 3 > len(bc) or bc[i] != OP_INVOKESPECIAL:
+        return None
+    init_class, init_name, init_desc = resolve_method_name(
+        cls.cp, (bc[i + 1] << 8) | bc[i + 2])
+    if init_class != class_name or init_name != "<init>" or not init_desc.endswith(")V"):
+        return None
+    i += 3
+
+    ctor_arg_descs = argument_descriptors(init_desc)
+    if len(ctor_arg_descs) != len(arg_sources):
+        return None
+    if any(not _const_factory_source_matches(src, desc, factory_arg_descs)
+           for src, desc in zip(arg_sources, ctor_arg_descs)):
+        return None
+
+    if i >= len(bc) or bc[i] != OP_ARETURN or i + 1 != len(bc):
+        return None
+
+    return {
+        "class_name": class_name,
+        "constructor": init_desc,
+        "arg_sources": arg_sources,
+    }
+
+
+def _collect_const_object_factories(classes):
+    """Collect static helpers that can be folded into @Const object arrays."""
+    factory_methods = {}
+    for cls in classes.values():
+        for m_access, m_name_idx, m_desc_idx, code_data in cls.methods_raw:
+            if not (m_access & ACC_STATIC):
+                continue
+            method_name = cls.cp[m_name_idx][1]
+            if method_name in ("<init>", "<clinit>"):
+                continue
+            method_desc = cls.cp[m_desc_idx][1]
+            layout = _const_object_factory_layout(cls, method_desc, code_data)
+            if layout is not None:
+                factory_methods[(cls.name, method_name, method_desc)] = layout
+    return factory_methods
+
+
 def _const_object_constructor_layout(cls):
     """Validate and describe the supported immutable value-object subset."""
     if cls.parent_name not in (None, "java/lang/Object"):
@@ -543,12 +703,14 @@ def _extract_program_const_arrays(classes, class_order, static_field_base,
     """Extract all supported @Const arrays and return NOP ranges."""
     const_arrays = []
     const_nop_ranges = {}
+    factory_methods = _collect_const_object_factories(classes)
     for name in class_order:
         cls = classes[name]
         if not cls.const_fields:
             continue
         extracted = _extract_const_arrays(cls, cls.cp, static_field_base.get(name, 0),
-                                          verbose=verbose)
+                                          verbose=verbose,
+                                          factory_methods=factory_methods)
         for fname, etype, vals, (bstart, bend) in extracted:
             if etype == PJVM_ELEM_STRING_REF:
                 vals = _intern_const_string_refs(

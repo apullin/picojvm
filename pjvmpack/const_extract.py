@@ -15,6 +15,7 @@ from .bytecode import (
     OP_ICONST_5,
     OP_ICONST_M1,
     OP_IASTORE,
+    OP_INVOKESTATIC,
     OP_LDC,
     OP_LDC_W,
     OP_NEW,
@@ -65,7 +66,8 @@ def _resolve_fieldref(cp, cp_idx):
     return None, None, None
 
 
-def extract_const_arrays(cls, cp, _static_field_base_slot=0, verbose=False):
+def extract_const_arrays(cls, cp, _static_field_base_slot=0, verbose=False,
+                         factory_methods=None):
     """Extract supported @Const array initializer patterns from <clinit>.
 
     Returns ``(field_name, elem_type_code, values, (start, end))`` tuples. If
@@ -96,6 +98,7 @@ def extract_const_arrays(cls, cp, _static_field_base_slot=0, verbose=False):
     stack = []
     last_push_start = None
     next_new_id = 0
+    factory_methods = factory_methods or {}
 
     while i < n:
         op = bc[i]
@@ -221,6 +224,34 @@ def extract_const_arrays(cls, cp, _static_field_base_slot=0, verbose=False):
                     stack.clear()
             else:
                 stack.clear()
+            i += 3
+        elif op == OP_INVOKESTATIC:
+            cp_idx = (bc[i + 1] << 8) | bc[i + 2]
+            method_key = resolve_method_name(cp, cp_idx)
+            factory = factory_methods.get(method_key)
+            if factory is None:
+                stack.clear()
+            else:
+                call_args = []
+                try:
+                    arg_descs = argument_descriptors(method_key[2])
+                except PackError:
+                    arg_descs = None
+                if arg_descs is None:
+                    stack.clear()
+                else:
+                    for _ in arg_descs:
+                        call_args.append(stack.pop() if stack else ("opaque",))
+                    call_args.reverse()
+                    obj_args = []
+                    for source in factory["arg_sources"]:
+                        if isinstance(source, tuple) and source[0] == "param":
+                            obj_args.append(call_args[source[1]])
+                        else:
+                            obj_args.append(source)
+                    stack.append((
+                        "object", factory["class_name"], factory["constructor"],
+                        tuple(obj_args)))
             i += 3
         elif op in (OP_IASTORE, OP_BASTORE, OP_CASTORE, OP_SASTORE):
             val = stack.pop() if stack else 0

@@ -98,3 +98,15 @@ STRING_NATIVE_IDS = {
     ("toString", "()Ljava/lang/String;"): 10,
     ("hashCode", "()I"): 12,
 }
+
+ENUM_NATIVE_IDS = {
+    ("<init>", "(Ljava/lang/String;I)V"): 27,
+    ("name", "()Ljava/lang/String;"): 28,
+    ("ordinal", "()I"): 29,
+    ("toString", "()Ljava/lang/String;"): 30,
+    ("valueOf", "(Ljava/lang/Class;Ljava/lang/String;)Ljava/lang/Enum;"): 31,
+}
+
+ARRAY_NATIVE_IDS = {
+    ("clone", "()Ljava/lang/Object;"): 32,
+}

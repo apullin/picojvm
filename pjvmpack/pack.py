@@ -13,6 +13,7 @@ from .bytecode import (
     OP_ICONST_0,
     OP_ICONST_5,
     OP_ICONST_M1,
+    OP_NOP,
     OP_I2B,
     OP_I2C,
     OP_I2S,
@@ -48,6 +49,8 @@ from .constants import (
     ACC_FINAL,
     ACC_NATIVE,
     ACC_STATIC,
+    ARRAY_NATIVE_IDS,
+    ENUM_NATIVE_IDS,
     NATIVE_IDS,
     NATIVE_OBJECT_INIT,
     PJVM_CONST_NULL_REF,
@@ -243,6 +246,41 @@ def _sort_synthetic_exceptions(classes, exc_classes_needed):
             sorted_exc.extend(remaining)
             break
     return sorted_exc
+
+
+def _program_needs_enum(classes):
+    """Return True if javac enum boilerplate references java/lang/Enum."""
+    if "java/lang/Enum" in classes:
+        return False
+    for cls in classes.values():
+        if cls.parent_name == "java/lang/Enum":
+            return True
+        for cp_idx in range(1, len(cls.cp)):
+            entry = cls.cp[cp_idx]
+            if entry and entry[0] == "Class" and cls.cp[entry[1]][1] == "java/lang/Enum":
+                return True
+    return False
+
+
+def _synthesize_enum_class(classes, verbose=False):
+    """Add the tiny system java/lang/Enum parent used by javac enums."""
+    if not _program_needs_enum(classes):
+        return
+    cp = [
+        None,
+        ("Utf8", "name"),
+        ("Utf8", "Ljava/lang/String;"),
+        ("Utf8", "ordinal"),
+        ("Utf8", "I"),
+    ]
+    fields = [
+        (ACC_FINAL, 1, 2, False),
+        (ACC_FINAL, 3, 4, False),
+    ]
+    classes["java/lang/Enum"] = ClassInfo(
+        "java/lang/Enum", "java/lang/Object", cp, fields, [])
+    if verbose:
+        print("  Synthesized system class java/lang/Enum")
 
 
 def _synthesize_exception_classes(classes, class_order, verbose=False):
@@ -886,6 +924,33 @@ def _nop_const_initializers(classes, method_table, const_nop_ranges):
                 break
 
 
+def _nop_array_checkcasts(classes, method_table, class_by_id):
+    """Erase array checkcasts; picoJVM arrays do not carry descriptor class ids."""
+    for mt in method_table:
+        cid = mt["class_id"]
+        if mt["is_native"] or cid == PJVM_NO_CLASS:
+            continue
+        cname = class_by_id[cid]
+        cls = classes[cname]
+        bc_arr = bytearray(mt["bytecode"])
+        changed = False
+        for off, _width, op, cp_idx in bytecode_cp_operands(mt["bytecode"]):
+            if op != OP_CHECKCAST or cp_idx <= 0 or cp_idx >= len(cls.cp):
+                continue
+            entry = cls.cp[cp_idx]
+            if entry is None or entry[0] != "Class":
+                continue
+            if not cls.cp[entry[1]][1].startswith("["):
+                continue
+            op_off = off - 1
+            bc_arr[op_off] = OP_NOP
+            bc_arr[op_off + 1] = OP_NOP
+            bc_arr[op_off + 2] = OP_NOP
+            changed = True
+        if changed:
+            mt["bytecode"] = bytes(bc_arr)
+
+
 def _build_bytecode_section(method_table):
     """Concatenate non-native method bytecode and assign code offsets."""
     bytecode_section = bytearray()
@@ -913,6 +978,8 @@ def pack_pjvm(class_data_list, verbose=False, v2=False, pin_hints=None,
 
     if verbose:
         print(f"Parsed {len(classes)} classes: {', '.join(classes.keys())}")
+
+    _synthesize_enum_class(classes, verbose=verbose)
 
     # Parents must be laid out before children inherit fields/vtables.
     class_order = topological_sort(classes)
@@ -976,6 +1043,27 @@ def pack_pjvm(class_data_list, verbose=False, v2=False, pin_hints=None,
         return vmid_map[key]
 
     method_table = []
+
+    def append_native_method(method_name, descriptor, arg_count, native_id,
+                             class_id=PJVM_NO_CLASS):
+        native_idx = len(method_table)
+        method_table.append({
+            "name": method_name,
+            "descriptor": descriptor,
+            "max_locals": arg_count,
+            "max_stack": 0,
+            "arg_count": arg_count,
+            "bytecode": b"",
+            "is_native": True,
+            "native_id": native_id,
+            "class_id": class_id,
+            "vtable_slot": PJVM_NO_VTABLE,
+            "vmid": PJVM_NO_VTABLE,
+            "cp_base": 0,
+            "exc_table": [],
+            "line_table": [],
+        })
+        return native_idx
 
     for name in class_order:
         cls = classes[name]
@@ -1080,6 +1168,21 @@ def pack_pjvm(class_data_list, verbose=False, v2=False, pin_hints=None,
                       f"(locals={max_locals}, stack={max_stack}, args={arg_count}, "
                       f"code={len(bytecode)}B, {vt_str})")
 
+    enum_cls = classes.get("java/lang/Enum")
+    if enum_cls is not None:
+        for (m_name, m_desc), native_id in ENUM_NATIVE_IDS.items():
+            if (m_name, m_desc) in enum_cls.global_methods:
+                continue
+            a_count = count_args(m_desc)
+            if m_name != "valueOf":
+                a_count += 1
+            native_idx = append_native_method(
+                m_name, m_desc, a_count, native_id, class_id=enum_cls.class_id)
+            enum_cls.global_methods[(m_name, m_desc)] = native_idx
+            if verbose:
+                print(f"  Native #{native_idx}: Enum.{m_name}{m_desc} "
+                      f"(id={native_id})")
+
     # Locate the program entry point.
     main_index = None
     for i, mt in enumerate(method_table):
@@ -1113,6 +1216,7 @@ def pack_pjvm(class_data_list, verbose=False, v2=False, pin_hints=None,
     class_by_id = {}
     for name in class_order:
         class_by_id[classes[name].class_id] = name
+    _nop_array_checkcasts(classes, method_table, class_by_id)
     class_cp_uses = {}
     for name in class_order:
         class_cp_uses[name] = {
@@ -1225,6 +1329,17 @@ def pack_pjvm(class_data_list, verbose=False, v2=False, pin_hints=None,
                     if verbose:
                         print(f"  Native #{nm_idx}: String.{ref_method}"
                               f"{ref_desc} (id={STRING_NATIVE_IDS[str_key]})")
+
+            elif ref_class.startswith("["):
+                arr_key = (ref_method, ref_desc)
+                if arr_key in ARRAY_NATIVE_IDS:
+                    native_id = ARRAY_NATIVE_IDS[arr_key]
+                    nm_idx = append_native_method(
+                        ref_method, ref_desc, 1, native_id)
+                    native_cache[key] = nm_idx
+                    if verbose:
+                        print(f"  Native #{nm_idx}: array.{ref_method}"
+                              f"{ref_desc} (id={native_id})")
 
     # Add interface method stubs used by invokeinterface dispatch.
     for name in class_order:

@@ -82,6 +82,12 @@ enum {
     NATIVE_TERM_INFO = 24,
     NATIVE_KEY_READ = 25,
     NATIVE_TICKS = 26,
+    NATIVE_ENUM_INIT = 27,
+    NATIVE_ENUM_NAME = 28,
+    NATIVE_ENUM_ORDINAL = 29,
+    NATIVE_ENUM_TOSTRING = 30,
+    NATIVE_ENUM_VALUEOF = 31,
+    NATIVE_ARRAY_CLONE = 32,
 };
 
 /* --- globals (extern-declared in pjvm.h) ------------------------------ */
@@ -939,6 +945,49 @@ static void pjvm_inv(pjvm_method_id_t mi) {
         case NATIVE_TICKS:
             pjvm_push32(pjvm_platform_ticks());
             break;
+        case NATIVE_ENUM_INIT: {
+            uint16_t obj, obj_hi, name_lo, name_hi, ord_lo, ord_hi;
+            SPOP32(ord_lo, ord_hi);
+            SPOP32(name_lo, name_hi);
+            SPOP32(obj, obj_hi);
+            if (obj_hi || obj == 0) { pjvm_platform_trap(OP_INVOKESPECIAL, g_pjvm->pc); break; }
+            w16((uint16_t)(obj + PJVM_OBJ_HEADER), name_lo);
+            w16((uint16_t)(obj + PJVM_OBJ_HEADER + 2), name_hi);
+            w16((uint16_t)(obj + PJVM_OBJ_HEADER + 4), ord_lo);
+            w16((uint16_t)(obj + PJVM_OBJ_HEADER + 6), ord_hi);
+            break;
+        }
+        case NATIVE_ENUM_NAME:
+        case NATIVE_ENUM_TOSTRING:
+            SPOP32(alo, ahi);
+            if (ahi || alo == 0) { pjvm_platform_trap(OP_INVOKEVIRTUAL, g_pjvm->pc); break; }
+            spush(r16((uint16_t)(alo + PJVM_OBJ_HEADER)),
+                  r16((uint16_t)(alo + PJVM_OBJ_HEADER + 2)));
+            break;
+        case NATIVE_ENUM_ORDINAL:
+            SPOP32(alo, ahi);
+            if (ahi || alo == 0) { pjvm_platform_trap(OP_INVOKEVIRTUAL, g_pjvm->pc); break; }
+            spush(r16((uint16_t)(alo + PJVM_OBJ_HEADER + 4)),
+                  r16((uint16_t)(alo + PJVM_OBJ_HEADER + 6)));
+            break;
+        case NATIVE_ENUM_VALUEOF:
+            pjvm_platform_trap(OP_INVOKESTATIC, g_pjvm->pc);
+            break;
+        case NATIVE_ARRAY_CLONE: {
+            uint16_t src, src_hi;
+            SPOP32(src, src_hi);
+            if (src_hi || src == 0) { pjvm_platform_trap(OP_INVOKEVIRTUAL, g_pjvm->pc); break; }
+            uint16_t len = r16(src);
+            uint16_t dst = heap_alloc(g_pjvm, (uint16_t)(PJVM_OBJ_HEADER + len * 4),
+                                      PJVM_HEAP_KIND_REF_ARRAY);
+            w16(dst, len);
+            w16((uint16_t)(dst + 2), 0);
+            for (uint16_t i = 0; i < len * 4; i++)
+                w8((uint16_t)(dst + PJVM_OBJ_HEADER + i),
+                   r8((uint16_t)(src + PJVM_OBJ_HEADER + i)));
+            spush(dst, 0);
+            break;
+        }
         default:
             pjvm_platform_trap(PJVM_TRAP_BAD_NATIVE, g_pjvm->pc);
             break;

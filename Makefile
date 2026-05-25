@@ -19,7 +19,7 @@ GC_EXACT_TEST     = $(BUILDDIR)/gc-exact-test
 
 # Single-class tests
 TESTS_SINGLE = Fib HelloWorld BubbleSort Counter StringTest RomStringTest NativeOpsTest StaticInitTest MultiArrayTest StringSwitchTest ConstTest ConstStringArrayTest ConstObjectArrayTest ConstNarrowingTest TermSmoke FilesSmoke PicoJseStdSmoke StringConcatSmoke TarSmoke ZipSmoke ZipDeflateSmoke
-TESTS_MULTI  = Shapes Features InterfaceTest ExceptionTest
+TESTS_MULTI  = Shapes Features InterfaceTest ExceptionTest EnumBasicTest
 TESTS_PAGER  = BigSwitch BigLUT
 ALL_TESTS    = $(TESTS_SINGLE) $(TESTS_MULTI)
 ALL_TESTS_PAGER = $(ALL_TESTS) $(TESTS_PAGER)
@@ -165,6 +165,13 @@ tests/ExceptionTest.pjvm: tests/MyException.class tests/ExceptionTest.class
 
 tests/MyException.class tests/ExceptionTest.class: tests/ExceptionTest.java tests/Native.java
 	$(JAVAC) -d tests $^
+
+# javac enums emit a nested class plus java/lang/Enum boilerplate.
+tests/EnumBasicTest.pjvm: tests/EnumBasicTest.class tests/EnumBasicTest$$Color.class
+	$(PYTHON) pjvmpack.py tests/EnumBasicTest.class 'tests/EnumBasicTest$$Color.class' -o $@ -v
+
+tests/EnumBasicTest.class tests/EnumBasicTest$$Color.class: tests/EnumBasicTest.java tests/Native.java
+	$(JAVAC) $(JAVAC8FLAGS) -d tests $^
 
 $(BUILDDIR)/picojse.stamp: $(PICOJSE_SRCS) tests/TermSmoke.java tests/FilesSmoke.java tests/TermDemo.java tests/PicoJseStdSmoke.java tests/StringConcatSmoke.java tests/TarSmoke.java tests/ZipSmoke.java tests/ZipDeflateSmoke.java tests/PJTar.java tests/PJUntar.java tests/PJZip.java tests/PJUnzip.java tests/PJArc.java | $(BUILDDIR)
 	@mkdir -p $(PICOJSE_CLASSDIR)

@@ -19,9 +19,30 @@ public final class Character {
         return ch >= '0' && ch <= '9';
     }
 
+    public static boolean isLetter(char ch) {
+        return (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z');
+    }
+
+    public static boolean isLetterOrDigit(char ch) {
+        return isLetter(ch) || isDigit(ch);
+    }
+
+    public static boolean isUpperCase(char ch) {
+        return ch >= 'A' && ch <= 'Z';
+    }
+
     public static boolean isWhitespace(char ch) {
         return ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r' ||
                ch == '\f';
+    }
+
+    public static int digit(char ch, int radix) {
+        int v;
+        if (ch >= '0' && ch <= '9') v = ch - '0';
+        else if (ch >= 'a' && ch <= 'z') v = ch - 'a' + 10;
+        else if (ch >= 'A' && ch <= 'Z') v = ch - 'A' + 10;
+        else return -1;
+        return v < radix && v >= 0 ? v : -1;
     }
 
     public static char toLowerCase(char ch) {

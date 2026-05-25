@@ -34,6 +34,34 @@ public class JavaLangSmoke {
         Native.putchar(Character.isDigit('7') ? '1' : '0');
         Native.putchar(Character.toLowerCase('Q'));
         Native.putchar('\n');
+
+        StringBuilder extra = new StringBuilder("hello");
+        Native.putchar(extra.length());
+        extra.ensureCapacity(20);
+        extra.setLength(3);
+        Native.print(extra.toString());
+        extra.setCharAt(0, 'H');
+        Native.print(extra.toString());
+        extra.insert(1, '!');
+        Native.print(extra.toString());
+        extra.delete(0, 2);
+        Native.print(extra.toString());
+        extra.replace(0, 1, "ang");
+        Native.print(extra.toString());
+        Native.putchar(extra.indexOf("ng"));
+        Native.putchar(extra.indexOf("zz"));
+        Native.putchar(extra.lastIndexOf("l"));
+        Native.putchar('\n');
+
+        Native.putchar(Character.isLetter('a') ? '1' : '0');
+        Native.putchar(Character.isLetter('5') ? '1' : '0');
+        Native.putchar(Character.isLetterOrDigit('5') ? '1' : '0');
+        Native.putchar(Character.isUpperCase('A') ? '1' : '0');
+        Native.putchar(Character.isUpperCase('a') ? '1' : '0');
+        Native.putchar(Character.digit('a', 16) == 10 ? '1' : '0');
+        Native.putchar(Character.digit('9', 10) == 9 ? '1' : '0');
+        Native.putchar(Character.digit('5', 4) == -1 ? '1' : '0');
+        Native.putchar('\n');
         Native.halt();
     }
 }

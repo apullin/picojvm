@@ -18,7 +18,11 @@ public final class Boolean {
         return value;
     }
 
-    public String toString() {
+    public static String toString(boolean value) {
         return value ? "true" : "false";
+    }
+
+    public String toString() {
+        return toString(value);
     }
 }

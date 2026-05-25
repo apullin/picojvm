@@ -136,6 +136,16 @@
 #endif
 #endif
 
+#ifndef PJVM_USE_EXT_JAVA_LANG_APIS
+#if PJVM_PROFILE_SELFHOST_SET
+#define PJVM_USE_EXT_JAVA_LANG_APIS 0
+#elif defined(__i8085__) || defined(__I8085__)
+#define PJVM_USE_EXT_JAVA_LANG_APIS 0
+#else
+#define PJVM_USE_EXT_JAVA_LANG_APIS 1
+#endif
+#endif
+
 #ifndef PJVM_USE_ASM_CPREAD
 #if defined(PJVM_ASM_HELPERS) && !defined(PJVM_PAGED)
 #define PJVM_USE_ASM_CPREAD 0

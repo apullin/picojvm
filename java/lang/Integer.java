@@ -13,8 +13,16 @@ public final class Integer {
         return new Integer(value);
     }
 
+    public static Integer valueOf(String value) {
+        return valueOf(parseInt(value));
+    }
+
     public static int compare(int a, int b) {
         return a < b ? -1 : (a == b ? 0 : 1);
+    }
+
+    public static int compareUnsigned(int a, int b) {
+        return compare(a + (1 << 31), b + (1 << 31));
     }
 
     public int intValue() {
@@ -59,5 +67,31 @@ public final class Integer {
             }
         }
         return Native.stringFromBytes(buf, 0, off);
+    }
+
+    public static int parseInt(String value) {
+        return parseInt(value, 10);
+    }
+
+    public static int parseInt(String value, int radix) {
+        int n = value.length();
+        int i = 0;
+        int sign = 1;
+        int result = 0;
+        if (n == 0) return 0;
+        char first = value.charAt(0);
+        if (first == '-') {
+            sign = -1;
+            i = 1;
+        } else if (first == '+') {
+            i = 1;
+        }
+        while (i < n) {
+            int digit = Character.digit(value.charAt(i), radix);
+            if (digit < 0) return 0;
+            result = result * radix + digit;
+            i++;
+        }
+        return result * sign;
     }
 }

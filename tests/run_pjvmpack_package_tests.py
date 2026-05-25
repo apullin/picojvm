@@ -52,7 +52,8 @@ def assert_unresolved_method_is_rejected(tmp_path):
             }
         }
     """).strip() + "\n")
-    run(["javac", "-source", "8", "-target", "8", "-d", str(tmp_path), str(src)])
+    run(["javac", "-source", "8", "-target", "8", "-sourcepath", str(tmp_path),
+         "-d", str(tmp_path), str(src)])
 
     out = tmp_path / "UnresolvedMethodTest.pjvm"
     proc = subprocess.run(

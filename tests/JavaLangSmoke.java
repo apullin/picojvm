@@ -62,6 +62,57 @@ public class JavaLangSmoke {
         Native.putchar(Character.digit('9', 10) == 9 ? '1' : '0');
         Native.putchar(Character.digit('5', 4) == -1 ? '1' : '0');
         Native.putchar('\n');
+
+        char[] chars = {'h', 'e', 'l', 'l', 'o'};
+        Native.print(new String(chars));
+        Native.putchar(',');
+        Native.print(new String(chars, 1, 3));
+        Native.putchar(',');
+        byte[] bytes = {(byte)'w', (byte)'o', (byte)'r', (byte)'l', (byte)'d'};
+        Native.print(new String(bytes, 1, 3));
+        Native.putchar(',');
+        Native.print(new String("copy"));
+        Native.putchar(',');
+        Native.print(new String());
+        Native.putchar(',');
+        Native.print(String.valueOf('x'));
+        Native.putchar('\n');
+
+        Native.print("  MiXeD  ".trim());
+        Native.putchar(',');
+        Native.print("up".toUpperCase());
+        Native.putchar(',');
+        Native.putchar("ABC".compareToIgnoreCase("abc") == 0 ? '1' : '0');
+        Native.putchar(',');
+        Native.putchar("abcabc".indexOf("bc", 3));
+        byte[] got = "az".getBytes();
+        Native.putchar(',');
+        Native.putchar(got[1]);
+        Native.putchar('\n');
+
+        Native.putchar(Integer.parseInt("42"));
+        Native.putchar(Integer.parseInt("ff", 16));
+        Native.putchar(Integer.compareUnsigned(-1, 1) > 0 ? '1' : '0');
+        Native.print(Boolean.toString(false));
+        Native.putchar(System.getProperty("missing") == null ? '1' : '0');
+        Native.print(System.getProperty("missing", "fallback"));
+        Native.putchar(System.getenv("missing") == null ? '1' : '0');
+        Native.putchar('\n');
+
+        int[] src = {1, 2, 3};
+        int[] dst = new int[3];
+        System.arraycopy(src, 0, dst, 0, 3);
+        Native.putchar(dst[2]);
+        byte[] ov = {1, 2, 3, 4};
+        System.arraycopy(ov, 0, ov, 1, 3);
+        Native.putchar(ov[1]);
+        Native.putchar(ov[2]);
+        Native.putchar(ov[3]);
+        String[] names = {"a", "b"};
+        String[] copy = new String[2];
+        System.arraycopy(names, 0, copy, 0, 2);
+        Native.print(copy[1]);
+        Native.putchar('\n');
         Native.halt();
     }
 }

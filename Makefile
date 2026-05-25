@@ -31,6 +31,7 @@ PICOJSE_SRCS = java/lang/Boolean.java \
                java/lang/Math.java \
                java/lang/Short.java \
                java/lang/StringBuilder.java \
+               java/lang/System.java \
                pj/Native.java \
                pj/archive/Tar.java \
                pj/archive/Zip.java \
@@ -237,6 +238,7 @@ tests/JavaLangSmoke.pjvm: $(BUILDDIR)/picojse.stamp
 		$(PICOJSE_CLASSDIR)/java/lang/Math.class \
 		$(PICOJSE_CLASSDIR)/java/lang/Short.class \
 		$(PICOJSE_CLASSDIR)/java/lang/StringBuilder.class \
+		$(PICOJSE_CLASSDIR)/java/lang/System.class \
 		$(PICOJSE_CLASSDIR)/pj/Native.class \
 		-o $@ -v
 

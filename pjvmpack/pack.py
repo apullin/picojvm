@@ -50,9 +50,11 @@ from .constants import (
     ACC_NATIVE,
     ACC_STATIC,
     ARRAY_NATIVE_IDS,
+    CLASS_NATIVE_IDS,
     ENUM_NATIVE_IDS,
     NATIVE_IDS,
     NATIVE_OBJECT_INIT,
+    OBJECT_NATIVE_IDS,
     PJVM_CONST_NULL_REF,
     PJVM_CP_STR_FLAG,
     PJVM_CP_UNRESOLVED,
@@ -81,6 +83,8 @@ from .constants import (
     PJVM_VERSION_V3,
     PJVM_VERSION_V4,
     STRING_NATIVE_IDS,
+    STRING_STATIC_NATIVE_IDS,
+    SYSTEM_NATIVE_IDS,
 )
 from .descriptors import argument_descriptors, count_args, is_ref_descriptor
 from .emit import (
@@ -110,6 +114,8 @@ EXCEPTION_HIERARCHY = {
     "java/lang/ClassCastException": "java/lang/RuntimeException",
     "java/lang/IllegalArgumentException": "java/lang/RuntimeException",
     "java/lang/IllegalStateException": "java/lang/RuntimeException",
+    "java/lang/Error": "java/lang/Throwable",
+    "java/lang/AssertionError": "java/lang/Error",
     "java/lang/StackOverflowError": "java/lang/Throwable",
 }
 
@@ -952,6 +958,48 @@ def _nop_array_checkcasts(classes, method_table, class_by_id):
             mt["bytecode"] = bytes(bc_arr)
 
 
+def _nop_string_constructor_allocations(classes, method_table, class_by_id):
+    """Erase `new String; dup` before constructor natives that return strings."""
+    for mt in method_table:
+        cid = mt["class_id"]
+        if mt["is_native"] or cid == PJVM_NO_CLASS:
+            continue
+        cname = class_by_id[cid]
+        cls = classes[cname]
+        bc_arr = bytearray(mt["bytecode"])
+        string_new_offsets = []
+        rewritten_new_offsets = set()
+        changed = False
+        for off, _width, op, cp_idx in bytecode_cp_operands(mt["bytecode"]):
+            if cp_idx <= 0 or cp_idx >= len(cls.cp):
+                continue
+            if op == OP_NEW:
+                if resolve_class_name(cls.cp, cp_idx) == "java/lang/String":
+                    string_new_offsets.append(off - 1)
+            elif op == OP_INVOKESPECIAL:
+                ref_class, ref_method, ref_desc = resolve_method_name(cls.cp, cp_idx)
+                if (ref_class, ref_method) != ("java/lang/String", "<init>"):
+                    continue
+                if (ref_method, ref_desc) not in STRING_NATIVE_IDS:
+                    continue
+                candidates = [
+                    new_off for new_off in string_new_offsets
+                    if new_off < off - 1 and new_off not in rewritten_new_offsets
+                ]
+                if not candidates:
+                    continue
+                op_off = candidates[-1]
+                rewritten_new_offsets.add(op_off)
+                bc_arr[op_off] = OP_NOP
+                bc_arr[op_off + 1] = OP_NOP
+                bc_arr[op_off + 2] = OP_NOP
+                if op_off + 3 < len(bc_arr) and bc_arr[op_off + 3] == OP_DUP:
+                    bc_arr[op_off + 3] = OP_NOP
+                changed = True
+        if changed:
+            mt["bytecode"] = bytes(bc_arr)
+
+
 def _build_bytecode_section(method_table):
     """Concatenate non-native method bytecode and assign code offsets."""
     bytecode_section = bytearray()
@@ -1217,6 +1265,7 @@ def pack_pjvm(class_data_list, verbose=False, v2=False, pin_hints=None,
     class_by_id = {}
     for name in class_order:
         class_by_id[classes[name].class_id] = name
+    _nop_string_constructor_allocations(classes, method_table, class_by_id)
     _nop_array_checkcasts(classes, method_table, class_by_id)
     class_cp_uses = {}
     for name in class_order:
@@ -1294,9 +1343,19 @@ def pack_pjvm(class_data_list, verbose=False, v2=False, pin_hints=None,
 
             elif ref_class == "java/lang/String":
                 str_key = (ref_method, ref_desc)
-                if str_key in STRING_NATIVE_IDS:
+                if str_key in STRING_STATIC_NATIVE_IDS:
+                    nm_idx = append_native_method(
+                        ref_method, ref_desc, count_args(ref_desc),
+                        STRING_STATIC_NATIVE_IDS[str_key])
+                    native_cache[key] = nm_idx
+                    if verbose:
+                        print(f"  Native #{nm_idx}: String.{ref_method}"
+                              f"{ref_desc} (id={STRING_STATIC_NATIVE_IDS[str_key]})")
+                elif str_key in STRING_NATIVE_IDS:
                     nm_idx = len(method_table)
-                    a_count = count_args(ref_desc) + 1  # +1 for 'this'
+                    a_count = count_args(ref_desc)
+                    if ref_method != "<init>":
+                        a_count += 1  # +1 for 'this'
                     method_table.append({
                         "name": ref_method,
                         "descriptor": ref_desc,
@@ -1317,6 +1376,39 @@ def pack_pjvm(class_data_list, verbose=False, v2=False, pin_hints=None,
                     if verbose:
                         print(f"  Native #{nm_idx}: String.{ref_method}"
                               f"{ref_desc} (id={STRING_NATIVE_IDS[str_key]})")
+
+            elif ref_class == "java/lang/System":
+                sys_key = (ref_method, ref_desc)
+                if sys_key in SYSTEM_NATIVE_IDS:
+                    nm_idx = append_native_method(
+                        ref_method, ref_desc, count_args(ref_desc),
+                        SYSTEM_NATIVE_IDS[sys_key])
+                    native_cache[key] = nm_idx
+                    if verbose:
+                        print(f"  Native #{nm_idx}: System.{ref_method}"
+                              f"{ref_desc} (id={SYSTEM_NATIVE_IDS[sys_key]})")
+
+            elif ref_class == "java/lang/Object":
+                obj_key = (ref_method, ref_desc)
+                if obj_key in OBJECT_NATIVE_IDS:
+                    nm_idx = append_native_method(
+                        ref_method, ref_desc, count_args(ref_desc) + 1,
+                        OBJECT_NATIVE_IDS[obj_key])
+                    native_cache[key] = nm_idx
+                    if verbose:
+                        print(f"  Native #{nm_idx}: Object.{ref_method}"
+                              f"{ref_desc} (id={OBJECT_NATIVE_IDS[obj_key]})")
+
+            elif ref_class == "java/lang/Class":
+                class_key = (ref_method, ref_desc)
+                if class_key in CLASS_NATIVE_IDS:
+                    nm_idx = append_native_method(
+                        ref_method, ref_desc, count_args(ref_desc) + 1,
+                        CLASS_NATIVE_IDS[class_key])
+                    native_cache[key] = nm_idx
+                    if verbose:
+                        print(f"  Native #{nm_idx}: Class.{ref_method}"
+                              f"{ref_desc} (id={CLASS_NATIVE_IDS[class_key]})")
 
             elif ref_class.startswith("["):
                 arr_key = (ref_method, ref_desc)

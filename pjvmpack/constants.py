@@ -114,6 +114,44 @@ STRING_NATIVE_IDS = {
     ("toCharArray", "()[C"): 47,
     ("contains", "(Ljava/lang/CharSequence;)Z"): 48,
     ("compareTo", "(Ljava/lang/String;)I"): 49,
+    ("indexOf", "(Ljava/lang/String;I)I"): 50,
+    ("compareToIgnoreCase", "(Ljava/lang/String;)I"): 51,
+    ("trim", "()Ljava/lang/String;"): 52,
+    ("toUpperCase", "()Ljava/lang/String;"): 53,
+    ("getBytes", "()[B"): 54,
+    ("toLowerCase", "(Ljava/util/Locale;)Ljava/lang/String;"): 58,
+    ("<init>", "([C)V"): 61,
+    ("<init>", "([CII)V"): 62,
+    ("<init>", "([B)V"): 63,
+    ("<init>", "([BII)V"): 64,
+    ("<init>", "([BLjava/lang/String;)V"): 65,
+    ("<init>", "([BLjava/nio/charset/Charset;)V"): 65,
+    ("<init>", "([BIILjava/lang/String;)V"): 66,
+    ("<init>", "([BIILjava/nio/charset/Charset;)V"): 67,
+    ("<init>", "(Ljava/lang/String;)V"): 68,
+    ("<init>", "()V"): 69,
+}
+
+STRING_STATIC_NATIVE_IDS = {
+    ("valueOf", "(C)Ljava/lang/String;"): 55,
+}
+
+SYSTEM_NATIVE_IDS = {
+    ("arraycopy", "(Ljava/lang/Object;ILjava/lang/Object;II)V"): 70,
+    ("identityHashCode", "(Ljava/lang/Object;)I"): 71,
+}
+
+OBJECT_NATIVE_IDS = {
+    ("getClass", "()Ljava/lang/Class;"): 72,
+}
+
+CLASS_NATIVE_IDS = {
+    ("getResourceAsStream", "(Ljava/lang/String;)Ljava/io/InputStream;"): 73,
+    ("getName", "()Ljava/lang/String;"): 74,
+    ("getSimpleName", "()Ljava/lang/String;"): 75,
+    ("isInstance", "(Ljava/lang/Object;)Z"): 76,
+    ("getClassLoader", "()Ljava/lang/ClassLoader;"): 77,
+    ("getDeclaredField", "(Ljava/lang/String;)Ljava/lang/reflect/Field;"): 78,
 }
 
 ENUM_NATIVE_IDS = {

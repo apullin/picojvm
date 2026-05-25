@@ -1,7 +1,9 @@
 """Command-line interface for pjvmpack."""
 
 import argparse
+import sys
 
+from .errors import PackError
 from .mapfile import emit_map
 from .options import PackOptions
 from .pack import pack_pjvm
@@ -71,15 +73,19 @@ def main(argv=None):
         pjvm_format=args.format,
         pack_method_table=args.pack_method_table,
     )
-    pjvm, class_order, method_table = pack_pjvm(
-        class_data_list,
-        verbose=options.verbose,
-        v2=options.v2,
-        pin_hints=options.pin_hints,
-        compact_cp=options.compact_cp,
-        pjvm_format=options.pjvm_format,
-        pack_method_table=options.pack_method_table,
-    )
+    try:
+        pjvm, class_order, method_table = pack_pjvm(
+            class_data_list,
+            verbose=options.verbose,
+            v2=options.v2,
+            pin_hints=options.pin_hints,
+            compact_cp=options.compact_cp,
+            pjvm_format=options.pjvm_format,
+            pack_method_table=options.pack_method_table,
+        )
+    except PackError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
 
     out_path = args.output
     if not out_path:
@@ -101,6 +107,8 @@ def main(argv=None):
         with open(map_path, "wb") as f:
             f.write(map_data)
         print(f"Wrote {map_path} ({len(map_data)} bytes)")
+
+    return 0
 
 
 __all__ = ["main"]

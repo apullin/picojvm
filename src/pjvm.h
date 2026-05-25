@@ -56,10 +56,11 @@
 #define PJVM_PC_HALT 0xFFFFFFFFu
 
 /* trap codes for pjvm_platform_trap (op argument) */
+#define PJVM_TRAP_BAD_METHOD   0xFB
+#define PJVM_TRAP_CAPACITY     0xFC
 #define PJVM_TRAP_BAD_VERSION  0xFD
 #define PJVM_TRAP_STEP_LIMIT   0xFE
 #define PJVM_TRAP_BAD_NATIVE   0xFF
-#define PJVM_TRAP_CAPACITY     0xFC
 
 /* --- .pjvm binary format constants ----------------------------------- */
 #define PJVM_MAGIC        0x85

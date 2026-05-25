@@ -16,14 +16,26 @@ from .bytecode import (
     OP_I2B,
     OP_I2C,
     OP_I2S,
+    OP_GETFIELD,
+    OP_GETSTATIC,
     OP_ILOAD,
     OP_ILOAD_0,
     OP_ILOAD_3,
+    OP_ANEWARRAY,
+    OP_CHECKCAST,
+    OP_INSTANCEOF,
+    OP_INVOKEDYNAMIC,
+    OP_INVOKEINTERFACE,
+    OP_INVOKESTATIC,
     OP_INVOKESPECIAL,
+    OP_INVOKEVIRTUAL,
     OP_LDC,
+    OP_LDC2_W,
     OP_LDC_W,
+    OP_MULTIANEWARRAY,
     OP_NEW,
     OP_PUTFIELD,
+    OP_PUTSTATIC,
     OP_RETURN,
     OP_SIPUSH,
     add_ordered_cp_use,
@@ -96,6 +108,76 @@ EXCEPTION_HIERARCHY = {
     "java/lang/IllegalArgumentException": "java/lang/RuntimeException",
     "java/lang/StackOverflowError": "java/lang/Throwable",
 }
+
+
+OPCODE_NAMES = {
+    OP_LDC: "ldc",
+    OP_LDC_W: "ldc_w",
+    OP_LDC2_W: "ldc2_w",
+    OP_GETSTATIC: "getstatic",
+    OP_PUTSTATIC: "putstatic",
+    OP_GETFIELD: "getfield",
+    OP_PUTFIELD: "putfield",
+    OP_INVOKEVIRTUAL: "invokevirtual",
+    OP_INVOKESPECIAL: "invokespecial",
+    OP_INVOKESTATIC: "invokestatic",
+    OP_INVOKEINTERFACE: "invokeinterface",
+    OP_INVOKEDYNAMIC: "invokedynamic",
+    OP_NEW: "new",
+    OP_ANEWARRAY: "anewarray",
+    OP_CHECKCAST: "checkcast",
+    OP_INSTANCEOF: "instanceof",
+    OP_MULTIANEWARRAY: "multianewarray",
+}
+
+IGNORED_CLASS_REF_OPS = {OP_ANEWARRAY, OP_MULTIANEWARRAY}
+
+
+def _opcode_name(op):
+    return OPCODE_NAMES.get(op, f"op 0x{op:02X}")
+
+
+def _describe_cp_entry(cp, cp_idx):
+    entry = cp[cp_idx]
+    if entry is None:
+        return "<empty constant-pool slot>"
+    tag = entry[0]
+    if tag in ("Methodref", "InterfaceMethodref"):
+        ref_class, ref_method, ref_desc = resolve_method_name(cp, cp_idx)
+        return f"{ref_class}.{ref_method}{ref_desc}"
+    if tag == "Fieldref":
+        ref_class = resolve_class_name(cp, entry[1])
+        nat = cp[entry[2]]
+        field_name = cp[nat[1]][1]
+        field_desc = cp[nat[2]][1]
+        return f"{ref_class}.{field_name}:{field_desc}"
+    if tag == "Class":
+        return cp[entry[1]][1]
+    if tag == "String":
+        return "String literal"
+    if tag == "Integer":
+        return "Integer literal"
+    return tag
+
+
+def _find_unresolved_cp_uses(class_name, cls, cp_resolve, uses):
+    """Return bytecode CP references that still have no runtime resolution."""
+    errors = []
+    first_uses = uses["first"]
+    for cp_idx in uses["all"]:
+        if cp_resolve[cp_idx] != PJVM_CP_UNRESOLVED:
+            continue
+        method_name, method_desc, op, bytecode_off = first_uses[cp_idx]
+        if op in IGNORED_CLASS_REF_OPS:
+            # The runtime currently ignores the type CP operand for reference
+            # array allocation. Keeping this permissive preserves old images
+            # such as `new String[n]` without requiring java/lang/String.class.
+            continue
+        errors.append(
+            f"{class_name}.{method_name}{method_desc}+{bytecode_off}: "
+            f"{_opcode_name(op)} CP#{cp_idx} {_describe_cp_entry(cls.cp, cp_idx)}"
+        )
+    return errors
 
 
 def _exception_classes_needed(classes, class_order):
@@ -1038,6 +1120,7 @@ def pack_pjvm(class_data_list, verbose=False, v2=False, pin_hints=None,
             "all_set": set(),
             "ldc": [],
             "ldc_set": set(),
+            "first": {},
         }
     for mt in method_table:
         cid = mt["class_id"]
@@ -1045,8 +1128,9 @@ def pack_pjvm(class_data_list, verbose=False, v2=False, pin_hints=None,
             continue
         cname = class_by_id[cid]
         uses = class_cp_uses[cname]
-        for _off, _width, op, cp_idx in bytecode_cp_operands(mt["bytecode"]):
+        for off, _width, op, cp_idx in bytecode_cp_operands(mt["bytecode"]):
             add_ordered_cp_use(uses, cp_idx, op == OP_LDC)
+            uses["first"].setdefault(cp_idx, (mt["name"], mt["descriptor"], op, off - 1))
 
     # Add native/external methods referenced by bytecode.
     native_cache = {}  # (class, name, desc) -> global method index
@@ -1187,6 +1271,7 @@ def pack_pjvm(class_data_list, verbose=False, v2=False, pin_hints=None,
     cp_bases = {}  # class_name -> cp_base offset
     cp_old_entries = 0
     cp_new_entries = 0
+    unresolved_cp_errors = []
 
     for name in class_order:
         cls = classes[name]
@@ -1319,6 +1404,10 @@ def pack_pjvm(class_data_list, verbose=False, v2=False, pin_hints=None,
             if ref_name in classes:
                 cp_resolve[cp_idx] = classes[ref_name].class_id
 
+        unresolved_cp_errors.extend(
+            _find_unresolved_cp_uses(name, cls, cp_resolve, class_cp_uses[name])
+        )
+
         if compact_cp:
             uses = class_cp_uses[name]
             ldc_order = [idx for idx in uses["ldc"] if idx in uses["all_set"]]
@@ -1337,6 +1426,16 @@ def pack_pjvm(class_data_list, verbose=False, v2=False, pin_hints=None,
         else:
             global_cp_resolve.extend(cp_resolve)
             cp_new_entries += len(cp_resolve)
+
+    if unresolved_cp_errors:
+        max_shown = 24
+        shown = "\n".join(f"  {msg}" for msg in unresolved_cp_errors[:max_shown])
+        remaining = len(unresolved_cp_errors) - max_shown
+        if remaining > 0:
+            shown += f"\n  ... {remaining} more"
+        raise PackError(
+            f"Unresolved bytecode references ({len(unresolved_cp_errors)}):\n{shown}"
+        )
 
     # Set cp_base on all method entries
     for mt in method_table:

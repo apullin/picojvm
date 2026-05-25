@@ -690,8 +690,21 @@ void pjvm_parse(uint8_t *data) {
 /* --- invoke / return -------------------------------------------------- */
 static void pjvm_exec(void);
 
+#if defined(PJVM_DEBUG_TOOLS) || defined(PJVM_BOUNDS_CHECK)
+#define PJVM_CHECK_METHOD_ID(mi) do { \
+    if ((uint32_t)(mi) >= (uint32_t)n_methods) { \
+        pjvm_platform_trap(PJVM_TRAP_BAD_METHOD, (uint16_t)g_pjvm->pc); \
+        return; \
+    } \
+} while (0)
+#else
+#define PJVM_CHECK_METHOD_ID(mi) do { } while (0)
+#endif
+
 static void pjvm_inv(pjvm_method_id_t mi) {
     uint16_t alo, ahi, blo, bhi;
+
+    PJVM_CHECK_METHOD_ID(mi);
 
     if (m_fl[mi] & 1) {
         uint8_t nid = (uint8_t)(m_fl[mi] >> 1);
@@ -1669,6 +1682,7 @@ static void pjvm_exec(void) {
         }
         case OP_INVOKEVIRTUAL: {
             pjvm_method_id_t bmi = cpread();
+            PJVM_CHECK_METHOD_ID(bmi);
             pjvm_vslot_t vs = m_vs[bmi];
             if (vs == PJVM_NO_VTABLE) { pjvm_inv(bmi); }
             else {
@@ -1686,6 +1700,7 @@ static void pjvm_exec(void) {
         case OP_INVOKEINTERFACE: {
             pjvm_method_id_t bmi = cpread();
             bcread(); bcread();
+            PJVM_CHECK_METHOD_ID(bmi);
             pjvm_vmid_t vid = m_vmid[bmi];
             uint16_t argi = (uint16_t)(g_pjvm->sp - m_ac[bmi]);
 #if PJVM_USE_CONST_OBJECT_ARRAYS

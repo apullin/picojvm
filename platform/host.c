@@ -311,7 +311,10 @@ void pjvm_platform_trap(uint8_t op, uint16_t pc) {
         exit(2);
     } else
 #endif
-    if (op == 0xFF) {
+    if (op == PJVM_TRAP_BAD_METHOD) {
+        fprintf(stderr, "Invalid method id at bytecode offset %u\n",
+                (unsigned)pc);
+    } else if (op == 0xFF) {
         fprintf(stderr, "Unknown native method at bytecode offset %u\n",
                 (unsigned)pc);
     } else {
@@ -440,7 +443,9 @@ int main(int argc, char **argv) {
 #ifdef PJVM_DEBUG_TOOLS
         } else if (strncmp(argv[i], "--step-limit=", 13) == 0) {
             extern uint32_t pjvm_step_limit;
+            extern uint8_t pjvm_trace_enabled;
             pjvm_step_limit = (uint32_t)strtoul(argv[i] + 13, NULL, 0);
+            pjvm_trace_enabled = 1;
         } else if (strcmp(argv[i], "--trace") == 0) {
             extern uint8_t pjvm_trace_enabled;
             pjvm_trace_enabled = 1;

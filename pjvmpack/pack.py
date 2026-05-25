@@ -13,6 +13,9 @@ from .bytecode import (
     OP_ICONST_0,
     OP_ICONST_5,
     OP_ICONST_M1,
+    OP_I2B,
+    OP_I2C,
+    OP_I2S,
     OP_ILOAD,
     OP_ILOAD_0,
     OP_ILOAD_3,
@@ -422,10 +425,52 @@ def _is_string_descriptor(descriptor):
     return descriptor == "Ljava/lang/String;"
 
 
+def _narrow_int(value, op):
+    if op == OP_I2B:
+        narrowed = value & 0xFF
+        return narrowed - 0x100 if narrowed & 0x80 else narrowed
+    if op == OP_I2S:
+        narrowed = value & 0xFFFF
+        return narrowed - 0x10000 if narrowed & 0x8000 else narrowed
+    if op == OP_I2C:
+        return value & 0xFFFF
+    return value
+
+
+def _apply_narrow_ops(value, ops):
+    for op in ops:
+        value = _narrow_int(value, op)
+    return value
+
+
+def _read_narrow_ops(bc, offset):
+    ops = []
+    while offset < len(bc) and bc[offset] in (OP_I2B, OP_I2C, OP_I2S):
+        ops.append(bc[offset])
+        offset += 1
+    return tuple(ops), offset
+
+
+def _narrow_ops_match(source_desc, target_desc, ops):
+    """Check whether a load plus narrowing ops can feed ``target_desc``."""
+    if not ops:
+        return source_desc == target_desc
+    if not _is_int_like_descriptor(source_desc):
+        return False
+    if ops[-1] == OP_I2B:
+        return target_desc == "B"
+    if ops[-1] == OP_I2S:
+        return target_desc == "S"
+    if ops[-1] == OP_I2C:
+        return target_desc == "C"
+    return False
+
+
 def _read_const_factory_push(cp, bc, offset, arg_for_local):
     """Read one load/literal push in a trivial const-object factory."""
     kind, local_idx, next_offset = _read_local_load(bc, offset)
     if kind in ("I", "A"):
+        narrow_ops, next_offset = _read_narrow_ops(bc, next_offset)
         arg_info = arg_for_local.get(local_idx)
         if arg_info is None:
             return None, offset
@@ -434,19 +479,29 @@ def _read_const_factory_push(cp, bc, offset, arg_for_local):
             return None, offset
         if kind == "A" and not _is_string_descriptor(arg_desc):
             return None, offset
-        return ("param", arg_idx), next_offset
+        if kind == "A" and narrow_ops:
+            return None, offset
+        return ("param", arg_idx, narrow_ops), next_offset
 
     op = bc[offset]
     if op == OP_ACONST_NULL:
         return ("null",), offset + 1
     if op == OP_ICONST_M1:
-        return -1, offset + 1
+        value, next_offset = -1, offset + 1
+        narrow_ops, next_offset = _read_narrow_ops(bc, next_offset)
+        return _apply_narrow_ops(value, narrow_ops), next_offset
     if OP_ICONST_0 <= op <= OP_ICONST_5:
-        return op - OP_ICONST_0, offset + 1
+        value, next_offset = op - OP_ICONST_0, offset + 1
+        narrow_ops, next_offset = _read_narrow_ops(bc, next_offset)
+        return _apply_narrow_ops(value, narrow_ops), next_offset
     if op == OP_BIPUSH:
-        return struct.unpack_from(">b", bc, offset + 1)[0], offset + 2
+        value, next_offset = struct.unpack_from(">b", bc, offset + 1)[0], offset + 2
+        narrow_ops, next_offset = _read_narrow_ops(bc, next_offset)
+        return _apply_narrow_ops(value, narrow_ops), next_offset
     if op == OP_SIPUSH:
-        return struct.unpack_from(">h", bc, offset + 1)[0], offset + 3
+        value, next_offset = struct.unpack_from(">h", bc, offset + 1)[0], offset + 3
+        narrow_ops, next_offset = _read_narrow_ops(bc, next_offset)
+        return _apply_narrow_ops(value, narrow_ops), next_offset
     if op in (OP_LDC, OP_LDC_W):
         if op == OP_LDC:
             cp_idx = bc[offset + 1]
@@ -456,7 +511,8 @@ def _read_const_factory_push(cp, bc, offset, arg_for_local):
             next_offset = offset + 3
         entry = cp[cp_idx]
         if entry and entry[0] == "Integer":
-            return entry[1], next_offset
+            narrow_ops, next_offset = _read_narrow_ops(bc, next_offset)
+            return _apply_narrow_ops(entry[1], narrow_ops), next_offset
         if entry and entry[0] == "String":
             return ("string", cp[entry[1]][1]), next_offset
     return None, offset
@@ -471,7 +527,7 @@ def _const_factory_source_matches(source, target_desc, factory_arg_descs):
     if isinstance(source, tuple) and source[0] == "null":
         return _is_string_descriptor(target_desc)
     if isinstance(source, tuple) and source[0] == "param":
-        return factory_arg_descs[source[1]] == target_desc
+        return _narrow_ops_match(factory_arg_descs[source[1]], target_desc, source[2])
     return False
 
 
@@ -603,6 +659,7 @@ def _const_object_constructor_layout(cls):
         if kind != "A" or local_idx != 0:
             raise PackError(f"@Const object {cls.name}: constructor has non-field side effects")
         load_kind, value_local, i = _read_local_load(bc, i)
+        narrow_ops, i = _read_narrow_ops(bc, i)
         if load_kind not in ("I", "A") or i + 3 > len(bc) or bc[i] != OP_PUTFIELD:
             raise PackError(f"@Const object {cls.name}: constructor has unsupported assignment")
         field_class, field_name, field_desc = _resolve_fieldref_name(
@@ -613,11 +670,13 @@ def _const_object_constructor_layout(cls):
         if value_local not in arg_for_local:
             raise PackError(f"@Const object {cls.name}: constructor does not assign from an argument")
         arg_idx = arg_for_local[value_local]
-        if arg_descs[arg_idx] != field_desc:
+        if load_kind == "A" and narrow_ops:
+            raise PackError(f"@Const object {cls.name}.{field_name}: reference narrowing is invalid")
+        if not _narrow_ops_match(arg_descs[arg_idx], field_desc, narrow_ops):
             raise PackError(f"@Const object {cls.name}.{field_name}: constructor arg type mismatch")
         if field_name in field_args:
             raise PackError(f"@Const object {cls.name}.{field_name}: assigned more than once")
-        field_args[field_name] = arg_idx
+        field_args[field_name] = (arg_idx, narrow_ops)
 
     if i != len(bc):
         raise PackError(f"@Const object {cls.name}: constructor has trailing bytecode")
@@ -650,6 +709,12 @@ def _const_object_slot(field_desc, value, global_string_constants, string_consta
         raise PackError(f"@Const object primitive field is not a literal int: {value!r}")
     if field_desc == "Z":
         value = 1 if value else 0
+    elif field_desc == "B":
+        value = _narrow_int(value, OP_I2B)
+    elif field_desc == "S":
+        value = _narrow_int(value, OP_I2S)
+    elif field_desc == "C":
+        value = _narrow_int(value, OP_I2C)
     raw = value & 0xFFFFFFFF
     return raw & 0xFFFF, (raw >> 16) & 0xFFFF
 
@@ -674,13 +739,15 @@ def _build_const_object_array(arr, classes, global_string_constants, string_cons
             raise PackError(f"@Const object array {class_name}: constructor descriptor mismatch")
 
         slots = []
-        for (field_name, field_desc), arg_idx in zip(
+        for (field_name, field_desc), (arg_idx, narrow_ops) in zip(
                 layout["fields"], layout["field_arg_indices"]):
             try:
                 arg_value = obj["args"][arg_idx]
             except IndexError as exc:
                 raise PackError(
                     f"@Const object array {class_name}.{field_name}: missing argument") from exc
+            if isinstance(arg_value, int):
+                arg_value = _apply_narrow_ops(arg_value, narrow_ops)
             slots.append(_const_object_slot(
                 field_desc, arg_value, global_string_constants, string_constant_dedup))
         records.append(slots)

@@ -14,6 +14,9 @@ from .bytecode import (
     OP_ICONST_0,
     OP_ICONST_5,
     OP_ICONST_M1,
+    OP_I2B,
+    OP_I2C,
+    OP_I2S,
     OP_IASTORE,
     OP_INVOKESTATIC,
     OP_LDC,
@@ -48,6 +51,24 @@ _ELEM_TYPE = {
     "I": PJVM_ELEM_INT,
     "Z": PJVM_ELEM_BYTE,
 }
+
+
+def _narrow_int(value, op):
+    if op == OP_I2B:
+        narrowed = value & 0xFF
+        return narrowed - 0x100 if narrowed & 0x80 else narrowed
+    if op == OP_I2S:
+        narrowed = value & 0xFFFF
+        return narrowed - 0x10000 if narrowed & 0x8000 else narrowed
+    if op == OP_I2C:
+        return value & 0xFFFF
+    return value
+
+
+def _apply_narrow_ops(value, ops):
+    for op in ops:
+        value = _narrow_int(value, op)
+    return value
 
 
 def _resolve_classref(cp, cp_idx):
@@ -225,6 +246,12 @@ def extract_const_arrays(cls, cp, _static_field_base_slot=0, verbose=False,
             else:
                 stack.clear()
             i += 3
+        elif op in (OP_I2B, OP_I2C, OP_I2S):
+            if stack and isinstance(stack[-1], int):
+                stack[-1] = _narrow_int(stack[-1], op)
+            elif stack:
+                stack[-1] = ("opaque",)
+            i += 1
         elif op == OP_INVOKESTATIC:
             cp_idx = (bc[i + 1] << 8) | bc[i + 2]
             method_key = resolve_method_name(cp, cp_idx)
@@ -246,7 +273,10 @@ def extract_const_arrays(cls, cp, _static_field_base_slot=0, verbose=False,
                     obj_args = []
                     for source in factory["arg_sources"]:
                         if isinstance(source, tuple) and source[0] == "param":
-                            obj_args.append(call_args[source[1]])
+                            value = call_args[source[1]]
+                            if isinstance(value, int):
+                                value = _apply_narrow_ops(value, source[2])
+                            obj_args.append(value)
                         else:
                             obj_args.append(source)
                     stack.append((

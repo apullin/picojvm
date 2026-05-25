@@ -18,7 +18,7 @@ GC_FRAGMENT_TEST  = $(BUILDDIR)/gc-fragment-test
 GC_EXACT_TEST     = $(BUILDDIR)/gc-exact-test
 
 # Single-class tests
-TESTS_SINGLE = Fib HelloWorld BubbleSort Counter StringTest RomStringTest NativeOpsTest StaticInitTest MultiArrayTest StringSwitchTest ConstTest ConstStringArrayTest ConstObjectArrayTest TermSmoke FilesSmoke PicoJseStdSmoke StringConcatSmoke TarSmoke ZipSmoke ZipDeflateSmoke
+TESTS_SINGLE = Fib HelloWorld BubbleSort Counter StringTest RomStringTest NativeOpsTest StaticInitTest MultiArrayTest StringSwitchTest ConstTest ConstStringArrayTest ConstObjectArrayTest ConstNarrowingTest TermSmoke FilesSmoke PicoJseStdSmoke StringConcatSmoke TarSmoke ZipSmoke ZipDeflateSmoke
 TESTS_MULTI  = Shapes Features InterfaceTest ExceptionTest
 TESTS_PAGER  = BigSwitch BigLUT
 ALL_TESTS    = $(TESTS_SINGLE) $(TESTS_MULTI)
@@ -126,6 +126,12 @@ tests/ConstObjectArrayTest.class tests/ConstPoint.class: tests/ConstObjectArrayT
 	$(JAVAC) -d tests $^
 
 tests/ConstObjectArrayTest.pjvm: tests/ConstObjectArrayTest.class tests/ConstPoint.class
+	$(PYTHON) pjvmpack.py $^ -o $@ -v
+
+tests/ConstNarrowingTest.class tests/NarrowPoint.class tests/ByteCommand.class: tests/ConstNarrowingTest.java tests/Native.java tests/Const.java
+	$(JAVAC) -d tests $^
+
+tests/ConstNarrowingTest.pjvm: tests/ConstNarrowingTest.class tests/NarrowPoint.class tests/ByteCommand.class
 	$(PYTHON) pjvmpack.py $^ -o $@ -v
 
 # Pack single-class .pjvm

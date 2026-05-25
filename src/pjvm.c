@@ -88,6 +88,23 @@ enum {
     NATIVE_ENUM_TOSTRING = 30,
     NATIVE_ENUM_VALUEOF = 31,
     NATIVE_ARRAY_CLONE = 32,
+    NATIVE_STR_ISEMPTY = 33,
+    NATIVE_STR_SUBSTRING1 = 34,
+    NATIVE_STR_SUBSTRING2 = 35,
+    NATIVE_STR_INDEXOF_I = 36,
+    NATIVE_STR_INDEXOF_II = 37,
+    NATIVE_STR_INDEXOF_STR = 38,
+    NATIVE_STR_LASTINDEXOF_I = 39,
+    NATIVE_STR_LASTINDEXOF_II = 40,
+    NATIVE_STR_STARTSWITH = 41,
+    NATIVE_STR_ENDSWITH = 42,
+    NATIVE_STR_EQUALSIGNORECASE = 43,
+    NATIVE_STR_REGIONMATCHES = 44,
+    NATIVE_STR_REPLACE_CC = 45,
+    NATIVE_STR_TOLOWERCASE = 46,
+    NATIVE_STR_TOCHARARRAY = 47,
+    NATIVE_STR_CONTAINS = 48,
+    NATIVE_STR_COMPARETO = 49,
 };
 
 /* --- globals (extern-declared in pjvm.h) ------------------------------ */
@@ -397,6 +414,81 @@ static uint8_t pjvm_string_byte(uint16_t lo, uint16_t hi, uint16_t idx) {
         return PROG(data + idx);
     }
     return r8((uint16_t)(lo + PJVM_OBJ_HEADER + idx));
+}
+#endif
+
+#if PJVM_USE_EXT_STRING_APIS
+static uint8_t pjvm_ascii_lower(uint8_t ch) {
+    return (ch >= 'A' && ch <= 'Z') ? (uint8_t)(ch + ('a' - 'A')) : ch;
+}
+
+static uint16_t pjvm_make_string_range(uint16_t lo, uint16_t hi,
+                                       uint16_t start, uint16_t len) {
+    uint16_t a = heap_alloc(g_pjvm, (uint16_t)(PJVM_OBJ_HEADER + len),
+                            PJVM_HEAP_KIND_STRING);
+    w16(a, len);
+    w16((uint16_t)(a + 2), 0);
+    for (uint16_t i = 0; i < len; i++)
+        w8((uint16_t)(a + PJVM_OBJ_HEADER + i),
+           pjvm_string_byte(lo, hi, (uint16_t)(start + i)));
+    return a;
+}
+
+static int16_t pjvm_string_index_of_byte(uint16_t lo, uint16_t hi,
+                                         uint8_t ch, uint16_t from) {
+    uint16_t len = pjvm_string_len(lo, hi);
+    for (uint16_t i = from; i < len; i++)
+        if (pjvm_string_byte(lo, hi, i) == ch) return (int16_t)i;
+    return -1;
+}
+
+static int16_t pjvm_string_last_index_of_byte(uint16_t lo, uint16_t hi,
+                                              uint8_t ch, int16_t from) {
+    uint16_t len = pjvm_string_len(lo, hi);
+    if (len == 0) return -1;
+    if (from < 0) return -1;
+    if ((uint16_t)from >= len) from = (int16_t)(len - 1);
+    for (int16_t i = from; i >= 0; i--)
+        if (pjvm_string_byte(lo, hi, (uint16_t)i) == ch) return i;
+    return -1;
+}
+
+static int16_t pjvm_string_index_of_string(uint16_t lo, uint16_t hi,
+                                           uint16_t needle_lo, uint16_t needle_hi,
+                                           uint16_t from) {
+    uint16_t len = pjvm_string_len(lo, hi);
+    uint16_t nlen = pjvm_string_len(needle_lo, needle_hi);
+    if (nlen == 0) return (int16_t)(from <= len ? from : len);
+    if (from > len || nlen > len) return -1;
+    for (uint16_t i = from; i <= (uint16_t)(len - nlen); i++) {
+        uint8_t match = 1;
+        for (uint16_t j = 0; j < nlen; j++) {
+            if (pjvm_string_byte(lo, hi, (uint16_t)(i + j)) !=
+                pjvm_string_byte(needle_lo, needle_hi, j)) {
+                match = 0;
+                break;
+            }
+        }
+        if (match) return (int16_t)i;
+    }
+    return -1;
+}
+
+static uint8_t pjvm_string_region_match(uint16_t alo, uint16_t ahi, uint16_t aoff,
+                                        uint16_t blo, uint16_t bhi, uint16_t boff,
+                                        uint16_t len, uint8_t ignore_case) {
+    if ((uint32_t)aoff + len > pjvm_string_len(alo, ahi)) return 0;
+    if ((uint32_t)boff + len > pjvm_string_len(blo, bhi)) return 0;
+    for (uint16_t i = 0; i < len; i++) {
+        uint8_t a = pjvm_string_byte(alo, ahi, (uint16_t)(aoff + i));
+        uint8_t b = pjvm_string_byte(blo, bhi, (uint16_t)(boff + i));
+        if (ignore_case) {
+            a = pjvm_ascii_lower(a);
+            b = pjvm_ascii_lower(b);
+        }
+        if (a != b) return 0;
+    }
+    return 1;
 }
 #endif
 
@@ -743,7 +835,7 @@ static void pjvm_inv(pjvm_method_id_t mi) {
             g_pjvm->fdepth = 0; g_pjvm->pc = PJVM_PC_HALT;
             break;
         case NATIVE_OBJECT_INIT:
-            g_pjvm->sp--;
+            g_pjvm->sp = (uint16_t)(g_pjvm->sp - m_ac[mi]);
             break;
         case NATIVE_STR_LENGTH:
             SPOP32(alo, ahi);
@@ -784,6 +876,166 @@ static void pjvm_inv(pjvm_method_id_t mi) {
             pjvm_push32((int32_t)h);
             break;
         }
+#if PJVM_USE_EXT_STRING_APIS
+        case NATIVE_STR_ISEMPTY:
+            SPOP32(alo, ahi);
+            spush(pjvm_string_len(alo, ahi) == 0 ? 1 : 0, 0);
+            break;
+        case NATIVE_STR_SUBSTRING1: {
+            SPOP_U16(blo);
+            SPOP32(alo, ahi);
+            uint16_t slen = pjvm_string_len(alo, ahi);
+            uint16_t a = pjvm_make_string_range(
+                alo, ahi, blo, (uint16_t)(slen - blo));
+            spush(a, 0);
+            break;
+        }
+        case NATIVE_STR_SUBSTRING2: {
+            uint16_t start, end;
+            SPOP_U16(end);
+            SPOP_U16(start);
+            SPOP32(alo, ahi);
+            uint16_t a = pjvm_make_string_range(
+                alo, ahi, start, (uint16_t)(end - start));
+            spush(a, 0);
+            break;
+        }
+        case NATIVE_STR_INDEXOF_I: {
+            SPOP_U16(blo);
+            SPOP32(alo, ahi);
+            int16_t idx = pjvm_string_index_of_byte(alo, ahi, (uint8_t)blo, 0);
+            spush((uint16_t)idx, SIGN16_HI(idx));
+            break;
+        }
+        case NATIVE_STR_INDEXOF_II: {
+            uint16_t ch, from;
+            SPOP_U16(from);
+            SPOP_U16(ch);
+            SPOP32(alo, ahi);
+            int16_t idx = pjvm_string_index_of_byte(alo, ahi, (uint8_t)ch, from);
+            spush((uint16_t)idx, SIGN16_HI(idx));
+            break;
+        }
+        case NATIVE_STR_INDEXOF_STR:
+        case NATIVE_STR_CONTAINS: {
+            SPOP32(blo, bhi);
+            SPOP32(alo, ahi);
+            int16_t idx = pjvm_string_index_of_string(alo, ahi, blo, bhi, 0);
+            if (nid == NATIVE_STR_CONTAINS) spush(idx >= 0 ? 1 : 0, 0);
+            else spush((uint16_t)idx, SIGN16_HI(idx));
+            break;
+        }
+        case NATIVE_STR_LASTINDEXOF_I: {
+            SPOP_U16(blo);
+            SPOP32(alo, ahi);
+            int16_t idx = pjvm_string_last_index_of_byte(
+                alo, ahi, (uint8_t)blo, (int16_t)(pjvm_string_len(alo, ahi) - 1));
+            spush((uint16_t)idx, SIGN16_HI(idx));
+            break;
+        }
+        case NATIVE_STR_LASTINDEXOF_II: {
+            uint16_t ch, from;
+            SPOP_U16(from);
+            SPOP_U16(ch);
+            SPOP32(alo, ahi);
+            int16_t idx = pjvm_string_last_index_of_byte(
+                alo, ahi, (uint8_t)ch, (int16_t)from);
+            spush((uint16_t)idx, SIGN16_HI(idx));
+            break;
+        }
+        case NATIVE_STR_STARTSWITH:
+        case NATIVE_STR_ENDSWITH: {
+            SPOP32(blo, bhi);
+            SPOP32(alo, ahi);
+            uint16_t slen = pjvm_string_len(alo, ahi);
+            uint16_t plen = pjvm_string_len(blo, bhi);
+            uint16_t off = nid == NATIVE_STR_ENDSWITH && slen >= plen ?
+                           (uint16_t)(slen - plen) : 0;
+            uint8_t ok = plen <= slen &&
+                pjvm_string_region_match(alo, ahi, off, blo, bhi, 0, plen, 0);
+            spush(ok, 0);
+            break;
+        }
+        case NATIVE_STR_EQUALSIGNORECASE: {
+            SPOP32(blo, bhi);
+            SPOP32(alo, ahi);
+            uint16_t alen = pjvm_string_len(alo, ahi);
+            uint16_t blen = pjvm_string_len(blo, bhi);
+            uint8_t ok = alen == blen &&
+                pjvm_string_region_match(alo, ahi, 0, blo, bhi, 0, alen, 1);
+            spush(ok, 0);
+            break;
+        }
+        case NATIVE_STR_REGIONMATCHES: {
+            uint16_t ignore, toff, ooff, len;
+            SPOP_U16(len);
+            SPOP_U16(ooff);
+            SPOP32(blo, bhi);
+            SPOP_U16(toff);
+            SPOP_U16(ignore);
+            SPOP32(alo, ahi);
+            spush(pjvm_string_region_match(
+                alo, ahi, toff, blo, bhi, ooff, len, ignore != 0), 0);
+            break;
+        }
+        case NATIVE_STR_REPLACE_CC: {
+            uint16_t old_ch, new_ch;
+            SPOP_U16(new_ch);
+            SPOP_U16(old_ch);
+            SPOP32(alo, ahi);
+            uint16_t slen = pjvm_string_len(alo, ahi);
+            uint16_t a = heap_alloc(g_pjvm, (uint16_t)(PJVM_OBJ_HEADER + slen),
+                                    PJVM_HEAP_KIND_STRING);
+            w16(a, slen); w16((uint16_t)(a + 2), 0);
+            for (uint16_t i = 0; i < slen; i++) {
+                uint8_t ch = pjvm_string_byte(alo, ahi, i);
+                if (ch == (uint8_t)old_ch) ch = (uint8_t)new_ch;
+                w8((uint16_t)(a + PJVM_OBJ_HEADER + i), ch);
+            }
+            spush(a, 0);
+            break;
+        }
+        case NATIVE_STR_TOLOWERCASE: {
+            SPOP32(alo, ahi);
+            uint16_t slen = pjvm_string_len(alo, ahi);
+            uint16_t a = heap_alloc(g_pjvm, (uint16_t)(PJVM_OBJ_HEADER + slen),
+                                    PJVM_HEAP_KIND_STRING);
+            w16(a, slen); w16((uint16_t)(a + 2), 0);
+            for (uint16_t i = 0; i < slen; i++)
+                w8((uint16_t)(a + PJVM_OBJ_HEADER + i),
+                   pjvm_ascii_lower(pjvm_string_byte(alo, ahi, i)));
+            spush(a, 0);
+            break;
+        }
+        case NATIVE_STR_TOCHARARRAY: {
+            SPOP32(alo, ahi);
+            uint16_t slen = pjvm_string_len(alo, ahi);
+            uint16_t a = heap_alloc(g_pjvm, (uint16_t)(PJVM_OBJ_HEADER + slen * 2),
+                                    PJVM_HEAP_KIND_SHORT_ARRAY);
+            w16(a, slen); w16((uint16_t)(a + 2), 0);
+            for (uint16_t i = 0; i < slen; i++) {
+                uint16_t addr = (uint16_t)(a + PJVM_OBJ_HEADER + i * 2);
+                w16(addr, pjvm_string_byte(alo, ahi, i));
+            }
+            spush(a, 0);
+            break;
+        }
+        case NATIVE_STR_COMPARETO: {
+            SPOP32(blo, bhi);
+            SPOP32(alo, ahi);
+            uint16_t alen = pjvm_string_len(alo, ahi);
+            uint16_t blen = pjvm_string_len(blo, bhi);
+            uint16_t n = alen < blen ? alen : blen;
+            int32_t result = (int32_t)alen - (int32_t)blen;
+            for (uint16_t i = 0; i < n; i++) {
+                uint8_t a = pjvm_string_byte(alo, ahi, i);
+                uint8_t b = pjvm_string_byte(blo, bhi, i);
+                if (a != b) { result = (int32_t)a - (int32_t)b; break; }
+            }
+            pjvm_push32(result);
+            break;
+        }
+#endif
         case NATIVE_ARRAYCOPY:
 #if PJVM_USE_ASM_ARRAYCOPY
             pjvm_native_arraycopy();

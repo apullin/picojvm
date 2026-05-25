@@ -82,6 +82,50 @@ public final class StringBuilder {
         return append("<object>");
     }
 
+    public int length() {
+        return len;
+    }
+
+    public char charAt(int index) {
+        return (char)(buf[index] & 0xFF);
+    }
+
+    public void setLength(int newLength) {
+        ensure(newLength - len);
+        while (len < newLength) buf[len++] = 0;
+        len = newLength;
+    }
+
+    public void setCharAt(int index, char c) {
+        buf[index] = (byte)c;
+    }
+
+    public String substring(int start) {
+        return substring(start, len);
+    }
+
+    public String substring(int start, int end) {
+        return Native.stringFromBytes(buf, start, end - start);
+    }
+
+    public int lastIndexOf(String s, int fromIndex) {
+        int n = s.length();
+        if (n == 0) return fromIndex < len ? fromIndex : len;
+        int start = fromIndex;
+        if (start > len - n) start = len - n;
+        for (int i = start; i >= 0; i--) {
+            boolean match = true;
+            for (int j = 0; j < n; j++) {
+                if ((buf[i + j] & 0xFF) != s.charAt(j)) {
+                    match = false;
+                    break;
+                }
+            }
+            if (match) return i;
+        }
+        return -1;
+    }
+
     public String toString() {
         return Native.stringFromBytes(buf, 0, len);
     }

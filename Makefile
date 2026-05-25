@@ -7,6 +7,7 @@ JAVAC8FLAGS ?= -source 8 -target 8
 PYTHON  = python3
 PICOJVM = ./picojvm
 PICOJVM_LARGE = ./picojvm-large
+PJVM_HEADERS = src/pjvm.h src/pjvm_opts.h
 EXPDIR  = expected
 GC_DEMO_MANUAL    = $(BUILDDIR)/gc-policy-demo-manual
 GC_DEMO_ALLOCFAIL = $(BUILDDIR)/gc-policy-demo-allocfail
@@ -18,12 +19,18 @@ GC_FRAGMENT_TEST  = $(BUILDDIR)/gc-fragment-test
 GC_EXACT_TEST     = $(BUILDDIR)/gc-exact-test
 
 # Single-class tests
-TESTS_SINGLE = Fib HelloWorld BubbleSort Counter StringTest RomStringTest NativeOpsTest StaticInitTest MultiArrayTest StringSwitchTest ConstTest ConstStringArrayTest ConstObjectArrayTest ConstNarrowingTest TermSmoke FilesSmoke PicoJseStdSmoke StringConcatSmoke TarSmoke ZipSmoke ZipDeflateSmoke
+TESTS_SINGLE = Fib HelloWorld BubbleSort Counter StringTest RomStringTest StringApiSmoke NativeOpsTest StaticInitTest MultiArrayTest StringSwitchTest ConstTest ConstStringArrayTest ConstObjectArrayTest ConstNarrowingTest TermSmoke FilesSmoke PicoJseStdSmoke JavaLangSmoke StringConcatSmoke TarSmoke ZipSmoke ZipDeflateSmoke
 TESTS_MULTI  = Shapes Features InterfaceTest ExceptionTest EnumBasicTest
 TESTS_PAGER  = BigSwitch BigLUT
 ALL_TESTS    = $(TESTS_SINGLE) $(TESTS_MULTI)
 ALL_TESTS_PAGER = $(ALL_TESTS) $(TESTS_PAGER)
-PICOJSE_SRCS = java/lang/StringBuilder.java \
+PICOJSE_SRCS = java/lang/Boolean.java \
+               java/lang/Byte.java \
+               java/lang/Character.java \
+               java/lang/Integer.java \
+               java/lang/Math.java \
+               java/lang/Short.java \
+               java/lang/StringBuilder.java \
                pj/Native.java \
                pj/archive/Tar.java \
                pj/archive/Zip.java \
@@ -102,13 +109,13 @@ SIM_CAPS = -DPJVM_METHOD_CAP=64 -DPJVM_CLASS_CAP=16 -DPJVM_VTABLE_CAP=128 \
 
 all: $(PICOJVM)
 
-$(PICOJVM): src/pjvm.c src/pjvm_heap.c src/pjvm_gc.c platform/host.c src/pjvm.h
+$(PICOJVM): src/pjvm.c src/pjvm_heap.c src/pjvm_gc.c platform/host.c $(PJVM_HEADERS)
 	$(CC) $(CFLAGS) $(HOST_VM_DEBUG) $(HOST_VM_OPTS) -DPJVM_MAX_FRAMES=128 -o $@ src/pjvm.c src/pjvm_heap.c src/pjvm_gc.c platform/host.c
 
-$(PICOJVM_LARGE): src/pjvm.c src/pjvm_heap.c src/pjvm_gc.c platform/host.c src/pjvm.h
+$(PICOJVM_LARGE): src/pjvm.c src/pjvm_heap.c src/pjvm_gc.c platform/host.c $(PJVM_HEADERS)
 	$(CC) $(CFLAGS) $(HOST_VM_DEBUG) $(HOST_VM_OPTS) $(HOST_VM_LARGE_OPTS) -o $@ src/pjvm.c src/pjvm_heap.c src/pjvm_gc.c platform/host.c
 
-$(PICOJVM_PAGED): src/pjvm.c src/pjvm_heap.c src/pjvm_gc.c platform/host.c src/pjvm.h
+$(PICOJVM_PAGED): src/pjvm.c src/pjvm_heap.c src/pjvm_gc.c platform/host.c $(PJVM_HEADERS)
 	$(CC) $(CFLAGS) $(HOST_VM_DEBUG) $(HOST_VM_OPTS) -DPJVM_PAGED -o $@ src/pjvm.c src/pjvm_heap.c src/pjvm_gc.c platform/host.c
 
 # Compile all test .java files
@@ -173,9 +180,9 @@ tests/EnumBasicTest.pjvm: tests/EnumBasicTest.class tests/EnumBasicTest$$Color.c
 tests/EnumBasicTest.class tests/EnumBasicTest$$Color.class: tests/EnumBasicTest.java tests/Native.java
 	$(JAVAC) $(JAVAC8FLAGS) -d tests $^
 
-$(BUILDDIR)/picojse.stamp: $(PICOJSE_SRCS) tests/TermSmoke.java tests/FilesSmoke.java tests/TermDemo.java tests/PicoJseStdSmoke.java tests/StringConcatSmoke.java tests/TarSmoke.java tests/ZipSmoke.java tests/ZipDeflateSmoke.java tests/PJTar.java tests/PJUntar.java tests/PJZip.java tests/PJUnzip.java tests/PJArc.java | $(BUILDDIR)
+$(BUILDDIR)/picojse.stamp: $(PICOJSE_SRCS) tests/TermSmoke.java tests/FilesSmoke.java tests/TermDemo.java tests/PicoJseStdSmoke.java tests/JavaLangSmoke.java tests/StringConcatSmoke.java tests/TarSmoke.java tests/ZipSmoke.java tests/ZipDeflateSmoke.java tests/PJTar.java tests/PJUntar.java tests/PJZip.java tests/PJUnzip.java tests/PJArc.java | $(BUILDDIR)
 	@mkdir -p $(PICOJSE_CLASSDIR)
-	$(JAVAC) $(JAVAC8FLAGS) -d $(PICOJSE_CLASSDIR) $(PICOJSE_SRCS) tests/TermSmoke.java tests/FilesSmoke.java tests/TermDemo.java tests/PicoJseStdSmoke.java tests/StringConcatSmoke.java tests/TarSmoke.java tests/ZipSmoke.java tests/ZipDeflateSmoke.java tests/PJTar.java tests/PJUntar.java tests/PJZip.java tests/PJUnzip.java tests/PJArc.java
+	$(JAVAC) $(JAVAC8FLAGS) -d $(PICOJSE_CLASSDIR) $(PICOJSE_SRCS) tests/TermSmoke.java tests/FilesSmoke.java tests/TermDemo.java tests/PicoJseStdSmoke.java tests/JavaLangSmoke.java tests/StringConcatSmoke.java tests/TarSmoke.java tests/ZipSmoke.java tests/ZipDeflateSmoke.java tests/PJTar.java tests/PJUntar.java tests/PJZip.java tests/PJUnzip.java tests/PJArc.java
 	@touch $@
 
 tests/TermSmoke.pjvm: $(BUILDDIR)/picojse.stamp
@@ -218,6 +225,19 @@ tests/PicoJseStdSmoke.pjvm: $(BUILDDIR)/picojse.stamp
 		$(PICOJSE_CLASSDIR)/pj/text/Strings.class \
 		$(PICOJSE_CLASSDIR)/pj/util/Bytes.class \
 		$(PICOJSE_CLASSDIR)/pj/util/Ints.class \
+		-o $@ -v
+
+tests/JavaLangSmoke.pjvm: $(BUILDDIR)/picojse.stamp
+	$(PYTHON) pjvmpack.py \
+		$(PICOJSE_CLASSDIR)/JavaLangSmoke.class \
+		$(PICOJSE_CLASSDIR)/java/lang/Boolean.class \
+		$(PICOJSE_CLASSDIR)/java/lang/Byte.class \
+		$(PICOJSE_CLASSDIR)/java/lang/Character.class \
+		$(PICOJSE_CLASSDIR)/java/lang/Integer.class \
+		$(PICOJSE_CLASSDIR)/java/lang/Math.class \
+		$(PICOJSE_CLASSDIR)/java/lang/Short.class \
+		$(PICOJSE_CLASSDIR)/java/lang/StringBuilder.class \
+		$(PICOJSE_CLASSDIR)/pj/Native.class \
 		-o $@ -v
 
 tests/StringConcatSmoke.pjvm: $(BUILDDIR)/picojse.stamp
@@ -653,19 +673,19 @@ pathlib.Path(sys.argv[2]).write_text('// Auto-generated — .pjvm program data\\
 $(BUILDDIR)/crt0.o: $(CRT) | $(BUILDDIR)
 	$(CLANG) --target=i8085-unknown-elf -ffreestanding -fno-builtin -$(TARGET_OPT) -c $< -o $@
 
-$(BUILDDIR)/pjvm.o: src/pjvm.c src/pjvm.h | $(BUILDDIR)
+$(BUILDDIR)/pjvm.o: src/pjvm.c $(PJVM_HEADERS) | $(BUILDDIR)
 	$(CLANG) --target=i8085-unknown-elf -ffreestanding -fno-builtin -$(TARGET_OPT) $(SIM_CAPS) $(TARGET_VM_OPTS) $(TARGET_ASM_HELPERS_DEF) -c $< -o $@
 
-$(BUILDDIR)/pjvm_heap.o: src/pjvm_heap.c src/pjvm.h | $(BUILDDIR)
+$(BUILDDIR)/pjvm_heap.o: src/pjvm_heap.c $(PJVM_HEADERS) | $(BUILDDIR)
 	$(CLANG) --target=i8085-unknown-elf -ffreestanding -fno-builtin -ffunction-sections -$(TARGET_OPT) $(SIM_CAPS) $(TARGET_VM_OPTS) -c $< -o $@
 
-$(BUILDDIR)/pjvm_gc.o: src/pjvm_gc.c src/pjvm.h | $(BUILDDIR)
+$(BUILDDIR)/pjvm_gc.o: src/pjvm_gc.c $(PJVM_HEADERS) | $(BUILDDIR)
 	$(CLANG) --target=i8085-unknown-elf -ffreestanding -fno-builtin -ffunction-sections -$(TARGET_OPT) $(SIM_CAPS) $(TARGET_VM_OPTS) -c $< -o $@
 
-$(BUILDDIR)/i8085_sim.o: platform/i8085_sim.c src/pjvm.h | $(BUILDDIR)
+$(BUILDDIR)/i8085_sim.o: platform/i8085_sim.c $(PJVM_HEADERS) | $(BUILDDIR)
 	$(CLANG) --target=i8085-unknown-elf -ffreestanding -fno-builtin -$(TARGET_OPT) $(SIM_CAPS) $(TARGET_VM_OPTS) $(TARGET_ASM_HELPERS_DEF) -c $< -o $@
 
-$(BUILDDIR)/i8085_helpers.o: platform/i8085_helpers.S | $(BUILDDIR)
+$(BUILDDIR)/i8085_helpers.o: platform/i8085_helpers.S src/pjvm_opts.h | $(BUILDDIR)
 	$(CLANG) --target=i8085-unknown-elf $(TARGET_VM_OPTS) -DPJVM_ASM_HELPERS -c $< -o $@
 
 $(PJVM_DATA_O): $(PJVM_DATA_C) | $(BUILDDIR)

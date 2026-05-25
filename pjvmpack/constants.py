@@ -97,6 +97,23 @@ STRING_NATIVE_IDS = {
     ("equals", "(Ljava/lang/Object;)Z"): 9,
     ("toString", "()Ljava/lang/String;"): 10,
     ("hashCode", "()I"): 12,
+    ("isEmpty", "()Z"): 33,
+    ("substring", "(I)Ljava/lang/String;"): 34,
+    ("substring", "(II)Ljava/lang/String;"): 35,
+    ("indexOf", "(I)I"): 36,
+    ("indexOf", "(II)I"): 37,
+    ("indexOf", "(Ljava/lang/String;)I"): 38,
+    ("lastIndexOf", "(I)I"): 39,
+    ("lastIndexOf", "(II)I"): 40,
+    ("startsWith", "(Ljava/lang/String;)Z"): 41,
+    ("endsWith", "(Ljava/lang/String;)Z"): 42,
+    ("equalsIgnoreCase", "(Ljava/lang/String;)Z"): 43,
+    ("regionMatches", "(ZILjava/lang/String;II)Z"): 44,
+    ("replace", "(CC)Ljava/lang/String;"): 45,
+    ("toLowerCase", "()Ljava/lang/String;"): 46,
+    ("toCharArray", "()[C"): 47,
+    ("contains", "(Ljava/lang/CharSequence;)Z"): 48,
+    ("compareTo", "(Ljava/lang/String;)I"): 49,
 }
 
 ENUM_NATIVE_IDS = {

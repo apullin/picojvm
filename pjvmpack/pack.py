@@ -109,6 +109,7 @@ EXCEPTION_HIERARCHY = {
     "java/lang/IndexOutOfBoundsException": "java/lang/RuntimeException",
     "java/lang/ClassCastException": "java/lang/RuntimeException",
     "java/lang/IllegalArgumentException": "java/lang/RuntimeException",
+    "java/lang/IllegalStateException": "java/lang/RuntimeException",
     "java/lang/StackOverflowError": "java/lang/Throwable",
 }
 
@@ -1283,26 +1284,13 @@ def pack_pjvm(class_data_list, verbose=False, v2=False, pin_hints=None,
             elif ref_method == "<init>" and (
                     ref_class == "java/lang/Object" or
                     ref_class in EXCEPTION_HIERARCHY):
-                nm_idx = len(method_table)
-                method_table.append({
-                    "name": "<init>",
-                    "descriptor": "()V",
-                    "max_locals": 1,
-                    "max_stack": 0,
-                    "arg_count": 1,
-                    "bytecode": b"",
-                    "is_native": True,
-                    "native_id": NATIVE_OBJECT_INIT,
-                    "class_id": PJVM_NO_CLASS,
-                    "vtable_slot": PJVM_NO_VTABLE,
-                    "vmid": PJVM_NO_VTABLE,
-                    "cp_base": 0,
-                    "exc_table": [],
-                    "line_table": [],
-                })
+                nm_idx = append_native_method(
+                    "<init>", ref_desc, count_args(ref_desc) + 1,
+                    NATIVE_OBJECT_INIT)
                 native_cache[key] = nm_idx
                 if verbose:
-                    print(f"  Native #{nm_idx}: {ref_class}.<init>()V (no-op)")
+                    print(f"  Native #{nm_idx}: {ref_class}.<init>{ref_desc} "
+                          "(no-op)")
 
             elif ref_class == "java/lang/String":
                 str_key = (ref_method, ref_desc)

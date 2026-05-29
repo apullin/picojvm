@@ -82,23 +82,30 @@ picojc/
   Makefile             Build, test, selfhost, disk modes
 pjvmpack.py            .class to .pjvm packer (bootstrap tool)
 Makefile               picoJVM host build and picoJVM-level tests
-java/                  Minimal java.lang surface supplied by picoJSE
-pj/                    picoJSE Java-side environment (`pj.archive`, `pj.io`, `pj.text`, `pj.term`, `pj.util`)
+java/                  Standard-name picoJSE facades (`java.lang` today)
+pj/                    picoJSE substrate (`pj.archive`, `pj.io`, `pj.text`, `pj.term`, `pj.util`)
 ```
 
 ## picoJSE Packages
 
 `picoJSE` is the Java-side standard environment layer for `picoJVM`.
 
+Naming convention: if picoJSE exposes a standard Java API, it should live under
+the matching `java.*` name so stock `javac` bytecode resolves unchanged. The
+`pj.*` root is for nonstandard picoJSE substrate and target helpers.
+
 Current package roots:
 
 - `java.lang.StringBuilder` — minimal Java-8 string-concat helper
 - `pj.Native` — package-visible native bridge
 - `pj.archive` — archive/container helpers (`Tar` and stored-entry `Zip` today)
-- `pj.io` — routed console/text output plus file and byte/binary helpers
+- `pj.io` — substrate for routed console/text output plus file and byte/binary helpers
 - `pj.util` — array, byte, and integer helpers
 - `pj.text` — formatting, parsing, and small string utilities
 - `pj.term` — retained cell-surface / terminal abstraction and drawing helpers
+
+Planned standard I/O and collection shims should be added as `java.io.*` and
+`java.util.*` facades layered on these helpers, not as parallel `pj.*` APIs.
 
 The current `pj.term` implementation is intentionally text-first:
 

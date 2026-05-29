@@ -12,6 +12,15 @@ is to move application-facing functionality into Java packages that can run on:
 
 ## Package split
 
+Standard Java-compatible surfaces use their standard package names. picoJSE
+already does this for `java.lang.*`, and future standard-library subsets should
+follow the same rule: if client bytecode names `java.io.FileInputStream`, the
+class picoJVM packs must also be named `java/io/FileInputStream`.
+
+`pj.*` is reserved for picoJSE substrate and nonstandard helpers: raw native
+bridges, target-specific terminal/device primitives, archive helpers, and small
+utility routines that do not claim JDK API compatibility.
+
 - `pj.Native`
   - package-visible native bridge
   - keeps `pj.*` code out of the default package
@@ -28,6 +37,35 @@ is to move application-facing functionality into Java packages that can run on:
   - retained cell-surface model and terminal/display presenters
 - `pj.ui`
   - later widget toolkit, forms, grids, menus, spreadsheet controls
+
+## Current naming audit
+
+Bucket A: standard surfaces exposed under `java.*`.
+
+- `java.lang.Boolean`
+- `java.lang.Byte`
+- `java.lang.Character`
+- `java.lang.Integer`
+- `java.lang.Math`
+- `java.lang.Short`
+- `java.lang.StringBuilder`
+- `java.lang.System`
+
+Bucket B: picoJSE substrate and nonstandard helpers that stay under `pj.*`.
+
+- `pj.Native`: native bridge and raw device/file/syscall hooks
+- `pj.io.Files`: minimal handle/current-file substrate over native file calls,
+  not a `java.io.File` facade
+- `pj.io.Console` and `pj.io.TextWriter`: routed target text output
+- `pj.io.Binary`: little-endian byte-buffer helpers
+- `pj.archive.*`: compact tar/zip container helpers, not `java.util.zip`
+- `pj.term.*`: terminal and retained cell-surface primitives
+- `pj.text.*`: small formatting/parsing/string helpers
+- `pj.util.*`: low-level byte/int array helpers
+
+Planned standard facades such as `java.io.*` and `java.util.*` should be added
+as `java.*` classes layered on top of the `pj.*` substrate rather than by
+renaming the substrate classes.
 
 ## Why `pj.term` first
 

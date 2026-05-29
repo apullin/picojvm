@@ -24,38 +24,45 @@ TESTS_MULTI  = Shapes Features InterfaceTest ExceptionTest EnumBasicTest
 TESTS_PAGER  = BigSwitch BigLUT
 ALL_TESTS    = $(TESTS_SINGLE) $(TESTS_MULTI)
 ALL_TESTS_PAGER = $(ALL_TESTS) $(TESTS_PAGER)
-PICOJSE_SRCS = java/lang/Boolean.java \
-               java/lang/Byte.java \
-               java/lang/Character.java \
-               java/lang/Integer.java \
-               java/lang/Math.java \
-               java/lang/Short.java \
-               java/lang/StringBuilder.java \
-               java/lang/System.java \
-               pj/Native.java \
-               pj/archive/Tar.java \
-               pj/archive/Zip.java \
-               pj/archive/ZipRead.java \
-               pj/archive/ZipWrite.java \
-               pj/archive/ZipDeflateBits.java \
-               pj/archive/ZipDeflate.java \
-               pj/archive/ZipHuffman.java \
-               pj/archive/ZipInflate.java \
-               pj/archive/ZipTables.java \
-               pj/io/Console.java \
-               pj/io/Files.java \
-               pj/io/Binary.java \
-               pj/io/TextWriter.java \
-               pj/term/Keys.java \
-               pj/term/Terminal.java \
-               pj/term/CellSurface.java \
-               pj/term/AnsiTerminal.java \
-               pj/term/Draw.java \
-               pj/util/Bytes.java \
-               pj/util/Ints.java \
-               pj/text/Format.java \
-               pj/text/Parse.java \
-               pj/text/Strings.java
+
+# picoJSE package rule:
+# - standard Java-compatible surfaces live under java.*
+# - target/runtime substrate and nonstandard helpers live under pj.*
+PICOJSE_JAVA_SRCS = java/lang/Boolean.java \
+                    java/lang/Byte.java \
+                    java/lang/Character.java \
+                    java/lang/Integer.java \
+                    java/lang/Math.java \
+                    java/lang/Short.java \
+                    java/lang/StringBuilder.java \
+                    java/lang/System.java
+
+PICOJSE_PJ_SRCS = pj/Native.java \
+                  pj/archive/Tar.java \
+                  pj/archive/Zip.java \
+                  pj/archive/ZipRead.java \
+                  pj/archive/ZipWrite.java \
+                  pj/archive/ZipDeflateBits.java \
+                  pj/archive/ZipDeflate.java \
+                  pj/archive/ZipHuffman.java \
+                  pj/archive/ZipInflate.java \
+                  pj/archive/ZipTables.java \
+                  pj/io/Console.java \
+                  pj/io/Files.java \
+                  pj/io/Binary.java \
+                  pj/io/TextWriter.java \
+                  pj/term/Keys.java \
+                  pj/term/Terminal.java \
+                  pj/term/CellSurface.java \
+                  pj/term/AnsiTerminal.java \
+                  pj/term/Draw.java \
+                  pj/util/Bytes.java \
+                  pj/util/Ints.java \
+                  pj/text/Format.java \
+                  pj/text/Parse.java \
+                  pj/text/Strings.java
+
+PICOJSE_SRCS = $(PICOJSE_JAVA_SRCS) $(PICOJSE_PJ_SRCS)
 PICOJSE_CLASSDIR = $(BUILDDIR)/picojse-classes
 
 # --- 8085 target toolchain ---

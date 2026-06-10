@@ -15,6 +15,11 @@ uint8_t pjvm_prog_read(uint32_t off) {
     return 0;
 }
 
+void pjvm_platform_trap(uint8_t op, uint16_t pc) {
+    (void)op;
+    (void)pc;
+}
+
 static void gc_demo_init(PJVMCtx *j, uint16_t used) {
     memset(j, 0, sizeof(*j));
     j->heap_base = 1;

@@ -449,6 +449,7 @@ static uint8_t pjvm_ascii_lower(uint8_t ch) {
 
 static uint16_t pjvm_make_string_range(uint16_t lo, uint16_t hi,
                                        uint16_t start, uint16_t len) {
+    PJVM_GC_PROTECT(lo, hi);
     uint16_t a = heap_alloc(g_pjvm, (uint16_t)(PJVM_OBJ_HEADER + len),
                             PJVM_HEAP_KIND_STRING);
     w16(a, len);
@@ -456,6 +457,7 @@ static uint16_t pjvm_make_string_range(uint16_t lo, uint16_t hi,
     for (uint16_t i = 0; i < len; i++)
         w8((uint16_t)(a + PJVM_OBJ_HEADER + i),
            pjvm_string_byte(lo, hi, (uint16_t)(start + i)));
+    PJVM_GC_UNPROTECT(1);
     return a;
 }
 
@@ -526,28 +528,33 @@ static uint8_t pjvm_ascii_space(uint8_t ch) {
 
 static uint16_t pjvm_make_string_from_bytes(uint16_t src, uint16_t off,
                                             uint16_t len) {
+    PJVM_GC_PROTECT(src, 0);
     uint16_t a = heap_alloc(g_pjvm, (uint16_t)(PJVM_OBJ_HEADER + len),
                             PJVM_HEAP_KIND_STRING);
     w16(a, len); w16((uint16_t)(a + 2), 0);
     for (uint16_t i = 0; i < len; i++)
         w8((uint16_t)(a + PJVM_OBJ_HEADER + i),
            r8((uint16_t)(src + PJVM_OBJ_HEADER + off + i)));
+    PJVM_GC_UNPROTECT(1);
     return a;
 }
 
 static uint16_t pjvm_make_string_from_chars(uint16_t src, uint16_t off,
                                             uint16_t len) {
+    PJVM_GC_PROTECT(src, 0);
     uint16_t a = heap_alloc(g_pjvm, (uint16_t)(PJVM_OBJ_HEADER + len),
                             PJVM_HEAP_KIND_STRING);
     w16(a, len); w16((uint16_t)(a + 2), 0);
     for (uint16_t i = 0; i < len; i++)
         w8((uint16_t)(a + PJVM_OBJ_HEADER + i),
            (uint8_t)r16((uint16_t)(src + PJVM_OBJ_HEADER + (off + i) * 2)));
+    PJVM_GC_UNPROTECT(1);
     return a;
 }
 
 static uint16_t pjvm_make_case_string(uint16_t lo, uint16_t hi, uint8_t upper) {
     uint16_t slen = pjvm_string_len(lo, hi);
+    PJVM_GC_PROTECT(lo, hi);
     uint16_t a = heap_alloc(g_pjvm, (uint16_t)(PJVM_OBJ_HEADER + slen),
                             PJVM_HEAP_KIND_STRING);
     w16(a, slen); w16((uint16_t)(a + 2), 0);
@@ -556,16 +563,19 @@ static uint16_t pjvm_make_case_string(uint16_t lo, uint16_t hi, uint8_t upper) {
         w8((uint16_t)(a + PJVM_OBJ_HEADER + i),
            upper ? pjvm_ascii_upper(ch) : pjvm_ascii_lower(ch));
     }
+    PJVM_GC_UNPROTECT(1);
     return a;
 }
 
 static uint16_t pjvm_make_byte_array_from_string(uint16_t lo, uint16_t hi) {
     uint16_t slen = pjvm_string_len(lo, hi);
+    PJVM_GC_PROTECT(lo, hi);
     uint16_t a = heap_alloc(g_pjvm, (uint16_t)(PJVM_OBJ_HEADER + slen),
                             PJVM_HEAP_KIND_BYTE_ARRAY);
     w16(a, slen); w16((uint16_t)(a + 2), PJVM_HEAP_KIND_BYTE_ARRAY);
     for (uint16_t i = 0; i < slen; i++)
         w8((uint16_t)(a + PJVM_OBJ_HEADER + i), pjvm_string_byte(lo, hi, i));
+    PJVM_GC_UNPROTECT(1);
     return a;
 }
 
@@ -585,6 +595,7 @@ static uint16_t pjvm_make_main_args(PJVMCtx *j) {
                             PJVM_HEAP_KIND_REF_ARRAY);
     w16(a, argc);
     w16((uint16_t)(a + 2), PJVM_HEAP_KIND_REF_ARRAY);
+    PJVM_GC_PROTECT(a, 0);
     for (uint16_t i = 0; i < argc; i++) {
         const char *arg = j->prog_argv ? j->prog_argv[i] : 0;
         uint16_t len = 0;
@@ -593,6 +604,7 @@ static uint16_t pjvm_make_main_args(PJVMCtx *j) {
         w16((uint16_t)(a + PJVM_OBJ_HEADER + i * 4), sref);
         w16((uint16_t)(a + PJVM_OBJ_HEADER + i * 4 + 2), 0);
     }
+    PJVM_GC_UNPROTECT(1);
     return a;
 }
 
@@ -1071,6 +1083,7 @@ static void pjvm_inv(pjvm_method_id_t mi) {
             SPOP_U16(old_ch);
             SPOP32(alo, ahi);
             uint16_t slen = pjvm_string_len(alo, ahi);
+            PJVM_GC_PROTECT(alo, ahi);
             uint16_t a = heap_alloc(g_pjvm, (uint16_t)(PJVM_OBJ_HEADER + slen),
                                     PJVM_HEAP_KIND_STRING);
             w16(a, slen); w16((uint16_t)(a + 2), 0);
@@ -1079,24 +1092,28 @@ static void pjvm_inv(pjvm_method_id_t mi) {
                 if (ch == (uint8_t)old_ch) ch = (uint8_t)new_ch;
                 w8((uint16_t)(a + PJVM_OBJ_HEADER + i), ch);
             }
+            PJVM_GC_UNPROTECT(1);
             spush(a, 0);
             break;
         }
         case NATIVE_STR_TOLOWERCASE: {
             SPOP32(alo, ahi);
             uint16_t slen = pjvm_string_len(alo, ahi);
+            PJVM_GC_PROTECT(alo, ahi);
             uint16_t a = heap_alloc(g_pjvm, (uint16_t)(PJVM_OBJ_HEADER + slen),
                                     PJVM_HEAP_KIND_STRING);
             w16(a, slen); w16((uint16_t)(a + 2), 0);
             for (uint16_t i = 0; i < slen; i++)
                 w8((uint16_t)(a + PJVM_OBJ_HEADER + i),
                    pjvm_ascii_lower(pjvm_string_byte(alo, ahi, i)));
+            PJVM_GC_UNPROTECT(1);
             spush(a, 0);
             break;
         }
         case NATIVE_STR_TOCHARARRAY: {
             SPOP32(alo, ahi);
             uint16_t slen = pjvm_string_len(alo, ahi);
+            PJVM_GC_PROTECT(alo, ahi);
             uint16_t a = heap_alloc(g_pjvm, (uint16_t)(PJVM_OBJ_HEADER + slen * 2),
                                     PJVM_HEAP_KIND_SHORT_ARRAY);
             w16(a, slen); w16((uint16_t)(a + 2), PJVM_HEAP_KIND_SHORT_ARRAY);
@@ -1104,6 +1121,7 @@ static void pjvm_inv(pjvm_method_id_t mi) {
                 uint16_t addr = (uint16_t)(a + PJVM_OBJ_HEADER + i * 2);
                 w16(addr, pjvm_string_byte(alo, ahi, i));
             }
+            PJVM_GC_UNPROTECT(1);
             spush(a, 0);
             break;
         }
@@ -1283,11 +1301,13 @@ static void pjvm_inv(pjvm_method_id_t mi) {
             SPOP_U16(len);
             SPOP_U16(off);
             src = spop_lo();
+            PJVM_GC_PROTECT(src, 0);
             uint16_t a = heap_alloc(g_pjvm, (uint16_t)(PJVM_OBJ_HEADER + len),
                                     PJVM_HEAP_KIND_STRING);
             w16(a, len); w16((uint16_t)(a + 2), 0);
             for (uint16_t i = 0; i < len; i++)
                 w8(a + PJVM_OBJ_HEADER + i, r8(src + PJVM_OBJ_HEADER + off + i));
+            PJVM_GC_UNPROTECT(1);
             spush(a, 0);
         }
 #endif
@@ -1411,6 +1431,7 @@ static void pjvm_inv(pjvm_method_id_t mi) {
             SPOP32(src, src_hi);
             if (src_hi || src == 0) { pjvm_platform_trap(OP_INVOKEVIRTUAL, g_pjvm->pc); break; }
             uint16_t len = r16(src);
+            PJVM_GC_PROTECT(src, 0);
             uint16_t dst = heap_alloc(g_pjvm, (uint16_t)(PJVM_OBJ_HEADER + len * 4),
                                       PJVM_HEAP_KIND_REF_ARRAY);
             w16(dst, len);
@@ -1418,6 +1439,7 @@ static void pjvm_inv(pjvm_method_id_t mi) {
             for (uint16_t i = 0; i < len * 4; i++)
                 w8((uint16_t)(dst + PJVM_OBJ_HEADER + i),
                    r8((uint16_t)(src + PJVM_OBJ_HEADER + i)));
+            PJVM_GC_UNPROTECT(1);
             spush(dst, 0);
             break;
         }
@@ -1591,11 +1613,13 @@ static uint16_t pjvm_multi_alloc(uint16_t *sizes, uint8_t depth, uint8_t dims) {
                             PJVM_HEAP_KIND_REF_ARRAY);
     w16(a, count); w16((uint16_t)(a + 2), PJVM_HEAP_KIND_REF_ARRAY);
     if (depth + 1 < dims) {
+        PJVM_GC_PROTECT(a, 0);
         for (uint16_t i = 0; i < count; i++) {
             uint16_t inner = pjvm_multi_alloc(sizes, depth + 1, dims);
             w16(a + PJVM_OBJ_HEADER + i * 4, inner);
             w16((uint16_t)(a + PJVM_OBJ_HEADER + i * 4 + 2), 0);
         }
+        PJVM_GC_UNPROTECT(1);
     }
     return a;
 }
@@ -1609,23 +1633,38 @@ void pjvm_run(PJVMCtx *j) {
         uint32_t p_cd = cd_off;
         uint16_t n_ca = PROG16(p_cd);
         p_cd += 2;
-        /* Skip past array entries to reach init table */
+        /* Skip past array entries to reach init table. Entry sizes are
+         * fixed by the image format, not by which element types this build
+         * can execute: a wrong dsz desyncs the walk and corrupts the
+         * static-init table below, so unsupported types trap instead. */
         for (uint16_t i = 0; i < n_ca; i++) {
             uint16_t ne = PROG16(p_cd);
             uint8_t et = PROG(p_cd + 2);
             p_cd += 4; /* skip 4-byte header */
             uint16_t dsz = ne;
-            if (et == PJVM_ELEM_CHAR || et == PJVM_ELEM_SHORT
-#if PJVM_USE_CONST_STRING_ARRAYS
-                || et == PJVM_ELEM_STRING_REF
-#endif
-            )
+            if (et == PJVM_ELEM_CHAR || et == PJVM_ELEM_SHORT ||
+                et == PJVM_ELEM_STRING_REF)
                 dsz = (uint16_t)(ne * 2);
-            else if (et == 3) dsz = (uint16_t)(ne * 4);
-#if PJVM_USE_CONST_OBJECT_ARRAYS
+            else if (et == PJVM_ELEM_INT)
+                dsz = (uint16_t)(ne * 4);
             else if (et == PJVM_ELEM_OBJECT_REF) {
                 uint16_t nf = PROG16(p_cd + 2);
                 dsz = (uint16_t)(4 + ne * (uint16_t)(4 + nf * 4));
+            }
+            else if (et != PJVM_ELEM_BYTE) {
+                pjvm_platform_trap(PJVM_TRAP_UNSUPPORTED, et);
+                return;
+            }
+#if !PJVM_USE_CONST_STRING_ARRAYS
+            if (et == PJVM_ELEM_STRING_REF) {
+                pjvm_platform_trap(PJVM_TRAP_UNSUPPORTED, et);
+                return;
+            }
+#endif
+#if !PJVM_USE_CONST_OBJECT_ARRAYS
+            if (et == PJVM_ELEM_OBJECT_REF) {
+                pjvm_platform_trap(PJVM_TRAP_UNSUPPORTED, et);
+                return;
             }
 #endif
             p_cd += dsz;
@@ -1637,6 +1676,10 @@ void pjvm_run(PJVMCtx *j) {
             uint16_t slot = PROG16(p_cd);
             uint16_t lo   = PROG16(p_cd + 2);
             uint16_t hi   = PROG16(p_cd + 4);
+            if (slot >= PJVM_STATIC_CAP) {
+                pjvm_platform_trap(PJVM_TRAP_CAPACITY, slot);
+                return;
+            }
             j->sf_lo[slot] = lo;
             j->sf_hi[slot] = hi;
             p_cd += 6;

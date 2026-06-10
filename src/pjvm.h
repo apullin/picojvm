@@ -56,6 +56,7 @@
 #define PJVM_PC_HALT 0xFFFFFFFFu
 
 /* trap codes for pjvm_platform_trap (op argument) */
+#define PJVM_TRAP_UNSUPPORTED  0xFA /* image needs a compiled-out feature */
 #define PJVM_TRAP_BAD_METHOD   0xFB
 #define PJVM_TRAP_CAPACITY     0xFC
 #define PJVM_TRAP_BAD_VERSION  0xFD
@@ -248,6 +249,27 @@ void pjvm_gc_maybe(PJVMCtx *j, uint8_t reason, uint16_t alloc_size);
 #define pjvm_gc_collect(j, reason) ((void)(j), (void)(reason), 0)
 #define pjvm_gc_maybe(j, reason, alloc_size) \
     ((void)(j), (void)(reason), (void)(alloc_size))
+#endif
+
+/*
+ * GC temp roots: pin refs held only in C locals across an allocation. Once a
+ * ref is popped off the Java stack the collector cannot see it, so any
+ * heap_alloc between the pop and the last use of that ref could free it.
+ * The collector is non-moving, so pinning only prevents reclamation; the
+ * C-held address stays valid. Compiles to nothing when GC is disabled.
+ */
+#if PJVM_GC_ENABLED
+#define PJVM_GC_TEMP_ROOT_CAP 8
+extern uint16_t pjvm_gc_temp_lo[PJVM_GC_TEMP_ROOT_CAP];
+extern uint16_t pjvm_gc_temp_hi[PJVM_GC_TEMP_ROOT_CAP];
+extern uint8_t pjvm_gc_temp_count;
+void pjvm_gc_protect(uint16_t lo, uint16_t hi);
+#define PJVM_GC_PROTECT(lo, hi) pjvm_gc_protect((lo), (hi))
+#define PJVM_GC_UNPROTECT(n) \
+    (pjvm_gc_temp_count = (uint8_t)(pjvm_gc_temp_count - (n)))
+#else
+#define PJVM_GC_PROTECT(lo, hi) ((void)(lo), (void)(hi))
+#define PJVM_GC_UNPROTECT(n) ((void)0)
 #endif
 
 #ifdef PJVM_PAGED

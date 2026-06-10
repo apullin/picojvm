@@ -3,7 +3,8 @@
 CC      = cc
 CFLAGS  = -Wall -Wextra -O2
 HOST_VM_DEBUG = -DPJVM_DEBUG_TOOLS
-HOST_VM_OPTS ?= -DPJVM_USE_CONST_STRING_ARRAYS=1 -DPJVM_USE_CONST_OBJECT_ARRAYS=1
+HOST_VM_FEATURES = -DPJVM_USE_CONST_STRING_ARRAYS=1 -DPJVM_USE_CONST_OBJECT_ARRAYS=1
+HOST_VM_OPTS ?= $(HOST_VM_FEATURES)
 JAVAC   = javac
 JAVAC8FLAGS ?= -source 8 -target 8
 PYTHON  = python3
@@ -391,6 +392,13 @@ tests/GCGraphTest.pjvm: tests/GCNode.class tests/GCGraphTest.class
 tests/GCNode.class tests/GCGraphTest.class: tests/GCGraphTest.java tests/Native.java
 	$(JAVAC) -d tests $^
 
+# GC temp-root regression test
+tests/GcTempRootTest.pjvm: tests/GcTempRootTest.class
+	$(PYTHON) pjvmpack.py $^ -o $@ -v
+
+tests/GcTempRootTest.class: tests/GcTempRootTest.java tests/Native.java
+	$(JAVAC) -d tests $^
+
 # Pager stress tests (generated)
 tests/BigSwitch.java tests/BigLUT.java: tests/gen_big_tests.py
 	$(PYTHON) tests/gen_big_tests.py .
@@ -649,16 +657,21 @@ test-paged-alloc-heavy: $(PICOJVM_PAGED) tests/AllocHeavyTest.pjvm
 test-gc-graph:
 	$(MAKE) --no-print-directory clean
 	$(MAKE) --no-print-directory test-GCGraphTest \
-		HOST_VM_OPTS='$(GC_DEFAULT_OPTS) -DPJVM_HOST_HEAP_LIMIT=$(GC_HOST_PRESSURE_LIMIT)'
+		HOST_VM_OPTS='$(HOST_VM_FEATURES) $(GC_DEFAULT_OPTS) -DPJVM_HOST_HEAP_LIMIT=$(GC_HOST_PRESSURE_LIMIT)'
+
+test-gc-temp-roots:
+	$(MAKE) --no-print-directory clean
+	$(MAKE) --no-print-directory test-GcTempRootTest \
+		HOST_VM_OPTS='$(HOST_VM_FEATURES) $(GC_DEFAULT_OPTS) -DPJVM_HOST_HEAP_LIMIT=$(GC_HOST_PRESSURE_LIMIT)'
 
 test-gc-alloc-heavy:
 	$(MAKE) --no-print-directory clean
 	$(MAKE) --no-print-directory test-AllocHeavyTest \
-		HOST_VM_OPTS='$(GC_DEFAULT_OPTS) -DPJVM_HOST_HEAP_LIMIT=$(GC_HOST_PRESSURE_LIMIT)'
+		HOST_VM_OPTS='$(HOST_VM_FEATURES) $(GC_DEFAULT_OPTS) -DPJVM_HOST_HEAP_LIMIT=$(GC_HOST_PRESSURE_LIMIT)'
 
 test-gc-host-compat:
 	$(MAKE) --no-print-directory clean
-	$(MAKE) --no-print-directory test test-paged HOST_VM_OPTS='$(GC_DEFAULT_OPTS)'
+	$(MAKE) --no-print-directory test test-paged HOST_VM_OPTS='$(HOST_VM_FEATURES) $(GC_DEFAULT_OPTS)'
 
 test-gc-host-suite:
 	$(MAKE) --no-print-directory gc-policy-test
@@ -668,6 +681,7 @@ test-gc-host-suite:
 	$(MAKE) --no-print-directory test-gc-host-compat
 	$(MAKE) --no-print-directory test-gc-alloc-heavy
 	$(MAKE) --no-print-directory test-gc-graph
+	$(MAKE) --no-print-directory test-gc-temp-roots
 
 # --- 8085 simulator target ---
 
@@ -771,5 +785,5 @@ clean:
 .PHONY: all test test-paged test-paged-stress clean sim
 .PHONY: gc-demo-manual gc-demo-allocfail gc-demo-watermark75 gc-demo-return gc-demo-random
 .PHONY: gc-policy-test test-gc-collect test-gc-fragment test-gc-exact test-v4 test-pjvmpack-package test-alloc-heavy test-paged-alloc-heavy test-gc-alloc-heavy
-.PHONY: test-gc-graph test-gc-host-compat test-gc-host-suite test-sim-smoke test-sim-gc-smoke
+.PHONY: test-gc-graph test-gc-temp-roots test-gc-host-compat test-gc-host-suite test-sim-smoke test-sim-gc-smoke
 .PHONY: test-sim-gc-alloc-heavy test-gc-sim-suite test-gc-suite

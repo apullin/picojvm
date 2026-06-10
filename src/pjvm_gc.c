@@ -21,6 +21,20 @@ static uint16_t pjvm_gc_next_random(PJVMCtx *j) {
 }
 #endif
 
+uint16_t pjvm_gc_temp_lo[PJVM_GC_TEMP_ROOT_CAP];
+uint16_t pjvm_gc_temp_hi[PJVM_GC_TEMP_ROOT_CAP];
+uint8_t pjvm_gc_temp_count;
+
+void pjvm_gc_protect(uint16_t lo, uint16_t hi) {
+    if (pjvm_gc_temp_count >= PJVM_GC_TEMP_ROOT_CAP) {
+        pjvm_platform_trap(PJVM_TRAP_CAPACITY, PJVM_GC_TEMP_ROOT_CAP);
+        return;
+    }
+    pjvm_gc_temp_lo[pjvm_gc_temp_count] = lo;
+    pjvm_gc_temp_hi[pjvm_gc_temp_count] = hi;
+    pjvm_gc_temp_count++;
+}
+
 #if PJVM_GC_TRIGGERS & (PJVM_GC_TRIG_WATERMARK | PJVM_GC_TRIG_RANDOM_ABOVE_WATERMARK)
 static uint32_t pjvm_gc_heap_limit_value(const PJVMCtx *j) {
     return j->heap_limit ? (uint32_t)j->heap_limit : 65536u;
@@ -170,6 +184,11 @@ static void pjvm_gc_mark_roots(PJVMCtx *j) {
 
     for (uint16_t i = 0; i < PJVM_STATIC_CAP; i++)
         (void)pjvm_gc_mark_ref(j, j->sf_lo[i], j->sf_hi[i]);
+
+#if PJVM_GC_ENABLED
+    for (uint8_t i = 0; i < pjvm_gc_temp_count; i++)
+        (void)pjvm_gc_mark_ref(j, pjvm_gc_temp_lo[i], pjvm_gc_temp_hi[i]);
+#endif
 }
 
 static void pjvm_gc_trace(PJVMCtx *j) {
@@ -255,6 +274,9 @@ static uint8_t pjvm_gc_sweep(PJVMCtx *j) {
 void pjvm_gc_init(PJVMCtx *j) {
     j->gc_lfsr = (uint16_t)(j->heap_base ? j->heap_base : 0xACE1u);
     j->gc_count = 0;
+#if PJVM_GC_ENABLED
+    pjvm_gc_temp_count = 0;
+#endif
 }
 
 uint8_t pjvm_gc_collect(PJVMCtx *j, uint8_t reason) {

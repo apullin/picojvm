@@ -7,3 +7,7 @@ __pycache__/
 tests/*.class
 tests/*.pjvm
 tests/*.pjvmmap
+*.dSYM/
+\#*\#
+.\#*
+*~

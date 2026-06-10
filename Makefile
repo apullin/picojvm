@@ -22,7 +22,7 @@ GC_FRAGMENT_TEST  = $(BUILDDIR)/gc-fragment-test
 GC_EXACT_TEST     = $(BUILDDIR)/gc-exact-test
 
 # Single-class tests
-TESTS_SINGLE = Fib HelloWorld BubbleSort Counter StringTest RomStringTest StringApiSmoke NativeOpsTest StaticInitTest MultiArrayTest StringSwitchTest ConstTest ConstStringArrayTest ConstObjectArrayTest ConstNarrowingTest TermSmoke FilesSmoke PicoJseStdSmoke JavaLangSmoke StringConcatSmoke TarSmoke ZipSmoke ZipDeflateSmoke
+TESTS_SINGLE = Fib HelloWorld BubbleSort Counter StringTest RomStringTest StringApiSmoke NativeOpsTest StaticInitTest MultiArrayTest StringSwitchTest VmHardeningTest ConstTest ConstStringArrayTest ConstObjectArrayTest ConstNarrowingTest TermSmoke FilesSmoke PicoJseStdSmoke JavaLangSmoke StringConcatSmoke TarSmoke ZipSmoke ZipDeflateSmoke
 TESTS_MULTI  = Shapes Features InterfaceTest ExceptionTest EnumBasicTest
 TESTS_PAGER  = BigSwitch BigLUT
 ALL_TESTS    = $(TESTS_SINGLE) $(TESTS_MULTI)
@@ -120,13 +120,22 @@ SIM_CAPS = -DPJVM_METHOD_CAP=64 -DPJVM_CLASS_CAP=16 -DPJVM_VTABLE_CAP=128 \
 
 all: $(PICOJVM)
 
-$(PICOJVM): src/pjvm.c src/pjvm_heap.c src/pjvm_gc.c platform/host.c $(PJVM_HEADERS)
+# Host binaries depend on the flags they were built with: a stamp file is
+# rewritten whenever HOST_VM_OPTS change, so test targets that override the
+# options (GC pressure configs, etc.) can't leave a stale ./picojvm behind.
+HOST_VM_ALLFLAGS = $(CFLAGS) $(HOST_VM_DEBUG) $(HOST_VM_OPTS)
+$(BUILDDIR)/.hostvm.flags: FORCE | $(BUILDDIR)
+	@printf '%s\n' '$(HOST_VM_ALLFLAGS)' | cmp -s - $@ 2>/dev/null || \
+		{ printf '%s\n' '$(HOST_VM_ALLFLAGS)' > $@; \
+		  rm -f $(PICOJVM) $(PICOJVM_LARGE) $(PICOJVM_PAGED); }
+
+$(PICOJVM): src/pjvm.c src/pjvm_heap.c src/pjvm_gc.c platform/host.c $(PJVM_HEADERS) $(BUILDDIR)/.hostvm.flags
 	$(CC) $(CFLAGS) $(HOST_VM_DEBUG) $(HOST_VM_OPTS) -DPJVM_MAX_FRAMES=128 -o $@ src/pjvm.c src/pjvm_heap.c src/pjvm_gc.c platform/host.c
 
-$(PICOJVM_LARGE): src/pjvm.c src/pjvm_heap.c src/pjvm_gc.c platform/host.c $(PJVM_HEADERS)
+$(PICOJVM_LARGE): src/pjvm.c src/pjvm_heap.c src/pjvm_gc.c platform/host.c $(PJVM_HEADERS) $(BUILDDIR)/.hostvm.flags
 	$(CC) $(CFLAGS) $(HOST_VM_DEBUG) $(HOST_VM_OPTS) $(HOST_VM_LARGE_OPTS) -o $@ src/pjvm.c src/pjvm_heap.c src/pjvm_gc.c platform/host.c
 
-$(PICOJVM_PAGED): src/pjvm.c src/pjvm_heap.c src/pjvm_gc.c platform/host.c $(PJVM_HEADERS)
+$(PICOJVM_PAGED): src/pjvm.c src/pjvm_heap.c src/pjvm_gc.c platform/host.c $(PJVM_HEADERS) $(BUILDDIR)/.hostvm.flags
 	$(CC) $(CFLAGS) $(HOST_VM_DEBUG) $(HOST_VM_OPTS) -DPJVM_PAGED -o $@ src/pjvm.c src/pjvm_heap.c src/pjvm_gc.c platform/host.c
 
 # Compile all test .java files

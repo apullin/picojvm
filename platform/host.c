@@ -317,6 +317,17 @@ void pjvm_platform_trap(uint8_t op, uint16_t pc) {
     } else if (op == 0xFF) {
         fprintf(stderr, "Unknown native method at bytecode offset %u\n",
                 (unsigned)pc);
+    } else if (op == PJVM_TRAP_DIV_ZERO) {
+        fprintf(stderr, "Integer division by zero at bytecode offset %u\n",
+                (unsigned)pc);
+    } else if (op == PJVM_TRAP_STACK_OVERFLOW) {
+        fprintf(stderr, "Stack overflow (frames/locals/operand stack) at bytecode offset %u\n",
+                (unsigned)pc);
+    } else if (op == PJVM_TRAP_UNSUPPORTED) {
+        fprintf(stderr, "Image uses unsupported feature (element type %u)\n",
+                (unsigned)pc);
+    } else if (op == PJVM_TRAP_CAPACITY) {
+        fprintf(stderr, "Capacity exceeded (detail %u)\n", (unsigned)pc);
     } else {
         fprintf(stderr, "Unimplemented opcode 0x%02X at bytecode offset %u\n",
                 op, (unsigned)pc);

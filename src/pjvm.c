@@ -391,6 +391,25 @@ static int32_t pjvm_to32(uint16_t lo, uint16_t hi) {
     return (int32_t)((uint32_t)lo | ((uint32_t)hi << 16));
 }
 
+/* JVM integer division: /0 traps; INT_MIN / -1 wraps to INT_MIN (UB in C). */
+NI static int32_t pjvm_idiv32(int32_t a, int32_t b) {
+    if (b == 0) {
+        pjvm_platform_trap(PJVM_TRAP_DIV_ZERO, g_pjvm->pc);
+        return 0;
+    }
+    if (b == -1) return (int32_t)(0u - (uint32_t)a);
+    return a / b;
+}
+
+NI static int32_t pjvm_irem32(int32_t a, int32_t b) {
+    if (b == 0) {
+        pjvm_platform_trap(PJVM_TRAP_DIV_ZERO, g_pjvm->pc);
+        return 0;
+    }
+    if (b == -1) return 0;
+    return a % b;
+}
+
 NI static void pjvm_push32(int32_t v) {
     spush((uint16_t)v, (uint16_t)((uint32_t)v >> 16));
 }
@@ -1431,12 +1450,17 @@ static void pjvm_inv(pjvm_method_id_t mi) {
             SPOP32(src, src_hi);
             if (src_hi || src == 0) { pjvm_platform_trap(OP_INVOKEVIRTUAL, g_pjvm->pc); break; }
             uint16_t len = r16(src);
+            uint16_t kind = r16((uint16_t)(src + 2));
+            uint8_t esz = 4;
+            if (kind == PJVM_HEAP_KIND_BYTE_ARRAY) esz = 1;
+            else if (kind == PJVM_HEAP_KIND_SHORT_ARRAY) esz = 2;
+            uint16_t nbytes = (uint16_t)(len * esz);
             PJVM_GC_PROTECT(src, 0);
-            uint16_t dst = heap_alloc(g_pjvm, (uint16_t)(PJVM_OBJ_HEADER + len * 4),
-                                      PJVM_HEAP_KIND_REF_ARRAY);
+            uint16_t dst = heap_alloc(g_pjvm, (uint16_t)(PJVM_OBJ_HEADER + nbytes),
+                                      (uint8_t)kind);
             w16(dst, len);
-            w16((uint16_t)(dst + 2), PJVM_HEAP_KIND_REF_ARRAY);
-            for (uint16_t i = 0; i < len * 4; i++)
+            w16((uint16_t)(dst + 2), kind);
+            for (uint16_t i = 0; i < nbytes; i++)
                 w8((uint16_t)(dst + PJVM_OBJ_HEADER + i),
                    r8((uint16_t)(src + PJVM_OBJ_HEADER + i)));
             PJVM_GC_UNPROTECT(1);
@@ -1503,6 +1527,14 @@ static void pjvm_inv(pjvm_method_id_t mi) {
             pjvm_platform_trap(PJVM_TRAP_BAD_NATIVE, g_pjvm->pc);
             break;
         }
+        return;
+    }
+
+    if (g_pjvm->fdepth >= PJVM_FDEPTH_LIMIT ||
+        (uint16_t)(g_pjvm->lt + m_ml[mi]) > PJVM_MAX_LOCALS ||
+        g_pjvm->sp > (uint16_t)(PJVM_MAX_STACK - PJVM_STACK_HEADROOM)) {
+        pjvm_platform_trap(PJVM_TRAP_STACK_OVERFLOW, g_pjvm->pc);
+        g_pjvm->pc = PJVM_PC_HALT;
         return;
     }
 
@@ -1609,6 +1641,10 @@ static void pjvm_throw(uint16_t exc_ref, uint32_t throw_pc) {
 
 static uint16_t pjvm_multi_alloc(uint16_t *sizes, uint8_t depth, uint8_t dims) {
     uint16_t count = sizes[depth];
+    if ((uint32_t)count * 4u + PJVM_OBJ_HEADER > 0xFFFFu) {
+        pjvm_platform_trap(PJVM_TRAP_CAPACITY, count);
+        return 0;
+    }
     uint16_t a = heap_alloc(g_pjvm, (uint16_t)(PJVM_OBJ_HEADER + count * 4),
                             PJVM_HEAP_KIND_REF_ARRAY);
     w16(a, count); w16((uint16_t)(a + 2), PJVM_HEAP_KIND_REF_ARRAY);
@@ -2092,8 +2128,8 @@ static void pjvm_exec(void) {
 #endif
 
         case OP_IMUL:  BINOP32(a * b)
-        case OP_IDIV:  BINOP32(a / b)
-        case OP_IREM:  BINOP32(a % b)
+        case OP_IDIV:  BINOP32(pjvm_idiv32(a, b))
+        case OP_IREM:  BINOP32(pjvm_irem32(a, b))
         case OP_ISHL:  SHIFTOP(a << s)
         case OP_ISHR:  SHIFTOP(a >> s)
         case OP_IUSHR: SHIFTOP((int32_t)((uint32_t)a >> s))
@@ -2162,12 +2198,16 @@ static void pjvm_exec(void) {
             uint32_t base = m_co[g_pjvm->cur_mi];
             g_pjvm->pc = base + (((g_pjvm->pc - base) + 3) & ~3u);
             g_pjvm->pc += 2; int16_t def_off = bread();
-            g_pjvm->pc += 2; int16_t low_lo = bread();
-            g_pjvm->pc += 2; int16_t high_lo = bread();
-            SPOP_U16(alo);
-            int16_t val = (int16_t)alo;
-            if (val >= low_lo && val <= high_lo) {
-                uint16_t idx = (uint16_t)(val - low_lo);
+            int16_t low_hw = bread();
+            uint16_t low_lw = (uint16_t)bread();
+            int16_t high_hw = bread();
+            uint16_t high_lw = (uint16_t)bread();
+            int32_t low = (int32_t)(((uint32_t)(uint16_t)low_hw << 16) | low_lw);
+            int32_t high = (int32_t)(((uint32_t)(uint16_t)high_hw << 16) | high_lw);
+            SPOP32(alo, ahi);
+            int32_t val = pjvm_to32(alo, ahi);
+            if (val >= low && val <= high) {
+                uint32_t idx = (uint32_t)(val - low);
                 g_pjvm->pc += idx * 4 + 2;
                 int16_t off = bread();
                 g_pjvm->pc = opc + off;
@@ -2312,20 +2352,32 @@ static void pjvm_exec(void) {
         }
         case OP_NEWARRAY: {
             uint8_t atype = bcread();
-            alo = spop_lo();
+            SPOP32(alo, ahi);
             uint8_t esz = 4;
             uint8_t kind = PJVM_HEAP_KIND_INT_ARRAY;
             if (atype == 4 || atype == 8) esz = 1;
             else if (atype == 5 || atype == 9) esz = 2;
             if (esz == 1) kind = PJVM_HEAP_KIND_BYTE_ARRAY;
             else if (esz == 2) kind = PJVM_HEAP_KIND_SHORT_ARRAY;
+            /* Negative counts and byte sizes past the 16-bit heap would
+             * otherwise wrap into a silently short allocation. */
+            if (ahi != 0 ||
+                (uint32_t)alo * esz + PJVM_OBJ_HEADER > 0xFFFFu) {
+                pjvm_platform_trap(op, opc);
+                spush(0, 0); break;
+            }
             uint16_t a = heap_alloc(g_pjvm, (uint16_t)(PJVM_OBJ_HEADER + alo * esz), kind);
             w16(a, alo); w16((uint16_t)(a + 2), kind);
             spush(a, 0); break;
         }
         case OP_ANEWARRAY: {
             g_pjvm->pc += 2;
-            alo = spop_lo();
+            SPOP32(alo, ahi);
+            if (ahi != 0 ||
+                (uint32_t)alo * 4u + PJVM_OBJ_HEADER > 0xFFFFu) {
+                pjvm_platform_trap(op, opc);
+                spush(0, 0); break;
+            }
             uint16_t a = heap_alloc(g_pjvm, (uint16_t)(PJVM_OBJ_HEADER + alo * 4),
                                     PJVM_HEAP_KIND_REF_ARRAY);
             w16(a, alo); w16((uint16_t)(a + 2), PJVM_HEAP_KIND_REF_ARRAY);
@@ -2344,8 +2396,21 @@ static void pjvm_exec(void) {
             g_pjvm->pc += 2;
             uint8_t ndims = bcread();
             uint16_t sizes[4];
-            for (uint8_t d = ndims; d > 0; d--)
-                sizes[d-1] = spop_lo();
+            if (ndims == 0 || ndims > 4) {
+                pjvm_platform_trap(op, opc);
+                g_pjvm->pc = PJVM_PC_HALT;
+                break;
+            }
+            uint8_t bad = 0;
+            for (uint8_t d = ndims; d > 0; d--) {
+                SPOP32(alo, ahi);
+                if (ahi != 0) bad = 1;
+                sizes[d-1] = alo;
+            }
+            if (bad) {
+                pjvm_platform_trap(op, opc);
+                spush(0, 0); break;
+            }
             spush(pjvm_multi_alloc(sizes, 0, ndims), 0);
             break;
         }

@@ -37,6 +37,16 @@
 #ifndef PJVM_MAX_FRAMES
 #define PJVM_MAX_FRAMES 64
 #endif
+/* fdepth is int8_t (PJVMCtx layout is frozen for the 8085 asm helpers), so
+ * the enforceable call depth tops out at 127 even if PJVM_MAX_FRAMES is
+ * configured larger. */
+#define PJVM_FDEPTH_LIMIT (PJVM_MAX_FRAMES < 127 ? PJVM_MAX_FRAMES : 127)
+/* Operand-stack headroom required at each invoke. Per-method max stack is
+ * not carried in the .pjvm image, so this is the conservative bound on what
+ * one frame may consume; size tiny-config PJVM_MAX_STACK accordingly. */
+#ifndef PJVM_STACK_HEADROOM
+#define PJVM_STACK_HEADROOM 32
+#endif
 #ifndef PJVM_ENABLE_V4
 #define PJVM_ENABLE_V4 0
 #endif
@@ -56,6 +66,8 @@
 #define PJVM_PC_HALT 0xFFFFFFFFu
 
 /* trap codes for pjvm_platform_trap (op argument) */
+#define PJVM_TRAP_DIV_ZERO     0xF8 /* integer division by zero */
+#define PJVM_TRAP_STACK_OVERFLOW 0xF9 /* frames/locals/operand stack exhausted */
 #define PJVM_TRAP_UNSUPPORTED  0xFA /* image needs a compiled-out feature */
 #define PJVM_TRAP_BAD_METHOD   0xFB
 #define PJVM_TRAP_CAPACITY     0xFC

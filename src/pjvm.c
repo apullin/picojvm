@@ -194,12 +194,14 @@ static pjvm_class_id_t pjvm_ref_class_id(uint16_t lo, uint16_t hi) {
 /* --- paged mode implementation ---------------------------------------- */
 #ifdef PJVM_PAGED
 
+/* Returns 0xFF only when every page is pinned (callers trap on that):
+ * <= keeps a slot whose age saturated at 0xFF selectable. */
 static uint8_t pjvm_find_victim(PJVMPager *p) {
     uint8_t best = 0xFF, best_age = 0xFF;
     for (uint8_t i = 0; i < p->n_pages; i++) {
         if (p->pinned[i]) continue;
         if (p->tag[i] == 0xFFFF) return i;
-        if (p->age[i] < best_age) {
+        if (p->age[i] <= best_age) {
             best_age = p->age[i];
             best = i;
         }
@@ -232,6 +234,11 @@ static uint8_t prog_fetch(uint32_t offset) {
 
     p->misses++;
     uint8_t victim = pjvm_find_victim(p);
+    if (victim == 0xFF) {
+        /* Every page is pinned: nothing can be evicted. */
+        pjvm_platform_trap(PJVM_TRAP_CAPACITY, chunk);
+        return 0;
+    }
     p->slot_misses[victim]++;
     pjvm_load_page(p, victim, chunk);
     return p->pool[(uint32_t)victim * p->page_size + within];
@@ -257,6 +264,10 @@ void pjvm_pin_chunk(PJVMPager *p, uint16_t chunk) {
         }
     }
     uint8_t slot = pjvm_find_victim(p);
+    if (slot == 0xFF) {
+        pjvm_platform_trap(PJVM_TRAP_CAPACITY, chunk);
+        return;
+    }
     pjvm_load_page(p, slot, chunk);
     p->pinned[slot] = 1;
 }
@@ -890,6 +901,10 @@ static void pjvm_parse_v4(uint8_t *data) {
 #endif
 
 void pjvm_parse(uint8_t *data) {
+    if (data[0] != PJVM_MAGIC) {
+        pjvm_platform_trap(PJVM_TRAP_BAD_VERSION, data[0]);
+        return;
+    }
     if (data[1] == PJVM_VERSION_V3) {
         pjvm_parse_v3(data);
         return;
@@ -1677,15 +1692,17 @@ void pjvm_run(PJVMCtx *j) {
             uint16_t ne = PROG16(p_cd);
             uint8_t et = PROG(p_cd + 2);
             p_cd += 4; /* skip 4-byte header */
-            uint16_t dsz = ne;
+            /* 32-bit: ne*esz can exceed 16 bits and a wrapped size would
+             * desync the walk just like an unknown element type. */
+            uint32_t dsz = ne;
             if (et == PJVM_ELEM_CHAR || et == PJVM_ELEM_SHORT ||
                 et == PJVM_ELEM_STRING_REF)
-                dsz = (uint16_t)(ne * 2);
+                dsz = (uint32_t)ne * 2u;
             else if (et == PJVM_ELEM_INT)
-                dsz = (uint16_t)(ne * 4);
+                dsz = (uint32_t)ne * 4u;
             else if (et == PJVM_ELEM_OBJECT_REF) {
                 uint16_t nf = PROG16(p_cd + 2);
-                dsz = (uint16_t)(4 + ne * (uint16_t)(4 + nf * 4));
+                dsz = 4u + (uint32_t)ne * (4u + (uint32_t)nf * 4u);
             }
             else if (et != PJVM_ELEM_BYTE) {
                 pjvm_platform_trap(PJVM_TRAP_UNSUPPORTED, et);

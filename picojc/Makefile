@@ -2,6 +2,8 @@
 # Phase 0: javac compiles picojc, pjvmpack packs it to .pjvm
 # Then picojc.pjvm runs on picoJVM to compile test programs
 
+.DELETE_ON_ERROR:
+
 JAVAC   = javac
 PYTHON  = python3
 CC      = cc
@@ -683,6 +685,10 @@ test-disk-selfhost: $(PICOJVM) $(BUILDDIR)/picojc-disk.pjvm $(BUILDDIR)/gen1.pjv
 	@echo "--- Disk multi-file selfhost ---"
 	@cd $(BUILDDIR)/disk_selfhost && $(DISK_PICOJVM) $(DISK_COMPILER) > gen1_disk.pjvm \
 		2> gen1_disk.log
+	@if [ "$$(head -c 1 $(BUILDDIR)/disk_selfhost/gen1_disk.pjvm | od -An -tx1 | tr -d ' ')" != "85" ]; then \
+		echo "FAIL: disk gen1 is not a .pjvm image (compiler error: $$(head -c 64 $(BUILDDIR)/disk_selfhost/gen1_disk.pjvm))"; \
+		false; \
+	fi
 	@if cmp -s $(BUILDDIR)/disk_selfhost/gen1_disk.pjvm $(BUILDDIR)/gen1.pjvm; then \
 		echo "PASS: disk multi-file gen1 == memory gen1 ($$(wc -c < $(BUILDDIR)/disk_selfhost/gen1_disk.pjvm | tr -d ' ') bytes)"; \
 	else \
@@ -716,6 +722,11 @@ $(BUILDDIR)/gen1.pjvm: $(BUILDDIR)/picojc.pjvm $(BUILDDIR)/compiler_src.java $(P
 		--preload 0xC000:$(BUILDDIR)/compiler_src.java \
 		--save-raw 0xC000:/dev/null \
 		> $@ 2> $(BUILDDIR)/gen1_compile.log
+	@if [ "$$(head -c 1 $@ | od -An -tx1 | tr -d ' ')" != "85" ]; then \
+		echo "FAIL: gen1 is not a .pjvm image (compiler error: $$(head -c 64 $@))"; \
+		tail -5 $(BUILDDIR)/gen1_compile.log; \
+		false; \
+	fi
 	@echo "gen1: $$(wc -c < $@ | tr -d ' ') bytes"
 
 # gen2: gen1 compiles itself
@@ -724,6 +735,11 @@ $(BUILDDIR)/gen2.pjvm: $(BUILDDIR)/gen1.pjvm $(BUILDDIR)/compiler_src.java $(PIC
 		--preload 0xC000:$(BUILDDIR)/compiler_src.java \
 		--save-raw 0xC000:/dev/null \
 		> $@ 2> $(BUILDDIR)/gen2_compile.log
+	@if [ "$$(head -c 1 $@ | od -An -tx1 | tr -d ' ')" != "85" ]; then \
+		echo "FAIL: gen2 is not a .pjvm image (compiler error: $$(head -c 64 $@))"; \
+		tail -5 $(BUILDDIR)/gen2_compile.log; \
+		false; \
+	fi
 	@echo "gen2: $$(wc -c < $@ | tr -d ' ') bytes"
 
 # Fixed-point test: gen1 == gen2
@@ -811,6 +827,6 @@ clean:
 
 .PHONY: all test test-negative test-all build check-javac clean test-disk test-disk-multi test-disk-package test-disk-picojse test-disk-picojse-term test-disk-picojse-io test-disk-picojse-std test-disk-picojse-string-concat test-disk-picojse-archive test-disk-picojse-zip test-disk-picojse-tools-tar test-disk-picojse-tools-zip test-disk-picojse-tools-arc test-disk-selfhost
 .PHONY: test-selfhost test-selfhost-fixpoint test-binmatch test-gen1
-.PRECIOUS: $(BUILDDIR)/%.pjvm $(BUILDDIR)/%.out
-.PRECIOUS: $(BUILDDIR)/gen1_%.pjvm $(BUILDDIR)/gen1_%.out
-.PRECIOUS: $(BUILDDIR)/lib_%.java $(BUILDDIR)/lib_%.pjvm $(BUILDDIR)/lib_%.out
+.SECONDARY: $(BUILDDIR)/%.pjvm $(BUILDDIR)/%.out
+.SECONDARY: $(BUILDDIR)/gen1_%.pjvm $(BUILDDIR)/gen1_%.out
+.SECONDARY: $(BUILDDIR)/lib_%.java $(BUILDDIR)/lib_%.pjvm $(BUILDDIR)/lib_%.out

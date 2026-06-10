@@ -1,3 +1,5 @@
+.DELETE_ON_ERROR:
+
 CC      = cc
 CFLAGS  = -Wall -Wextra -O2
 HOST_VM_DEBUG = -DPJVM_DEBUG_TOOLS
@@ -563,24 +565,24 @@ test-pjtools: test-pjtools-tar test-pjtools-zip test-pjtools-arc
 
 # Run all tests on host with golden-output comparison
 test: $(PICOJVM) $(addprefix tests/,$(addsuffix .pjvm,$(TESTS_SINGLE))) tests/Shapes.pjvm tests/Features.pjvm tests/InterfaceTest.pjvm tests/ExceptionTest.pjvm
-	@for t in $(ALL_TESTS); do \
-		$(MAKE) --no-print-directory test-$$t; \
-	done
+	@fail=0; for t in $(ALL_TESTS); do \
+		$(MAKE) --no-print-directory test-$$t || fail=1; \
+	done; exit $$fail
 
 # Paged-mode run and test
 run-paged-%: $(PICOJVM_PAGED) tests/%.pjvm
 	$(PICOJVM_PAGED) tests/$*.pjvm
 
 test-paged: $(PICOJVM_PAGED) $(addprefix tests/,$(addsuffix .pjvm,$(ALL_TESTS_PAGER)))
-	@for t in $(ALL_TESTS_PAGER); do \
-		$(MAKE) --no-print-directory test-paged-$$t; \
-	done
+	@fail=0; for t in $(ALL_TESTS_PAGER); do \
+		$(MAKE) --no-print-directory test-paged-$$t || fail=1; \
+	done; exit $$fail
 
 # Paged stress: 1 page × 128B — forces eviction on every page boundary
 test-paged-stress: $(PICOJVM_PAGED) $(addprefix tests/,$(addsuffix .pjvm,$(ALL_TESTS_PAGER)))
-	@for t in $(ALL_TESTS_PAGER); do \
-		$(MAKE) --no-print-directory test-paged-stress-$$t; \
-	done
+	@fail=0; for t in $(ALL_TESTS_PAGER); do \
+		$(MAKE) --no-print-directory test-paged-stress-$$t || fail=1; \
+	done; exit $$fail
 
 $(GC_DEMO_MANUAL): tests/gc_policy_demo.c src/pjvm_gc.c src/pjvm.h | $(BUILDDIR)
 	$(CC) $(CFLAGS) -DPJVM_GC_TRIGGERS=0 -o $@ tests/gc_policy_demo.c src/pjvm_gc.c

@@ -4,18 +4,18 @@ class C {
 	static final int MAX_CLASSES  = 32;
 	// .pjvm stores n_methods in one byte, so 255 is the true format ceiling.
 	static final int MAX_METHODS  = 255;
-	static final int MAX_FIELDS   = 416;
-	static final int MAX_NAMES    = 1024;
-	static final int MAX_NAME_POOL= 12288;
+	static final int MAX_FIELDS   = 448;
+	static final int MAX_NAMES    = 1152;
+	static final int MAX_NAME_POOL= 9216;
 	static final int MAX_CP       = 2560;
 	static final int MAX_CODE     = 19456;
 	static final int MAX_LOCALS   = 64;
 	static final int MAX_EXC      = 32;
 	static final int MAX_VTABLE   = 128;
-	static final int MAX_SIG_PARAMS = 1024;
+	static final int MAX_SIG_PARAMS = 512;
 	static final int MAX_CALL_ARGS = 16;
-	static final int MAX_INT_CONST= 80;
-	static final int MAX_STR_CONST= 96;
+	static final int MAX_INT_CONST= 32;
+	static final int MAX_STR_CONST= 112;
 	static final int MAX_VA_SLOTS = 8;
 	static final int NK_NONE = 0, NK_BYTE = 1, NK_CHAR = 2, NK_SHORT = 3, NK_BOOL = 4;
 	static final short SIG_NULL = -1, SIG_INT = -2, SIG_BYTE = -3, SIG_CHAR = -4, SIG_SHORT = -5, SIG_BOOL = -6;
@@ -25,8 +25,8 @@ class C {
 	// --- Name pool (interning) ---
 	static byte[] nPool = new byte[MAX_NAME_POOL];
 	static int npLen;
-	static int[] nOff = new int[MAX_NAMES];
-	static int[] nLen = new int[MAX_NAMES];
+	static short[] nOff = new short[MAX_NAMES]; // offsets into nPool (<= MAX_NAME_POOL)
+	static short[] nLen = new short[MAX_NAMES];
 	static int nCount;
 
 	// Well-known name IDs. These match the fixed seed order in initNames().
@@ -129,7 +129,7 @@ class C {
 	static int cdBase; // set at runtime to SRC_BASE + srcLen
 	static int cdLen;
 	static boolean diskSpill; // true = write bytecodes to disk file
-	static byte[] mcode = new byte[2048]; // current method bytecodes
+	static byte[] mcode = new byte[3072]; // current method bytecodes
 	static int mcLen;
 
 	// --- Integer constants ---
@@ -161,11 +161,11 @@ class C {
 	static int maxStk;
 
 	// --- Backpatch / Labels ---
-	static short[] patLoc   = new short[320]; // offset in mcode of branch operand
-	static short[] patLbl = new short[320]; // which label
-	static short[] patBase = new short[320]; // pc base used to compute relative offset
+	static short[] patLoc   = new short[512]; // offset in mcode of branch operand
+	static short[] patLbl = new short[512]; // which label
+	static short[] patBase = new short[512]; // pc base used to compute relative offset
 	static int patC;
-	static short[] lblAddr  = new short[320]; // address for each label
+	static short[] lblAddr  = new short[512]; // address for each label
 	static int lblCount;
 
 	// --- Loop context stack (break/continue targets) ---
@@ -266,8 +266,8 @@ class C {
 			return 0;
 		}
 		int idx = nCount++;
-		nOff[idx] = npLen;
-		nLen[idx] = len;
+		nOff[idx] = (short)npLen;
+		nLen[idx] = (short)len;
 		Native.arraycopy(buf, 0, nPool, npLen, len);
 		npLen += len;
 		return idx;
@@ -310,8 +310,8 @@ class C {
 			return 0;
 		}
 		int idx = nCount++;
-		nOff[idx] = npLen;
-		nLen[idx] = len;
+		nOff[idx] = (short)npLen;
+		nLen[idx] = (short)len;
 		Native.arraycopy(buf, off, nPool, npLen, len);
 		npLen += len;
 		return idx;

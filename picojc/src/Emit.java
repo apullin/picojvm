@@ -536,7 +536,7 @@ class E {
 	static void popLp() { C.lpDepth--; }
 
 	static void eb(int b) {
-		C.chk(C.mcLen, 2048, 256);
+		C.chk(C.mcLen, 3072, 256);
 		C.mcode[C.mcLen++] = (byte)(b & 0xFF);
 	}
 
@@ -565,7 +565,7 @@ class E {
 	}
 
 	static int label() {
-		C.chk(C.lblCount, 320, 261);
+		C.chk(C.lblCount, 512, 261);
 		return C.lblCount++;
 	}
 
@@ -582,7 +582,7 @@ class E {
 
 	// Shared offset patch record used by both 2-byte branches and switch tables.
 	static void ePat(int loc, int basePc, int label) {
-		C.chk(C.patC, 320, 262);
+		C.chk(C.patC, 512, 262);
 		C.patLoc[C.patC] = (short)loc;
 		C.patLbl[C.patC] = (short)label;
 		C.patBase[C.patC] = (short)basePc;

@@ -54,24 +54,8 @@ public class Resolver {
 			}
 		}
 
-		// Ensure all user classes have a default constructor if none declared
-		for (int ci = C.uClsStart; ci < C.cCount; ci++) {
-			if (C.cIsIface[ci]) continue;
-			boolean hasCtor = false;
-			for (int mi = 0; mi < C.mCount; mi++) {
-				if (C.mClass[mi] == ci && C.mIsCtor[mi]) {
-					hasCtor = true;
-					break;
-				}
-			}
-			if (!hasCtor) {
-				int mi = C.initMethod(ci, C.N_INIT, 1, false, true, false, 0);
-				C.mBodyS[mi] = -2; C.mBodyE[mi] = -2;
-			}
-		}
-
-		// Ensure Object.<init> exists
-		C.ensNat(C.N_OBJECT, C.N_INIT);
+		// Default constructors are materialized lazily by fCtor() so that
+		// never-instantiated classes do not consume method-table slots.
 
 		// Build vtables
 		for (int ci = 0; ci < C.cCount; ci++) {
@@ -365,6 +349,19 @@ public class Resolver {
 		for (int mi = 0; mi < C.mCount; mi++) {
 			if (declShapeFits(mi, ci, C.N_INIT, false, argc, false, true) &&
 				sigFits(mi, sig, sigC, true)) {
+				return mi;
+			}
+		}
+		// Lazily materialize the default constructor: only classes that are
+		// actually instantiated (or super()-chained) pay a method-table slot.
+		if (argc == 1 && ci >= C.uClsStart && !C.cIsIface[ci]) {
+			boolean declared = false;
+			for (int mi = 0; mi < C.mCount; mi++) {
+				if (C.mClass[mi] == ci && C.mIsCtor[mi]) { declared = true; break; }
+			}
+			if (!declared) {
+				int mi = C.initMethod(ci, C.N_INIT, 1, false, true, false, 0);
+				C.mBodyS[mi] = -2; C.mBodyE[mi] = -2;
 				return mi;
 			}
 		}

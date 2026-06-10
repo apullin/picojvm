@@ -9,16 +9,18 @@
 #include <stdint.h>
 
 /* Output buffer: putchar writes sequentially into a configured RAM window.
- * The simulator path sometimes needs a smaller heap or a flatter linker map
- * than the default 32K/32K split, so keep both addresses overrideable. */
+ * Defaults match the 64K flat sim map: code/data/bss from 0x0040, then the
+ * Java heap up to 0xE000, output at 0xE000, trap markers at 0xE080, the
+ * disk filename buffer at 0xE100, and the C stack from 0xFE00 down. All
+ * addresses stay overrideable for other maps. */
 #ifndef PJVM_SIM_OUTPUT_BASE
-#define PJVM_SIM_OUTPUT_BASE 0x7000
+#define PJVM_SIM_OUTPUT_BASE 0xE000
 #endif
 #ifndef PJVM_SIM_HEAP_END
-#define PJVM_SIM_HEAP_END 0x7000
+#define PJVM_SIM_HEAP_END 0xE000
 #endif
 #ifndef PJVM_SIM_TRAP_BASE
-#define PJVM_SIM_TRAP_BASE 0x7080
+#define PJVM_SIM_TRAP_BASE 0xE080
 #endif
 static uint16_t output_ptr;
 #define HEAP_END PJVM_SIM_HEAP_END
@@ -122,14 +124,16 @@ void pjvm_platform_trap(uint8_t op, uint16_t pc) {
 #define DISK_WRITE_BYTE 4
 #define DISK_CLOSE      5
 #define DISK_DELETE      6
-#define DISK_FNAME_BUF  0x6F00
+/* Above the trap markers, below the C stack: the old 0x6F00 location sat
+ * inside the Java heap window and now sits inside code in the flat map. */
+#define DISK_FNAME_BUF  0xE100
 
 int32_t pjvm_platform_file_open(const uint8_t *name, uint8_t nameLen, uint8_t mode) {
     uint8_t *fname_buf = (uint8_t *)(uintptr_t)DISK_FNAME_BUF;
     for (uint8_t i = 0; i < nameLen; i++)
         fname_buf[i] = name[i];
-    IO_OUT(DISK_ADRL, 0x00);           /* addr lo = 0x00 */
-    IO_OUT(DISK_ADRH, 0x6F);           /* addr hi = 0x6F → 0x6F00 */
+    IO_OUT(DISK_ADRL, DISK_FNAME_BUF & 0xFF);
+    IO_OUT(DISK_ADRH, DISK_FNAME_BUF >> 8);
     IO_OUT(DISK_DATA, nameLen);
     IO_OUT(DISK_CMD, mode);            /* 1=OPEN_READ, 2=OPEN_WRITE */
     uint8_t status = IO_IN(DISK_CMD);
@@ -158,8 +162,8 @@ int32_t pjvm_platform_file_delete(const uint8_t *name, uint8_t nameLen) {
     uint8_t *fname_buf = (uint8_t *)(uintptr_t)DISK_FNAME_BUF;
     for (uint8_t i = 0; i < nameLen; i++)
         fname_buf[i] = name[i];
-    IO_OUT(DISK_ADRL, 0x00);
-    IO_OUT(DISK_ADRH, 0x6F);           /* addr hi → 0x6F00 */
+    IO_OUT(DISK_ADRL, DISK_FNAME_BUF & 0xFF);
+    IO_OUT(DISK_ADRH, DISK_FNAME_BUF >> 8);
     IO_OUT(DISK_DATA, nameLen);
     IO_OUT(DISK_CMD, DISK_DELETE);
     uint8_t status = IO_IN(DISK_CMD);
@@ -172,6 +176,12 @@ int main(void) {
     output_ptr = PJVM_SIM_OUTPUT_BASE;
     pjvm_prog = (uint8_t *)pjvm_program;
     pjvm_parse(pjvm_prog);
+    /* An image+bss that has grown past the heap window would otherwise
+     * start with a zero-byte heap and die confusingly at the first alloc. */
+    if ((uint16_t)(uintptr_t)_end >= (uint16_t)HEAP_END) {
+        pjvm_platform_trap(PJVM_TRAP_CAPACITY, (uint16_t)(uintptr_t)_end);
+        return 1;
+    }
     pjvm_heap_init(&ctx, (uint16_t)(uintptr_t)_end, HEAP_END);
     pjvm_run(&ctx);
     return 0;

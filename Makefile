@@ -73,8 +73,8 @@ ROOT     = $(shell cd ../.. && pwd)
 GC_DEFAULT_OPTS = -DPJVM_HEAP_MODE=PJVM_HEAP_FREELIST -DPJVM_GC_TRIGGERS=3 -DPJVM_GC_WATERMARK_PCT=75
 GC_HOST_PRESSURE_LIMIT ?= 2049
 GC_SIM_OUTPUT_BASE ?= 0xE000
-GC_SIM_SMOKE_HEAP_END ?= 0xA000
-GC_SIM_HEAP_END ?= 0xA000
+GC_SIM_SMOKE_HEAP_END ?= 0xE000
+GC_SIM_HEAP_END ?= 0xE000
 GC_SIM_TRAP_BASE ?= 0xE080
 GC_SIM_FLAT_LDSCRIPT = $(ROOT)/sysroot/ldscripts/i8085-64k-flat.ld
 GC_SIM_SMOKE_OPTS = $(GC_DEFAULT_OPTS) -DPJVM_SIM_HEAP_END=$(GC_SIM_SMOKE_HEAP_END) -DPJVM_SIM_OUTPUT_BASE=$(GC_SIM_OUTPUT_BASE) -DPJVM_SIM_TRAP_BASE=$(GC_SIM_TRAP_BASE)
@@ -88,12 +88,15 @@ SIM_VERIFY = $(ROOT)/tooling/examples/verify_dump.py
 CRT      = $(ROOT)/sysroot/crt/crt0.S
 LIBGCC   = $(ROOT)/sysroot/lib/libgcc.a
 LIBC     = $(ROOT)/sysroot/lib/libc.a
-LDSCRIPT = $(ROOT)/sysroot/ldscripts/i8085-32kram-32krom.ld
+# 64K flat map: the VM image (~35K text+rodata with hardening + GC) no
+# longer fits the 32K ROM split; real-hardware footprint validation lives
+# in the outer pjvm8085-asm suite.
+LDSCRIPT = $(ROOT)/sysroot/ldscripts/i8085-64k-flat.ld
 TARGET_OPT = Oz
 BUILDDIR = build
 TARGET_VM_OPTS ?=
 TARGET_ASM_HELPERS ?= 1
-SIM_DUMP_ADDR ?= 0x7000
+SIM_DUMP_ADDR ?= 0xE000
 PJVM_TAG = $(if $(PJVM_FILE),$(basename $(notdir $(PJVM_FILE))),pjvm)
 PJVM_DATA_C = $(BUILDDIR)/$(PJVM_TAG)_data.c
 PJVM_DATA_O = $(BUILDDIR)/$(PJVM_TAG)_data.o

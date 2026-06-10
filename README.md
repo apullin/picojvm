@@ -14,7 +14,10 @@ picoJVM itself.
   string switch, multi-dimensional arrays, method overloading
 - **89 JVM opcodes** — full integer arithmetic, object/array operations,
   virtual and interface dispatch, exception handling, type checking
-- **~24KB on Intel 8085** (including runtime), ~10KB estimated on TMS9900
+- **~43KB ROM image on Intel 8085** (interpreter, asm helpers, runtime
+  libraries, and an embedded test program; measured with the full feature
+  set including bounds hardening — leaner configs shrink with `PJVM_USE_*`
+  options)
 - **Program-space paging** — LRU page cache allows programs larger than
   available RAM; only active code pages reside in memory
 - **Configurable heap backends** — tiny bump allocator by default, optional
@@ -23,8 +26,8 @@ picoJVM itself.
   a `PJVMCtx` struct passed to all API calls
 - **File I/O** — native file operations for disk-backed compilation on
   both host and embedded targets
-- **~1,300 lines of C** (interpreter core + header), plus ~150 lines per
-  platform shim
+- **~3,300 lines of C** across the interpreter core, heap backends, and
+  GC, plus a few hundred lines per platform shim
 
 ## picojc — Self-Hosting Java Compiler
 
@@ -33,9 +36,9 @@ bytecode. It compiles itself.
 
 - **Self-hosting fixpoint** — javac builds gen0, gen0 compiles picojc to
   gen1, gen1 compiles itself to gen2, gen1 == gen2 (byte-identical)
-- **38KB compiled bytecode** (self-hosted binary)
-- **124KB source** across 11 Java files (~4,400 lines)
-- **67 tests + 9 negative tests**, all passing on host
+- **~45KB compiled bytecode** (self-hosted binary)
+- **~180KB source** across 11 Java files (~5,300 lines)
+- **76 tests + 36 negative tests**, all passing on host
 - **Disk-backed compilation** — reads source and writes output through
   native file I/O; supports single-file and multi-file (sources.lst) modes
 - **Bootstrap from any modern JDK** — `javac` compiles picojc source,

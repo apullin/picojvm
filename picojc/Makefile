@@ -11,6 +11,13 @@ CFLAGS  = -Wall -Wextra -O2
 PICOJVM = ../picojvm
 PJVMPACK = ../pjvmpack.py
 
+# Build the host VM via the parent Makefile so the suite runs from a clean
+# checkout (the parent's flags stamp keeps it fresh across option changes).
+$(PICOJVM): FORCE
+	@$(MAKE) --no-print-directory -C .. picojvm
+
+.PHONY: FORCE
+
 SRCDIR  = src
 BUILDDIR = build
 TESTDIR = tests

@@ -396,6 +396,14 @@ public class Catalog {
 			C.fInitLn[fi] = (short)Lexer.line;
 			if (isFinal) extractConst(fi);
 			ensClinitFor(ci);
+		} else if (Tk.type == Tk.ASSIGN) {
+			// Instance field initializer: literal values are emitted at the
+			// top of every constructor; anything more complex is rejected
+			// loudly instead of being silently ignored.
+			C.fInitPos[fi] = Lexer.pos;
+			C.fInitLn[fi] = (short)Lexer.line;
+			extractConst(fi);
+			if (!C.fHasConst[fi]) Lexer.error(270);
 		}
 
 		while (Tk.type != Tk.SEMI && Tk.type != Tk.EOF) {
@@ -409,6 +417,11 @@ public class Catalog {
 					C.fInitLn[fi2] = (short)Lexer.line;
 					if (isFinal) extractConst(fi2);
 					ensClinitFor(ci);
+				} else if (Tk.type == Tk.ASSIGN) {
+					C.fInitPos[fi2] = Lexer.pos;
+					C.fInitLn[fi2] = (short)Lexer.line;
+					extractConst(fi2);
+					if (!C.fHasConst[fi2]) Lexer.error(270);
 				}
 			} else {
 				Lexer.nextToken();
@@ -424,20 +437,36 @@ public class Catalog {
 		Lexer.nextToken(); // skip '='
 		boolean neg = false;
 		if (Tk.type == Tk.MINUS) { neg = true; Lexer.nextToken(); }
+		int val = 0;
+		boolean has = false;
 		if (Tk.type == Tk.INT_LIT) {
-			C.fConstVal[fi] = neg ? -Tk.intValue : Tk.intValue;
-			C.fHasConst[fi] = true;
+			val = neg ? -Tk.intValue : Tk.intValue;
+			has = true;
 		} else if (!neg && Tk.type == Tk.CHAR_LIT) {
-			C.fConstVal[fi] = Tk.intValue;
-			C.fHasConst[fi] = true;
+			val = Tk.intValue;
+			has = true;
 		} else if (!neg && Tk.type == Tk.TRUE) {
-			C.fConstVal[fi] = 1;
-			C.fHasConst[fi] = true;
+			val = 1;
+			has = true;
 		} else if (!neg && Tk.type == Tk.FALSE) {
-			C.fConstVal[fi] = 0;
+			has = true;
+		}
+		if (has) {
+			// An initializer expression like "5 + 3" is not a simple
+			// literal: folding its head value would be wrong. Leave it to
+			// the <clinit> path unless the literal ends the initializer.
+			Lexer.nextToken();
+			if (Tk.type != Tk.SEMI && Tk.type != Tk.COMMA) has = false;
+		}
+		if (has) {
+			C.fConstVal[fi] = val;
 			C.fHasConst[fi] = true;
 		}
 		Lexer.restore();
+		// Re-lex so Tk matches the restored position (the terminator peek
+		// above otherwise leaves a stale SEMI that ends the caller's skip
+		// loop early). Current token becomes the initializer's first token.
+		Lexer.nextToken();
 	}
 
 	static void catMethod(int ci, int nm, boolean isStat, boolean isCtor,

@@ -171,11 +171,20 @@ class C {
 	// --- Loop context stack (break/continue targets) ---
 	static short[] lpBrkLbl = new short[32];
 	static short[] lpContLbl  = new short[32];
+	// Index of the lp entry that owns each entry's continue label: a switch
+	// inherits the enclosing loop's continue, so its owner points there.
+	static byte[] lpContOwn = new byte[32];
 	static int lpDepth;
 
-	// --- Switch case arrays (reused, not nested) ---
+	// --- Switch case arrays (stacked so nested switches don't clobber) ---
 	static int[] caseVals     = new int[64];
 	static short[] caseLbls = new short[64];
+	static int caseTop;
+
+	// --- Active try regions (finally cannot run after an escaping exit) ---
+	static byte[] tryLpD = new byte[8];
+	static short[] tryEsc = new short[8];
+	static int tryDepth;
 
 	// --- Current context ---
 	static int curCi;

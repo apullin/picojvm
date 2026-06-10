@@ -265,7 +265,9 @@ class E {
 				int cpIdx = aCP(C.fSlot[fi]);
 				eOp(PUTSTATIC, cpIdx); pop();
 		}
-		endClinitChunk(false);
+		// Track hidden locals the initializer expression allocated (string
+		// concat temporaries, etc.) or <clinit> max_locals under-reports.
+		endClinitChunk(true);
 	}
 
 	// Accumulate explicit static { } block into clinit buffer
@@ -341,6 +343,7 @@ class E {
 				eOp(INVOKESPECIAL, aCP(targetMi));
 				pop();
 			}
+			eInstFieldInits(C.curCi);
 			Stmt.pBlock();
 			Lexer.expect(Tk.RBRACE);
 
@@ -391,25 +394,46 @@ class E {
 
 	static boolean autoCtorsEmitted;
 
+	// Literal instance-field initializers run at the top of every ctor,
+	// after the super call (complex initializers are rejected at catalog
+	// time, so a literal store covers everything that parses).
+	static void eInstFieldInits(int ci) {
+		for (int fi = 0; fi < C.fCount; fi++) {
+			if (C.fClass[fi] == ci && !C.fStatic[fi] && C.fHasConst[fi]) {
+				ethis();
+				eIC(C.fConstVal[fi]); push();
+				eNarrow(C.fNarrow[fi]);
+				eOp(PUTFIELD, aCP(C.fSlot[fi]));
+				pop(); pop();
+			}
+		}
+	}
+
 	static void eAutoCtors() {
 		if (autoCtorsEmitted) return;
 		autoCtorsEmitted = true;
 
 		for (int mi = 0; mi < C.mCount; mi++) {
 			if (C.mIsCtor[mi] && !C.mNative[mi] && C.mBodyS[mi] == -2) {
-				// Auto-generated default constructor
+				// Auto-generated default constructor: chain to the parent
+				// ctor (materialized lazily if needed) so inherited field
+				// initializers run, then apply this class's own.
 				initMC(mi);
-
-				// ALOAD_0, INVOKESPECIAL Object.<init>, RETURN
-				eb(ALOAD_0);
-				int objInitMi = C.ensNat(C.N_OBJECT, C.N_INIT);
-				int cpIdx = aCP(objInitMi);
-				eOp(INVOKESPECIAL, cpIdx);
+				C.stkDepth = 0;
+				C.maxStk = 0;
+				int ci = C.mClass[mi];
+				ethis();
+				int targetMi = -1;
+				if (C.cParent[ci] >= 0) targetMi = Resolver.fCtor(C.cParent[ci], 1);
+				if (targetMi < 0) targetMi = C.ensNat(C.N_OBJECT, C.N_INIT);
+				eOp(INVOKESPECIAL, aCP(targetMi));
+				pop();
+				eInstFieldInits(ci);
 				eb(RETURN);
 
 				commitMC(mi);
 				C.mMaxLoc[mi] = (byte)1;
-				C.mMaxStk[mi] = (byte)1;
+				C.mMaxStk[mi] = (byte)(C.maxStk > 0 ? C.maxStk : 1);
 			}
 			// Synthetic clinits are now handled in eClsMethods via cinitBuf
 		}
@@ -531,6 +555,7 @@ class E {
 		C.chk(C.lpDepth, 32, 263);
 		C.lpBrkLbl[C.lpDepth] = (short)brk;
 		C.lpContLbl[C.lpDepth] = (short)cont;
+		C.lpContOwn[C.lpDepth] = (byte)C.lpDepth;
 		C.lpDepth++;
 	}
 	static void popLp() { C.lpDepth--; }

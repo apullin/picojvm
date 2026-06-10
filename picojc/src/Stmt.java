@@ -31,16 +31,16 @@ public class Stmt {
 		else if (Tk.type == Tk.BREAK) {
 			Lexer.nextToken();
 			Lexer.expect(Tk.SEMI);
-			if (C.lpDepth > 0) {
-				E.eBr(E.GOTO, C.lpBrkLbl[C.lpDepth - 1]); // GOTO break
-			}
+			if (C.lpDepth <= 0) Lexer.error(268); // break outside loop/switch
+			markTryEscape(C.lpDepth - 1);
+			E.eBr(E.GOTO, C.lpBrkLbl[C.lpDepth - 1]); // GOTO break
 		}
 		else if (Tk.type == Tk.CONTINUE) {
 			Lexer.nextToken();
 			Lexer.expect(Tk.SEMI);
-			if (C.lpDepth > 0) {
-				E.eBr(E.GOTO, C.lpContLbl[C.lpDepth - 1]); // GOTO continue
-			}
+			if (C.lpDepth <= 0 || C.lpContLbl[C.lpDepth - 1] < 0) Lexer.error(268); // continue outside loop
+			markTryEscape(C.lpContOwn[C.lpDepth - 1]);
+			E.eBr(E.GOTO, C.lpContLbl[C.lpDepth - 1]); // GOTO continue
 		}
 		else if (Tk.type == Tk.SWITCH) {
 			pSwitch();
@@ -384,7 +384,17 @@ public class Stmt {
 		E.mark(lblEnd);
 	}
 
+	// Record a control transfer whose target lp entry sits below `target`;
+	// any active try region entered after that entry is escaped, and a
+	// finally attached to it would be skipped, so pTry rejects the program.
+	static void markTryEscape(int target) {
+		for (int i = 0; i < C.tryDepth; i++) {
+			if (target < C.tryLpD[i]) C.tryEsc[i]++;
+		}
+	}
+
 	static void pRet() {
+		for (int i = 0; i < C.tryDepth; i++) C.tryEsc[i]++;
 		Lexer.nextToken(); // skip 'return'
 		if (Tk.type == Tk.SEMI) {
 			Lexer.nextToken();
@@ -442,13 +452,13 @@ public class Stmt {
 	}
 
 	// Choose the smallest dispatch encoding that preserves int-switch semantics.
-	static int pickIntSwitchMode(int swSlot, int caseCount) {
+	static int pickIntSwitchMode(int swSlot, int base, int caseCount) {
 		if (caseCount <= 1) return SW_LINEAR;
 
 		int linear = 3;
-		int minVal = C.caseVals[0], maxVal = C.caseVals[0];
+		int minVal = C.caseVals[base], maxVal = C.caseVals[base];
 		boolean fit16 = true;
-		for (int i = 0; i < caseCount; i++) {
+		for (int i = base; i < base + caseCount; i++) {
 			int v = C.caseVals[i];
 			linear += switchLoadBytes(swSlot) + switchConstBytes(v) + 3;
 			if (v < minVal) minVal = v;
@@ -476,8 +486,8 @@ public class Stmt {
 		return mode;
 	}
 
-	static void emitLinearSwitch(int swSlot, int caseCount, int defaultLabel) {
-		for (int i = 0; i < caseCount; i++) {
+	static void emitLinearSwitch(int swSlot, int base, int caseCount, int defaultLabel) {
+		for (int i = base; i < base + caseCount; i++) {
 			E.eLd(swSlot, 0); E.push();
 			E.eIC(C.caseVals[i]); E.push();
 			E.eBr(0x9F, C.caseLbls[i]); // IF_ICMPEQ
@@ -486,23 +496,23 @@ public class Stmt {
 		E.eBr(E.GOTO, defaultLabel);
 	}
 
-	static void emitLookupSwitch(int swSlot, int caseCount, int defaultLabel) {
+	static void emitLookupSwitch(int swSlot, int base, int caseCount, int defaultLabel) {
 		E.eLd(swSlot, 0); E.push();
 		int switchPc = C.mcLen;
 		E.eb(E.LOOKUPSWITCH);
 		E.eAlign4();
 		E.eSwitchOff(switchPc, defaultLabel);
 		E.eIBE(caseCount);
-		for (int i = 0; i < caseCount; i++) {
+		for (int i = base; i < base + caseCount; i++) {
 			E.eIBE(C.caseVals[i]);
 			E.eSwitchOff(switchPc, C.caseLbls[i]);
 		}
 		E.pop();
 	}
 
-	static void emitTableSwitch(int swSlot, int caseCount, int defaultLabel) {
-		int minVal = C.caseVals[0], maxVal = C.caseVals[0];
-		for (int i = 1; i < caseCount; i++) {
+	static void emitTableSwitch(int swSlot, int base, int caseCount, int defaultLabel) {
+		int minVal = C.caseVals[base], maxVal = C.caseVals[base];
+		for (int i = base + 1; i < base + caseCount; i++) {
 			int v = C.caseVals[i];
 			if (v < minVal) minVal = v;
 			if (v > maxVal) maxVal = v;
@@ -517,7 +527,7 @@ public class Stmt {
 		E.eIBE(maxVal);
 		for (int val = minVal; val <= maxVal; val++) {
 			int target = defaultLabel;
-			for (int i = 0; i < caseCount; i++) {
+			for (int i = base; i < base + caseCount; i++) {
 				if (C.caseVals[i] == val) {
 					target = C.caseLbls[i];
 					break;
@@ -547,13 +557,17 @@ public class Stmt {
 
 		int lblDispatch = E.label();
 		int lblEnd = E.label();
+		int base = C.caseTop;
 		int caseCount = 0;
 		int defaultLabel = -1;
 
 		// Parse the body first, then branch into the selected case block.
 		E.eBr(E.GOTO, lblDispatch);
 		Lexer.expect(Tk.LBRACE);
-		E.pushLp(lblEnd, lblEnd); // continue in switch = break
+		// continue inside a switch targets the enclosing loop, if any
+		int outerCont = C.lpDepth > 0 ? C.lpContLbl[C.lpDepth - 1] : -1;
+		E.pushLp(lblEnd, outerCont);
+		C.lpContOwn[C.lpDepth - 1] = (byte)(C.lpDepth >= 2 ? C.lpContOwn[C.lpDepth - 2] : -1);
 
 		while (Tk.type != Tk.RBRACE && Tk.type != Tk.EOF) {
 			if (Tk.type == Tk.CASE) {
@@ -564,15 +578,18 @@ public class Stmt {
 					neg = true;
 					Lexer.nextToken();
 				}
+				if (Tk.type != Tk.INT_LIT && (neg || Tk.type != Tk.CHAR_LIT))
+					Lexer.error(267); // case label needs an int or char literal
 				val = Tk.intValue;
 				if (neg) val = -val;
 					Lexer.nextToken();
 					Lexer.expect(Tk.COLON);
 
-					C.chk(caseCount, 64, 266);
-					C.caseLbls[caseCount] = (short)E.label();
-					E.mark(C.caseLbls[caseCount]);
-					C.caseVals[caseCount] = val;
+					C.chk(C.caseTop, 64, 266);
+					C.caseLbls[C.caseTop] = (short)E.label();
+					E.mark(C.caseLbls[C.caseTop]);
+					C.caseVals[C.caseTop] = val;
+				C.caseTop++;
 				caseCount++;
 			} else if (Tk.type == Tk.DEFAULT) {
 				Lexer.nextToken();
@@ -591,12 +608,13 @@ public class Stmt {
 		if (caseCount == 0) {
 			E.eBr(E.GOTO, dispatchDefault);
 		} else {
-			int mode = pickIntSwitchMode(swSlot, caseCount);
-			if (mode == SW_TABLE) emitTableSwitch(swSlot, caseCount, dispatchDefault);
-			else if (mode == SW_LOOKUP) emitLookupSwitch(swSlot, caseCount, dispatchDefault);
-			else emitLinearSwitch(swSlot, caseCount, dispatchDefault);
+			int mode = pickIntSwitchMode(swSlot, base, caseCount);
+			if (mode == SW_TABLE) emitTableSwitch(swSlot, base, caseCount, dispatchDefault);
+			else if (mode == SW_LOOKUP) emitLookupSwitch(swSlot, base, caseCount, dispatchDefault);
+			else emitLinearSwitch(swSlot, base, caseCount, dispatchDefault);
 		}
 		E.mark(lblEnd);
+		C.caseTop = base;
 
 		Lexer.expect(Tk.RBRACE);
 	}
@@ -611,26 +629,32 @@ public class Stmt {
 		int eqMi = C.ensNat(C.N_STRING, C.N_EQUALS);
 		int eqCpIdx = E.aCP(eqMi);
 
+		int base = C.caseTop;
 		int caseCount = 0;
 		int defaultLabel = -1;
 
 		E.eBr(E.GOTO, lblDispatch);
 		Lexer.expect(Tk.LBRACE);
-		E.pushLp(lblEnd, lblEnd);
+		// continue inside a switch targets the enclosing loop, if any
+		int outerCont = C.lpDepth > 0 ? C.lpContLbl[C.lpDepth - 1] : -1;
+		E.pushLp(lblEnd, outerCont);
+		C.lpContOwn[C.lpDepth - 1] = (byte)(C.lpDepth >= 2 ? C.lpContOwn[C.lpDepth - 2] : -1);
 
 		while (Tk.type != Tk.RBRACE && Tk.type != Tk.EOF) {
 			if (Tk.type == Tk.CASE) {
 				Lexer.nextToken();
+				if (Tk.type != Tk.STR_LIT) Lexer.error(267); // case label needs a string literal
 				// Parse string literal — register in CP
 				byte[] buf = new byte[Tk.strLen];
 				Native.arraycopy(Tk.strBuf, 0, buf, 0, Tk.strLen);
-				C.caseVals[caseCount] = E.aSCP(buf, Tk.strLen);
+				C.chk(C.caseTop, 64, 266);
+				C.caseVals[C.caseTop] = E.aSCP(buf, Tk.strLen);
 					Lexer.nextToken(); // skip string
 					Lexer.expect(Tk.COLON);
 
-					C.chk(caseCount, 64, 266);
-					C.caseLbls[caseCount] = (short)E.label();
-					E.mark(C.caseLbls[caseCount]);
+					C.caseLbls[C.caseTop] = (short)E.label();
+					E.mark(C.caseLbls[C.caseTop]);
+					C.caseTop++;
 					caseCount++;
 			} else if (Tk.type == Tk.DEFAULT) {
 				Lexer.nextToken();
@@ -645,7 +669,7 @@ public class Stmt {
 		E.popLp();
 		E.eBr(E.GOTO, lblEnd);
 		E.mark(lblDispatch);
-		for (int i = 0; i < caseCount; i++) {
+		for (int i = base; i < base + caseCount; i++) {
 			E.eLd(swSlot, 1); E.push();
 			E.eLdc(C.caseVals[i]); E.push();
 			E.eOp(E.INVOKEVIRTUAL, eqCpIdx); E.pop(); E.pop(); E.push();
@@ -654,6 +678,7 @@ public class Stmt {
 		}
 		E.eBr(E.GOTO, defaultLabel >= 0 ? defaultLabel : lblEnd);
 		E.mark(lblEnd);
+		C.caseTop = base;
 
 		Lexer.expect(Tk.RBRACE);
 	}
@@ -663,6 +688,13 @@ public class Stmt {
 
 		int lblEnd = E.label();
 		int startPC = C.mcLen;
+
+		// Track exits that leave this region: the single-pass emitter cannot
+		// inline a finally body at them, so try-finally rejects such code.
+		C.chk(C.tryDepth, 8, 265);
+		C.tryLpD[C.tryDepth] = (byte)C.lpDepth;
+		C.tryEsc[C.tryDepth] = (short)0;
+		C.tryDepth++;
 
 		Lexer.expect(Tk.LBRACE);
 		pBlock();
@@ -711,7 +743,11 @@ public class Stmt {
 		}
 
 		// Finally clause — emit body once, use flag variable for normal vs exceptional
+		C.tryDepth--;
 		if (Tk.type == Tk.FINALLY) {
+			// A return/break/continue that left the protected region would
+			// silently skip this finally; reject instead of miscompiling.
+			if (C.tryEsc[C.tryDepth] != 0) Lexer.error(269);
 			Lexer.nextToken();
 
 			int lblFinally = E.label();

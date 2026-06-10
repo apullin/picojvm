@@ -647,10 +647,19 @@ public class Expr {
 			// Check for cast: (Type)expr
 			Lexer.save();
 			Lexer.nextToken();
-			if (Stmt.isTyTok(Tk.type) || Tk.type == Tk.IDENT) {
+			// Only a primitive type token or an identifier naming a known
+			// class counts as a cast; "(x)" for a variable x must fall
+			// through to the parenthesized-expression parse below.
+			// (resolveTypeNm only qualifies the name - it never fails -
+			// so the class catalog decides.)
+			boolean isCast = Stmt.isTyTok(Tk.type);
+			int castNm = -1;
+			if (!isCast && Tk.type == Tk.IDENT) {
+				castNm = Catalog.resolveTypeNm(C.intern(Tk.strBuf, Tk.strLen));
+				isCast = Resolver.fClsByNm(castNm) >= 0 || Catalog.isBuiltinType(castNm);
+			}
+			if (isCast) {
 				int castType = Tk.type;
-				int castNm = -1;
-				if (Tk.type == Tk.IDENT) castNm = Catalog.resolveTypeNm(C.intern(Tk.strBuf, Tk.strLen));
 				Lexer.nextToken();
 				if (Tk.type == Tk.RPAREN) {
 					// It's a cast

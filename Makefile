@@ -231,6 +231,7 @@ tests/TermDemo.pjvm: $(BUILDDIR)/picojse.stamp
 		$(PICOJSE_CLASSDIR)/pj/term/CellSurface.class \
 		$(PICOJSE_CLASSDIR)/pj/term/AnsiTerminal.class \
 		$(PICOJSE_CLASSDIR)/pj/term/Draw.class \
+		$(PICOJSE_CLASSDIR)/pj/text/Format.class \
 		-o $@ -v
 
 tests/PicoJseStdSmoke.pjvm: $(BUILDDIR)/picojse.stamp

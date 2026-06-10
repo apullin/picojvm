@@ -174,15 +174,20 @@ def _find_unresolved_cp_uses(class_name, cls, cp_resolve, uses):
     """Return bytecode CP references that still have no runtime resolution."""
     errors = []
     first_uses = uses["first"]
+    sites = uses.get("sites", {})
     for cp_idx in uses["all"]:
         if cp_resolve[cp_idx] != PJVM_CP_UNRESOLVED:
             continue
-        method_name, method_desc, op, bytecode_off = first_uses[cp_idx]
-        if op in IGNORED_CLASS_REF_OPS:
-            # The runtime currently ignores the type CP operand for reference
-            # array allocation. Keeping this permissive preserves old images
-            # such as `new String[n]` without requiring java/lang/String.class.
+        use_sites = sites.get(cp_idx) or [first_uses[cp_idx]]
+        # The runtime currently ignores the type CP operand for reference
+        # array allocation. Keeping this permissive preserves old images
+        # such as `new String[n]` without requiring java/lang/String.class -
+        # but only when *every* use of the index is of that kind; checking
+        # just the first use let e.g. an unresolved checkcast through.
+        blocking = [s for s in use_sites if s[2] not in IGNORED_CLASS_REF_OPS]
+        if not blocking:
             continue
+        method_name, method_desc, op, bytecode_off = blocking[0]
         errors.append(
             f"{class_name}.{method_name}{method_desc}+{bytecode_off}: "
             f"{_opcode_name(op)} CP#{cp_idx} {_describe_cp_entry(cls.cp, cp_idx)}"
@@ -1275,6 +1280,7 @@ def pack_pjvm(class_data_list, verbose=False, v2=False, pin_hints=None,
             "ldc": [],
             "ldc_set": set(),
             "first": {},
+            "sites": {},
         }
     for mt in method_table:
         cid = mt["class_id"]
@@ -1285,6 +1291,15 @@ def pack_pjvm(class_data_list, verbose=False, v2=False, pin_hints=None,
         for off, _width, op, cp_idx in bytecode_cp_operands(mt["bytecode"]):
             add_ordered_cp_use(uses, cp_idx, op == OP_LDC)
             uses["first"].setdefault(cp_idx, (mt["name"], mt["descriptor"], op, off - 1))
+            uses["sites"].setdefault(cp_idx, []).append(
+                (mt["name"], mt["descriptor"], op, off - 1))
+            if op == OP_MULTIANEWARRAY:
+                dims = mt["bytecode"][off + 2]
+                if dims < 1 or dims > 4:
+                    raise PackError(
+                        f"{cname}.{mt['name']}{mt['descriptor']}+{off - 1}: "
+                        f"multianewarray with {dims} dimensions "
+                        f"(picoJVM supports 1-4)")
 
     # Add native/external methods referenced by bytecode.
     native_cache = {}  # (class, name, desc) -> global method index
@@ -1535,23 +1550,24 @@ def pack_pjvm(class_data_list, verbose=False, v2=False, pin_hints=None,
             nat = cp[entry[2]]
             field_name = cp[nat[1]][1]
 
-            target_cls = classes.get(ref_class_name)
-            if not target_cls:
-                # Walk up from referencing class
-                walk = name
-                while walk and walk in classes:
-                    target_cls = classes[walk]
-                    break
-                if not target_cls:
-                    continue
-
-            # Check static fields
+            # Check static fields, walking up the hierarchy: javac may emit
+            # the subclass as the Fieldref owner for an inherited static,
+            # and the slot must come from the declaring class's base. An
+            # unknown owner class simply stays unresolved (reported by the
+            # unresolved-use check) instead of being mislooked-up in the
+            # referencing class.
             found = False
-            for slot, sf in enumerate(target_cls.static_fields):
-                if sf == field_name:
-                    cp_resolve[cp_idx] = static_field_base[ref_class_name] + slot
-                    found = True
+            walk = ref_class_name
+            while walk and walk in classes:
+                tc = classes[walk]
+                for slot, sf in enumerate(tc.static_fields):
+                    if sf == field_name:
+                        cp_resolve[cp_idx] = static_field_base[walk] + slot
+                        found = True
+                        break
+                if found:
                     break
+                walk = tc.parent_name
 
             if not found:
                 # Check instance fields (search up hierarchy)

@@ -1,6 +1,7 @@
 """Extraction of @Const array initializers from simple <clinit> bytecode."""
 
 import struct
+import sys
 
 from .bytecode import (
     FIXED_OPCODE_LENGTHS,
@@ -109,6 +110,9 @@ def extract_const_arrays(cls, cp, _static_field_base_slot=0, verbose=False,
             break
 
     if clinit_code is None:
+        for fname in sorted(cls.const_fields):
+            print(f"  WARNING: {cls.name}.{fname} is marked @Const but the "
+                  f"class has no <clinit> to extract it from.", file=sys.stderr)
         return []
 
     results = []
@@ -298,6 +302,10 @@ def extract_const_arrays(cls, cp, _static_field_base_slot=0, verbose=False,
                             OP_SASTORE: 0xFFFF,
                         }[op]
                         arr["values"][idx] = val & mask
+                elif arr:
+                    # A store this scanner can't model (computed index or
+                    # value): extracting the array would silently drop data.
+                    arr["bad"] = True
             i += 1
         elif op == OP_AASTORE:
             val = stack.pop() if stack else None
@@ -309,6 +317,8 @@ def extract_const_arrays(cls, cp, _static_field_base_slot=0, verbose=False,
                     if 0 <= idx < arr["size"] and (
                             isinstance(val, tuple) and val[0] in ("string", "null")):
                         arr["values"][idx] = None if val[0] == "null" else val[1]
+                    else:
+                        arr["bad"] = True
                 elif arr and arr["kind"] == "object" and isinstance(idx, int):
                     if 0 <= idx < arr["size"]:
                         if isinstance(val, tuple) and val[0] == "null":
@@ -320,6 +330,12 @@ def extract_const_arrays(cls, cp, _static_field_base_slot=0, verbose=False,
                                 "constructor": val[2],
                                 "args": list(val[3]),
                             }
+                        else:
+                            arr["bad"] = True
+                    else:
+                        arr["bad"] = True
+                elif arr:
+                    arr["bad"] = True
             i += 1
         elif op == OP_PUTSTATIC:
             cp_idx = (bc[i + 1] << 8) | bc[i + 2]
@@ -329,28 +345,47 @@ def extract_const_arrays(cls, cp, _static_field_base_slot=0, verbose=False,
                     isinstance(val, tuple) and val[0] == "array"):
                 arr = pending.pop(val[1], None)
                 if arr:
+                    if arr.get("bad"):
+                        raise PackError(
+                            f"{cls.name}.{field_name}: @Const initializer "
+                            f"contains stores this packer cannot model "
+                            f"(computed index or value); extracting it would "
+                            f"silently drop data. Use literal initializers or "
+                            f"remove @Const.")
                     etype = _ELEM_TYPE.get(arr["type"])
                     if arr.get("kind") == "string" and field_desc == "[Ljava/lang/String;":
                         etype = PJVM_ELEM_STRING_REF
                     elif arr.get("kind") == "object" and field_desc == f"[{arr['type']}":
                         etype = PJVM_ELEM_OBJECT_REF
-                    if etype is not None:
-                        end_off = i + 3
-                        values = arr if etype == PJVM_ELEM_OBJECT_REF else arr["values"]
-                        results.append(
-                            (field_name, etype, values, (arr["start"], end_off))
+                    if etype is None:
+                        raise PackError(
+                            f"{cls.name}.{field_name}: @Const array element "
+                            f"type {arr['type']!r} is not supported")
+                    end_off = i + 3
+                    values = arr if etype == PJVM_ELEM_OBJECT_REF else arr["values"]
+                    results.append(
+                        (field_name, etype, values, (arr["start"], end_off))
+                    )
+                    if verbose:
+                        print(
+                            f"    @Const {field_name}: "
+                            f"{arr['type']}[{arr['size']}] "
+                            f"({end_off - arr['start']}B clinit code)"
                         )
-                        if verbose:
-                            print(
-                                f"    @Const {field_name}: "
-                                f"{arr['type']}[{arr['size']}] "
-                                f"({end_off - arr['start']}B clinit code)"
-                            )
             i += 3
         elif op == OP_RETURN:
             i += 1
         else:
             stack.clear()
             i += FIXED_OPCODE_LENGTHS[op]
+
+    extracted_names = {r[0] for r in results}
+    for fname in sorted(cls.const_fields - extracted_names):
+        # The field keeps its runtime <clinit> initializer (a RAM copy), so
+        # the program still works - but the ROM placement @Const asked for
+        # silently didn't happen. Make that visible.
+        print(f"  WARNING: {cls.name}.{fname} is marked @Const but its "
+              f"initializer was not extractable; it stays a RAM array "
+              f"initialized at runtime.", file=sys.stderr)
 
     return results

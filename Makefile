@@ -143,25 +143,32 @@ $(PICOJVM_LARGE): src/pjvm.c src/pjvm_heap.c src/pjvm_gc.c platform/host.c $(PJV
 $(PICOJVM_PAGED): src/pjvm.c src/pjvm_heap.c src/pjvm_gc.c platform/host.c $(PJVM_HEADERS) $(BUILDDIR)/.hostvm.flags
 	$(CC) $(CFLAGS) $(HOST_VM_DEBUG) $(HOST_VM_OPTS) -DPJVM_PAGED -o $@ src/pjvm.c src/pjvm_heap.c src/pjvm_gc.c platform/host.c
 
+# Test compiles resolve java.lang.* to the shims in java/lang/ via javac's
+# implicit sourcepath, so a shim change must recompile every test class.
+# All test-class rules depend on tests/Native.java: touching it when a shim
+# source changes re-fires them without editing each rule.
+tests/Native.java: $(PICOJSE_JAVA_SRCS)
+	touch $@
+
 # Compile all test .java files
 tests/%.class: tests/%.java tests/Native.java
-	$(JAVAC) -d tests $^
+	$(JAVAC) $(JAVAC8FLAGS) -d tests $^ $(PICOJSE_JAVA_SRCS)
 
 # ConstTest needs Const.java annotation
 tests/ConstTest.class: tests/ConstTest.java tests/Native.java tests/Const.java
-	$(JAVAC) -d tests $^
+	$(JAVAC) $(JAVAC8FLAGS) -d tests $^ $(PICOJSE_JAVA_SRCS)
 
 tests/ConstStringArrayTest.class: tests/ConstStringArrayTest.java tests/Native.java tests/Const.java
-	$(JAVAC) -d tests $^
+	$(JAVAC) $(JAVAC8FLAGS) -d tests $^ $(PICOJSE_JAVA_SRCS)
 
 tests/ConstObjectArrayTest.class tests/ConstPoint.class: tests/ConstObjectArrayTest.java tests/Native.java tests/Const.java
-	$(JAVAC) -d tests $^
+	$(JAVAC) $(JAVAC8FLAGS) -d tests $^ $(PICOJSE_JAVA_SRCS)
 
 tests/ConstObjectArrayTest.pjvm: tests/ConstObjectArrayTest.class tests/ConstPoint.class
 	$(PYTHON) pjvmpack.py $^ -o $@ -v
 
 tests/ConstNarrowingTest.class tests/NarrowPoint.class tests/ByteCommand.class: tests/ConstNarrowingTest.java tests/Native.java tests/Const.java
-	$(JAVAC) -d tests $^
+	$(JAVAC) $(JAVAC8FLAGS) -d tests $^ $(PICOJSE_JAVA_SRCS)
 
 tests/ConstNarrowingTest.pjvm: tests/ConstNarrowingTest.class tests/NarrowPoint.class tests/ByteCommand.class
 	$(PYTHON) pjvmpack.py $^ -o $@ -v
@@ -175,35 +182,35 @@ tests/Shapes.pjvm: tests/Shape.class tests/Square.class tests/Rect.class tests/S
 	$(PYTHON) pjvmpack.py $^ -o $@ -v
 
 tests/Shape.class tests/Square.class tests/Rect.class tests/Shapes.class: tests/Shapes.java tests/Native.java
-	$(JAVAC) -d tests $^
+	$(JAVAC) $(JAVAC8FLAGS) -d tests $^ $(PICOJSE_JAVA_SRCS)
 
 # Multi-class Features test (needs Shape hierarchy)
 tests/Features.pjvm: tests/Shape.class tests/Square.class tests/Rect.class tests/Features.class
 	$(PYTHON) pjvmpack.py $^ -o $@ -v
 
 tests/Features.class: tests/Features.java tests/Shapes.java tests/Native.java
-	$(JAVAC) -d tests $^
+	$(JAVAC) $(JAVAC8FLAGS) -d tests $^ $(PICOJSE_JAVA_SRCS)
 
 # Multi-class InterfaceTest
 tests/InterfaceTest.pjvm: tests/HasArea.class tests/Describable.class tests/Measurable.class tests/Circle.class tests/Box.class tests/InterfaceTest.class
 	$(PYTHON) pjvmpack.py $^ -o $@ -v
 
 tests/HasArea.class tests/Describable.class tests/Measurable.class tests/Circle.class tests/Box.class tests/InterfaceTest.class: tests/InterfaceTest.java tests/Native.java
-	$(JAVAC) -d tests $^
+	$(JAVAC) $(JAVAC8FLAGS) -d tests $^ $(PICOJSE_JAVA_SRCS)
 
 # Multi-class ExceptionTest
 tests/ExceptionTest.pjvm: tests/MyException.class tests/ExceptionTest.class
 	$(PYTHON) pjvmpack.py $^ -o $@ -v
 
 tests/MyException.class tests/ExceptionTest.class: tests/ExceptionTest.java tests/Native.java
-	$(JAVAC) -d tests $^
+	$(JAVAC) $(JAVAC8FLAGS) -d tests $^ $(PICOJSE_JAVA_SRCS)
 
 # javac enums emit a nested class plus java/lang/Enum boilerplate.
 tests/EnumBasicTest.pjvm: tests/EnumBasicTest.class tests/EnumBasicTest$$Color.class
 	$(PYTHON) pjvmpack.py tests/EnumBasicTest.class 'tests/EnumBasicTest$$Color.class' -o $@ -v
 
 tests/EnumBasicTest.class tests/EnumBasicTest$$Color.class: tests/EnumBasicTest.java tests/Native.java
-	$(JAVAC) $(JAVAC8FLAGS) -d tests $^
+	$(JAVAC) $(JAVAC8FLAGS) -d tests $^ $(PICOJSE_JAVA_SRCS)
 
 # Java-tier enums: pack the java/lang/Enum shim so no VM natives are used
 tests/EnumShimTest.pjvm: tests/EnumShimTest.class tests/EnumShimTest$$Color.class $(BUILDDIR)/picojse.stamp
@@ -218,10 +225,29 @@ tests/StringShimTest.pjvm: tests/StringShimTest.class $(BUILDDIR)/picojse.stamp
 		$(PICOJSE_CLASSDIR)/java/lang/String.class -o $@ -v
 
 tests/StringShimTest.class: tests/StringShimTest.java tests/Native.java
-	$(JAVAC) $(JAVAC8FLAGS) -d tests $^
+	$(JAVAC) $(JAVAC8FLAGS) -d tests $^ $(PICOJSE_JAVA_SRCS)
+
+tests/StringApiSmoke.pjvm: tests/StringApiSmoke.class $(BUILDDIR)/picojse.stamp
+	$(PYTHON) pjvmpack.py tests/StringApiSmoke.class \
+		$(PICOJSE_CLASSDIR)/java/lang/String.class -o $@ -v
+
+# Legacy native string tier: same program packed WITHOUT the shim, run on a
+# VM built with the (now default-off) C implementations enabled. Keeps the
+# legacy block honest until it is deleted outright.
+tests/StringApiSmokeNative.pjvm: tests/StringApiSmoke.class
+	$(PYTHON) pjvmpack.py tests/StringApiSmoke.class -o $@ -v
+
+$(EXPDIR)/StringApiSmokeNative.hex: $(EXPDIR)/StringApiSmoke.hex
+	cp $< $@
+
+test-legacy-string-natives: $(EXPDIR)/StringApiSmokeNative.hex
+	$(MAKE) --no-print-directory picojvm \
+		HOST_VM_OPTS='$(HOST_VM_FEATURES) -DPJVM_USE_EXT_STRING_APIS=1'
+	$(MAKE) --no-print-directory test-StringApiSmokeNative \
+		HOST_VM_OPTS='$(HOST_VM_FEATURES) -DPJVM_USE_EXT_STRING_APIS=1'
 
 tests/EnumShimTest.class tests/EnumShimTest$$Color.class: tests/EnumShimTest.java tests/Native.java
-	$(JAVAC) $(JAVAC8FLAGS) -d tests $^
+	$(JAVAC) $(JAVAC8FLAGS) -d tests $^ $(PICOJSE_JAVA_SRCS)
 
 $(BUILDDIR)/picojse.stamp: $(PICOJSE_SRCS) tests/TermSmoke.java tests/FilesSmoke.java tests/TermDemo.java tests/PicoJseStdSmoke.java tests/JavaLangSmoke.java tests/StringConcatSmoke.java tests/TarSmoke.java tests/ZipSmoke.java tests/ZipDeflateSmoke.java tests/PJTar.java tests/PJUntar.java tests/PJZip.java tests/PJUnzip.java tests/PJArc.java | $(BUILDDIR)
 	@mkdir -p $(PICOJSE_CLASSDIR)
@@ -280,6 +306,7 @@ tests/JavaLangSmoke.pjvm: $(BUILDDIR)/picojse.stamp
 		$(PICOJSE_CLASSDIR)/java/lang/Integer.class \
 		$(PICOJSE_CLASSDIR)/java/lang/Math.class \
 		$(PICOJSE_CLASSDIR)/java/lang/Short.class \
+		$(PICOJSE_CLASSDIR)/java/lang/String.class \
 		$(PICOJSE_CLASSDIR)/java/lang/StringBuilder.class \
 		$(PICOJSE_CLASSDIR)/java/lang/System.class \
 		$(PICOJSE_CLASSDIR)/pj/Native.class \
@@ -423,14 +450,16 @@ tests/GCGraphTest.pjvm: tests/GCNode.class tests/GCGraphTest.class
 	$(PYTHON) pjvmpack.py $^ -o $@ -v
 
 tests/GCNode.class tests/GCGraphTest.class: tests/GCGraphTest.java tests/Native.java
-	$(JAVAC) -d tests $^
+	$(JAVAC) $(JAVAC8FLAGS) -d tests $^ $(PICOJSE_JAVA_SRCS)
 
-# GC temp-root regression test
-tests/GcTempRootTest.pjvm: tests/GcTempRootTest.class
-	$(PYTHON) pjvmpack.py $^ -o $@ -v
+# GC temp-root regression test (shim-packed: the allocation pressure flows
+# through the primitive INIT natives, which carry the temp-root protection)
+tests/GcTempRootTest.pjvm: tests/GcTempRootTest.class $(BUILDDIR)/picojse.stamp
+	$(PYTHON) pjvmpack.py tests/GcTempRootTest.class \
+		$(PICOJSE_CLASSDIR)/java/lang/String.class -o $@ -v
 
 tests/GcTempRootTest.class: tests/GcTempRootTest.java tests/Native.java
-	$(JAVAC) -d tests $^
+	$(JAVAC) $(JAVAC8FLAGS) -d tests $^ $(PICOJSE_JAVA_SRCS)
 
 # Pager stress tests (generated)
 tests/BigSwitch.java tests/BigLUT.java: tests/gen_big_tests.py
@@ -848,5 +877,5 @@ clean:
 .PHONY: all test test-paged test-paged-stress clean sim
 .PHONY: gc-demo-manual gc-demo-allocfail gc-demo-watermark75 gc-demo-return gc-demo-random
 .PHONY: gc-policy-test test-gc-collect test-gc-fragment test-gc-exact test-v4 test-pjvmpack-package test-alloc-heavy test-paged-alloc-heavy test-gc-alloc-heavy
-.PHONY: test-gc-graph test-gc-temp-roots test-gc-host-compat test-gc-host-suite test-sim-smoke test-sim-gc-smoke
+.PHONY: test-gc-graph test-gc-temp-roots test-gc-host-compat test-gc-host-suite test-sim-smoke test-sim-gc-smoke test-legacy-string-natives
 .PHONY: test-sim-gc-alloc-heavy test-gc-sim-suite test-gc-suite

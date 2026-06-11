@@ -18,12 +18,15 @@ package java.lang;
  *    8085 builds, where PJVM_USE_EXT_STRING_APIS has the equivalent C
  *    compiled out. pjvmpack strips the methods a program doesn't use.
  *
- * This file shadows the platform java.lang.String for every javac compile
- * run from the repo root, so programs can only use what picoJVM can
- * actually deliver - missing methods fail at compile time, not as a trap
- * on the device. Signatures may be narrower than the JDK's (e.g.
- * contains(String) instead of contains(CharSequence)); pjvmpack carries
- * descriptor aliases so images compiled against the JDK still resolve.
+ * To compile a program against this contract, pass the shim sources as
+ * explicit compilation units alongside it (the build does this for every
+ * test compile) - javac's sourcepath cannot shadow boot packages like
+ * java.lang, so a bare javac run silently binds the platform String.
+ * Compiled against the shim, missing methods fail at compile time instead
+ * of trapping on the device. Signatures may be narrower than the JDK's
+ * (e.g. contains(String) instead of contains(CharSequence)); pjvmpack
+ * carries descriptor aliases so images compiled against the JDK still
+ * resolve.
  *
  * Strings are immutable byte strings (8-bit chars). No instance fields:
  * a String reference is a tagged VM value, not an object with a header.

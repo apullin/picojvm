@@ -125,15 +125,13 @@
 #endif
 #endif
 
+/* Legacy native tier for the algorithmic String API (~8.5KB on 8085).
+ * Off everywhere since the java/lang/String shim: programs pack their
+ * string algorithms as bytecode over the always-present primitives
+ * (length/charAt/equals/hashCode/constructors). Enable only to run old
+ * images that were packed without the shim. */
 #ifndef PJVM_USE_EXT_STRING_APIS
-#if PJVM_PROFILE_SELFHOST_SET
 #define PJVM_USE_EXT_STRING_APIS 0
-#elif defined(__i8085__) || defined(__I8085__)
-/* Java-compatible String helpers are useful, but large on 8085. */
-#define PJVM_USE_EXT_STRING_APIS 0
-#else
-#define PJVM_USE_EXT_STRING_APIS 1
-#endif
 #endif
 
 #ifndef PJVM_USE_EXT_JAVA_LANG_APIS

@@ -3,6 +3,10 @@ package java.lang;
 import pj.Native;
 
 public final class Integer {
+    /* Compile-time constants: javac inlines these at use sites. */
+    public static final int MIN_VALUE = 0x80000000;
+    public static final int MAX_VALUE = 0x7FFFFFFF;
+
     private final int value;
 
     public Integer(int value) {

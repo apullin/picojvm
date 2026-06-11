@@ -1448,6 +1448,7 @@ static void pjvm_inv(pjvm_method_id_t mi) {
         case NATIVE_TICKS:
             pjvm_push32(pjvm_platform_ticks());
             break;
+#if PJVM_USE_ENUM_NATIVES
         case NATIVE_ENUM_INIT: {
             uint16_t obj, obj_hi, name_lo, name_hi, ord_lo, ord_hi;
             SPOP32(ord_lo, ord_hi);
@@ -1476,6 +1477,7 @@ static void pjvm_inv(pjvm_method_id_t mi) {
         case NATIVE_ENUM_VALUEOF:
             pjvm_platform_trap(OP_INVOKESTATIC, g_pjvm->pc);
             break;
+#endif /* PJVM_USE_ENUM_NATIVES */
         case NATIVE_ARRAY_CLONE: {
             uint16_t src, src_hi;
             SPOP32(src, src_hi);

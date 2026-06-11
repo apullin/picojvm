@@ -23,7 +23,7 @@ GC_EXACT_TEST     = $(BUILDDIR)/gc-exact-test
 
 # Single-class tests
 TESTS_SINGLE = Fib HelloWorld BubbleSort Counter StringTest RomStringTest StringApiSmoke NativeOpsTest StaticInitTest MultiArrayTest StringSwitchTest VmHardeningTest ConstTest ConstStringArrayTest ConstObjectArrayTest ConstNarrowingTest TermSmoke FilesSmoke PicoJseStdSmoke JavaLangSmoke StringConcatSmoke TarSmoke ZipSmoke ZipDeflateSmoke
-TESTS_MULTI  = Shapes Features InterfaceTest ExceptionTest EnumBasicTest
+TESTS_MULTI  = Shapes Features InterfaceTest ExceptionTest EnumBasicTest EnumShimTest
 TESTS_PAGER  = BigSwitch BigLUT
 ALL_TESTS    = $(TESTS_SINGLE) $(TESTS_MULTI)
 ALL_TESTS_PAGER = $(ALL_TESTS) $(TESTS_PAGER)
@@ -34,6 +34,7 @@ ALL_TESTS_PAGER = $(ALL_TESTS) $(TESTS_PAGER)
 PICOJSE_JAVA_SRCS = java/lang/Boolean.java \
                     java/lang/Byte.java \
                     java/lang/Character.java \
+                    java/lang/Enum.java \
                     java/lang/Integer.java \
                     java/lang/Math.java \
                     java/lang/Short.java \
@@ -201,6 +202,14 @@ tests/EnumBasicTest.pjvm: tests/EnumBasicTest.class tests/EnumBasicTest$$Color.c
 	$(PYTHON) pjvmpack.py tests/EnumBasicTest.class 'tests/EnumBasicTest$$Color.class' -o $@ -v
 
 tests/EnumBasicTest.class tests/EnumBasicTest$$Color.class: tests/EnumBasicTest.java tests/Native.java
+	$(JAVAC) $(JAVAC8FLAGS) -d tests $^
+
+# Java-tier enums: pack the java/lang/Enum shim so no VM natives are used
+tests/EnumShimTest.pjvm: tests/EnumShimTest.class tests/EnumShimTest$$Color.class $(BUILDDIR)/picojse.stamp
+	$(PYTHON) pjvmpack.py tests/EnumShimTest.class 'tests/EnumShimTest$$Color.class' \
+		$(PICOJSE_CLASSDIR)/java/lang/Enum.class -o $@ -v
+
+tests/EnumShimTest.class tests/EnumShimTest$$Color.class: tests/EnumShimTest.java tests/Native.java
 	$(JAVAC) $(JAVAC8FLAGS) -d tests $^
 
 $(BUILDDIR)/picojse.stamp: $(PICOJSE_SRCS) tests/TermSmoke.java tests/FilesSmoke.java tests/TermDemo.java tests/PicoJseStdSmoke.java tests/JavaLangSmoke.java tests/StringConcatSmoke.java tests/TarSmoke.java tests/ZipSmoke.java tests/ZipDeflateSmoke.java tests/PJTar.java tests/PJUntar.java tests/PJZip.java tests/PJUnzip.java tests/PJArc.java | $(BUILDDIR)

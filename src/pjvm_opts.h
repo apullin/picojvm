@@ -146,6 +146,15 @@
 #endif
 #endif
 
+/* Enum natives back javac enums when no java/lang/Enum class is packed.
+ * Images packed with the java/lang/Enum.java shim run enums as ordinary
+ * bytecode and never call these, so a build committed to shim-packed
+ * images can compile them out (~1KB on 8085). picojc enums are plain int
+ * constants and never use them either way. */
+#ifndef PJVM_USE_ENUM_NATIVES
+#define PJVM_USE_ENUM_NATIVES 1
+#endif
+
 #ifndef PJVM_USE_ASM_CPREAD
 #if defined(PJVM_ASM_HELPERS) && !defined(PJVM_PAGED)
 #define PJVM_USE_ASM_CPREAD 0

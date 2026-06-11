@@ -790,6 +790,35 @@ test-gc-suite:
 	$(MAKE) --no-print-directory test-gc-host-suite
 	$(MAKE) --no-print-directory test-gc-sim-suite
 
+# 8085 code-size table for the principal VM configs (needs the outer
+# llvm-8085 toolchain). Sums pjvm.c + pjvm_heap.c + pjvm_gc.c text so
+# format/feature growth gets noticed when it lands, not months later.
+SIZEREP_BIG = -DPJVM_ENABLE_V4=1 -DPJVM_METHOD_CAP=320 -DPJVM_CLASS_CAP=32 \
+              -DPJVM_VTABLE_CAP=320 -DPJVM_STATIC_CAP=128 -DPJVM_MAX_STACK=96 \
+              -DPJVM_MAX_LOCALS=256 -DPJVM_MAX_FRAMES=20
+SIZEREP_GC = -DPJVM_HEAP_MODE=PJVM_HEAP_FREELIST -DPJVM_GC_TRIGGERS=3 \
+             -DPJVM_GC_WATERMARK_PCT=75
+
+size-report: | $(BUILDDIR)
+	@echo "VM core text bytes (pjvm.c+heap+gc, i8085 -Oz):"; \
+	for cfg in \
+	  "small-v3|$(SIM_CAPS) -DPJVM_ASM_HELPERS" \
+	  "small-v3+GC|$(SIM_CAPS) -DPJVM_ASM_HELPERS $(SIZEREP_GC)" \
+	  "big-v3+v4|$(SIZEREP_BIG)" \
+	  "big-v4only|$(SIZEREP_BIG) -DPJVM_ENABLE_V3=0" \
+	  "big-v4only+GC|$(SIZEREP_BIG) -DPJVM_ENABLE_V3=0 $(SIZEREP_GC)"; do \
+	  name=$${cfg%%|*}; flags=$${cfg#*|}; total=0; \
+	  for f in src/pjvm.c src/pjvm_heap.c src/pjvm_gc.c; do \
+	    $(CLANG) --target=i8085-unknown-elf -ffreestanding -fno-builtin -Oz \
+	      $$flags -c $$f -o $(BUILDDIR)/.sizerep.o 2>/dev/null || exit 1; \
+	    t=$$($(SIZE) $(BUILDDIR)/.sizerep.o | awk 'NR==2{print $$1}'); \
+	    total=$$((total + t)); \
+	  done; \
+	  printf "  %-16s %6d\n" "$$name" "$$total"; \
+	done; rm -f $(BUILDDIR)/.sizerep.o
+
+.PHONY: size-report
+
 clean:
 	rm -f $(PICOJVM) $(PICOJVM_PAGED) tests/*.class tests/*.pjvm tests/*.pjvmmap
 	rm -rf $(BUILDDIR)

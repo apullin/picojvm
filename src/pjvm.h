@@ -50,6 +50,15 @@
 #ifndef PJVM_ENABLE_V4
 #define PJVM_ENABLE_V4 0
 #endif
+/* Loader formats are independent build options: v3-only (default), v4-only
+ * (-DPJVM_ENABLE_V4=1 -DPJVM_ENABLE_V3=0, drops ~3KB of loader on 8085), or
+ * both. Programs stay universal — pjvmpack --format picks the image format. */
+#ifndef PJVM_ENABLE_V3
+#define PJVM_ENABLE_V3 1
+#endif
+#if !PJVM_ENABLE_V3 && !PJVM_ENABLE_V4
+#error "At least one of PJVM_ENABLE_V3 / PJVM_ENABLE_V4 must be enabled"
+#endif
 #ifndef PJVM_USE_OP_WIDE
 #define PJVM_USE_OP_WIDE PJVM_ENABLE_V4
 #endif

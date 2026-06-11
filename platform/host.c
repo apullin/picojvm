@@ -323,6 +323,9 @@ void pjvm_platform_trap(uint8_t op, uint16_t pc) {
     } else if (op == PJVM_TRAP_STACK_OVERFLOW) {
         fprintf(stderr, "Stack overflow (frames/locals/operand stack) at bytecode offset %u\n",
                 (unsigned)pc);
+    } else if (op == PJVM_TRAP_BAD_VERSION) {
+        fprintf(stderr, "Image format not supported by this build "
+                "(magic/version byte 0x%02X)\n", (unsigned)pc);
     } else if (op == PJVM_TRAP_UNSUPPORTED) {
         fprintf(stderr, "Image uses unsupported feature (element type %u)\n",
                 (unsigned)pc);

@@ -155,7 +155,14 @@ uint8_t *sc;
 static uint16_t n_static_fields;
 static pjvm_count_t n_int_constants, n_string_constants;
 uint8_t  region_flags;  /* byte 9: bit0=pin_hints, bit1=ref bitmaps, bit2=const_data */
+/* Constant-fold the format flag when only one loader is compiled in. */
+#if PJVM_ENABLE_V3 && PJVM_ENABLE_V4
 static uint8_t pjvm_format_v4;
+#elif PJVM_ENABLE_V4
+#define pjvm_format_v4 1
+#else
+#define pjvm_format_v4 0
+#endif
 static pjvm_count_t m_ml[PJVM_METHOD_CAP], m_ac[PJVM_METHOD_CAP];
 static pjvm_flags_t m_fl[PJVM_METHOD_CAP];
 static pjvm_vslot_t m_vs[PJVM_METHOD_CAP];
@@ -647,8 +654,11 @@ static uint8_t pjvm_check_caps(void) {
     return 1;
 }
 
+#if PJVM_ENABLE_V3
 static void pjvm_parse_v3(uint8_t *data) {
+#if PJVM_ENABLE_V4
     pjvm_format_v4 = 0;
+#endif
     n_methods = data[2];
     main_mi = data[3];
     n_static_fields = RD16LE(data + 4);
@@ -739,6 +749,8 @@ static void pjvm_parse_v3(uint8_t *data) {
 #endif
 }
 
+#endif /* PJVM_ENABLE_V3 */
+
 #if PJVM_ENABLE_V4
 static uint32_t pjvm_read_uleb(uint8_t **pp) {
     uint32_t v = 0;
@@ -754,7 +766,9 @@ static uint32_t pjvm_read_uleb(uint8_t **pp) {
 }
 
 static void pjvm_parse_v4(uint8_t *data) {
+#if PJVM_ENABLE_V3
     pjvm_format_v4 = 1;
+#endif
     n_methods = RD16LE(data + 2);
     main_mi = RD16LE(data + 4);
     n_static_fields = RD16LE(data + 6);
@@ -905,10 +919,12 @@ void pjvm_parse(uint8_t *data) {
         pjvm_platform_trap(PJVM_TRAP_BAD_VERSION, data[0]);
         return;
     }
+#if PJVM_ENABLE_V3
     if (data[1] == PJVM_VERSION_V3) {
         pjvm_parse_v3(data);
         return;
     }
+#endif
 #if PJVM_ENABLE_V4
     if (data[1] == PJVM_VERSION_V4) {
         pjvm_parse_v4(data);

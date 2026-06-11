@@ -86,6 +86,35 @@ static uint32_t pjvm_gc_heap_limit_full(const PJVMCtx *j) {
     return j->heap_limit ? (uint32_t)j->heap_limit : 65536u;
 }
 
+/* Trusted marking: `lo` came from a typed reference slot (ref-bitmapped
+ * object field or ref array), so under this non-moving collector it is a
+ * payload pointer by construction and the block header sits at lo-4. The
+ * range and ALLOC-flag checks stay (they are cheap and keep the collector
+ * itself memory-safe against a corrupted slot); only the search goes. */
+static uint8_t pjvm_gc_mark_payload(PJVMCtx *j, uint16_t lo, uint16_t hi) {
+    uint16_t blk, meta;
+    uint8_t kind;
+
+    if (hi != 0 || lo == 0) return 0;
+    if (lo < (uint16_t)(j->heap_base + PJVM_HEAP_ALLOC_HDR) ||
+        (uint32_t)lo >= pjvm_gc_heap_limit_full(j))
+        return 0;
+
+    blk = (uint16_t)(lo - PJVM_HEAP_ALLOC_HDR);
+    if (!pjvm_gc_blk_is_allocated(blk)) return 0;
+    meta = pjvm_gc_blk_meta(blk);
+    if ((meta & PJVM_HEAP_META_MARK) != 0) return 0;
+    kind = (uint8_t)(meta & PJVM_HEAP_META_KIND_MASK);
+    meta |= PJVM_HEAP_META_MARK;
+    if (kind == PJVM_HEAP_KIND_OBJECT || kind == PJVM_HEAP_KIND_REF_ARRAY)
+        meta |= PJVM_HEAP_META_PENDING;
+    pjvm_gc_blk_set_meta(blk, meta);
+    return 1;
+}
+
+/* Conservative marking for ambiguous words (stack/locals/temp roots and
+ * objects without ref bitmaps): an int can alias a heap address, so the
+ * candidate only counts if the block walk proves it is a payload start. */
 static uint8_t pjvm_gc_mark_ref(PJVMCtx *j, uint16_t lo, uint16_t hi) {
     uint32_t end;
     uint32_t blk32;
@@ -100,21 +129,9 @@ static uint8_t pjvm_gc_mark_ref(PJVMCtx *j, uint16_t lo, uint16_t hi) {
         uint16_t blk = (uint16_t)blk32;
         uint16_t size = pjvm_gc_blk_size(blk);
         if (size < PJVM_HEAP_FREE_HDR || blk32 + size > end) return 0;
-        if (pjvm_gc_blk_is_allocated(blk)) {
-            uint16_t payload = (uint16_t)(blk + PJVM_HEAP_ALLOC_HDR);
-            if (payload == lo) {
-                uint16_t meta = pjvm_gc_blk_meta(blk);
-                if ((meta & PJVM_HEAP_META_MARK) == 0) {
-                    uint8_t kind = (uint8_t)(meta & PJVM_HEAP_META_KIND_MASK);
-                    meta |= PJVM_HEAP_META_MARK;
-                    if (kind == PJVM_HEAP_KIND_OBJECT || kind == PJVM_HEAP_KIND_REF_ARRAY)
-                        meta |= PJVM_HEAP_META_PENDING;
-                    pjvm_gc_blk_set_meta(blk, meta);
-                    return 1;
-                }
-                return 0;
-            }
-        }
+        if (pjvm_gc_blk_is_allocated(blk) &&
+            (uint16_t)(blk + PJVM_HEAP_ALLOC_HDR) == lo)
+            return pjvm_gc_mark_payload(j, lo, hi);
         blk32 += size;
     }
     return 0;
@@ -125,6 +142,15 @@ static void pjvm_gc_scan_words(PJVMCtx *j, uint16_t start, uint16_t size) {
         uint16_t lo = r16((uint16_t)(start + off));
         uint16_t hi = r16((uint16_t)(start + off + 2u));
         (void)pjvm_gc_mark_ref(j, lo, hi);
+    }
+}
+
+/* Trusted variant of scan_words for ref arrays: every slot is a ref. */
+static void pjvm_gc_scan_refs(PJVMCtx *j, uint16_t start, uint16_t size) {
+    for (uint16_t off = 0; off + 3u < size; off = (uint16_t)(off + 4u)) {
+        uint16_t lo = r16((uint16_t)(start + off));
+        uint16_t hi = r16((uint16_t)(start + off + 2u));
+        (void)pjvm_gc_mark_payload(j, lo, hi);
     }
 }
 
@@ -158,7 +184,7 @@ static void pjvm_gc_scan_object(PJVMCtx *j, uint16_t payload, uint16_t payload_s
             uint16_t addr = (uint16_t)(payload + PJVM_OBJ_HEADER + (uint16_t)slot * 4u);
             uint16_t lo = r16(addr);
             uint16_t hi = r16((uint16_t)(addr + 2u));
-            (void)pjvm_gc_mark_ref(j, lo, hi);
+            (void)pjvm_gc_mark_payload(j, lo, hi);
         }
     }
 }
@@ -176,9 +202,9 @@ static void pjvm_gc_scan_block(PJVMCtx *j, uint16_t blk) {
     if (kind == PJVM_HEAP_KIND_OBJECT) {
         pjvm_gc_scan_object(j, payload, payload_size);
     } else if (kind == PJVM_HEAP_KIND_REF_ARRAY) {
-        pjvm_gc_scan_words(j,
-                           (uint16_t)(payload + PJVM_OBJ_HEADER),
-                           (uint16_t)(payload_size - PJVM_OBJ_HEADER));
+        pjvm_gc_scan_refs(j,
+                          (uint16_t)(payload + PJVM_OBJ_HEADER),
+                          (uint16_t)(payload_size - PJVM_OBJ_HEADER));
     }
 }
 

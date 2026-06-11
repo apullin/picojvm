@@ -1423,6 +1423,12 @@ def pack_pjvm(class_data_list, verbose=False, v2=False, pin_hints=None,
             elif ref_method == "<init>" and (
                     ref_class == "java/lang/Object" or
                     ref_class in EXCEPTION_HIERARCHY):
+                if (ref_class in classes and
+                        (ref_method, ref_desc) in classes[ref_class].global_methods):
+                    # A packed shim (e.g. java/lang/Throwable) provides this
+                    # constructor as real bytecode - the message actually gets
+                    # stored. Leave the ref to class-walk resolution.
+                    continue
                 nm_idx = append_native_method(
                     "<init>", ref_desc, count_args(ref_desc) + 1,
                     NATIVE_OBJECT_INIT)

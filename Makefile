@@ -23,7 +23,7 @@ GC_EXACT_TEST     = $(BUILDDIR)/gc-exact-test
 
 # Single-class tests
 TESTS_SINGLE = Fib HelloWorld BubbleSort Counter StringTest RomStringTest StringApiSmoke StringShimTest NativeOpsTest StaticInitTest MultiArrayTest StringSwitchTest VmHardeningTest ConstTest ConstStringArrayTest ConstObjectArrayTest ConstNarrowingTest TermSmoke FilesSmoke PicoJseStdSmoke JavaLangSmoke StringConcatSmoke TarSmoke ZipSmoke ZipDeflateSmoke
-TESTS_MULTI  = Shapes Features InterfaceTest ExceptionTest EnumBasicTest EnumShimTest
+TESTS_MULTI  = Shapes Features InterfaceTest ExceptionTest EnumBasicTest EnumShimTest ThrowableShimTest
 TESTS_PAGER  = BigSwitch BigLUT
 ALL_TESTS    = $(TESTS_SINGLE) $(TESTS_MULTI)
 ALL_TESTS_PAGER = $(ALL_TESTS) $(TESTS_PAGER)
@@ -35,12 +35,15 @@ PICOJSE_JAVA_SRCS = java/lang/Boolean.java \
                     java/lang/Byte.java \
                     java/lang/Character.java \
                     java/lang/Enum.java \
+                    java/lang/Exception.java \
                     java/lang/Integer.java \
                     java/lang/Math.java \
+                    java/lang/RuntimeException.java \
                     java/lang/Short.java \
                     java/lang/String.java \
                     java/lang/StringBuilder.java \
-                    java/lang/System.java
+                    java/lang/System.java \
+                    java/lang/Throwable.java
 
 PICOJSE_PJ_SRCS = pj/Native.java \
                   pj/archive/Tar.java \
@@ -230,6 +233,17 @@ tests/StringShimTest.class: tests/StringShimTest.java tests/Native.java
 tests/StringApiSmoke.pjvm: tests/StringApiSmoke.class $(BUILDDIR)/picojse.stamp
 	$(PYTHON) pjvmpack.py tests/StringApiSmoke.class \
 		$(PICOJSE_CLASSDIR)/java/lang/String.class -o $@ -v
+
+# Java-tier exceptions: real messages via the Throwable chain shims
+tests/ThrowableShimTest.pjvm: tests/ThrowableShimTest.class $(BUILDDIR)/picojse.stamp
+	$(PYTHON) pjvmpack.py tests/ThrowableShimTest.class tests/CustomFault.class \
+		$(PICOJSE_CLASSDIR)/java/lang/Throwable.class \
+		$(PICOJSE_CLASSDIR)/java/lang/Exception.class \
+		$(PICOJSE_CLASSDIR)/java/lang/RuntimeException.class \
+		-o $@ -v
+
+tests/ThrowableShimTest.class tests/CustomFault.class: tests/ThrowableShimTest.java tests/Native.java
+	$(JAVAC) $(JAVAC8FLAGS) -d tests $^ $(PICOJSE_JAVA_SRCS)
 
 # Legacy native string tier: same program packed WITHOUT the shim, run on a
 # VM built with the (now default-off) C implementations enabled. Keeps the

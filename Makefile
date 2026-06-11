@@ -22,7 +22,7 @@ GC_FRAGMENT_TEST  = $(BUILDDIR)/gc-fragment-test
 GC_EXACT_TEST     = $(BUILDDIR)/gc-exact-test
 
 # Single-class tests
-TESTS_SINGLE = Fib HelloWorld BubbleSort Counter StringTest RomStringTest StringApiSmoke NativeOpsTest StaticInitTest MultiArrayTest StringSwitchTest VmHardeningTest ConstTest ConstStringArrayTest ConstObjectArrayTest ConstNarrowingTest TermSmoke FilesSmoke PicoJseStdSmoke JavaLangSmoke StringConcatSmoke TarSmoke ZipSmoke ZipDeflateSmoke
+TESTS_SINGLE = Fib HelloWorld BubbleSort Counter StringTest RomStringTest StringApiSmoke StringShimTest NativeOpsTest StaticInitTest MultiArrayTest StringSwitchTest VmHardeningTest ConstTest ConstStringArrayTest ConstObjectArrayTest ConstNarrowingTest TermSmoke FilesSmoke PicoJseStdSmoke JavaLangSmoke StringConcatSmoke TarSmoke ZipSmoke ZipDeflateSmoke
 TESTS_MULTI  = Shapes Features InterfaceTest ExceptionTest EnumBasicTest EnumShimTest
 TESTS_PAGER  = BigSwitch BigLUT
 ALL_TESTS    = $(TESTS_SINGLE) $(TESTS_MULTI)
@@ -38,6 +38,7 @@ PICOJSE_JAVA_SRCS = java/lang/Boolean.java \
                     java/lang/Integer.java \
                     java/lang/Math.java \
                     java/lang/Short.java \
+                    java/lang/String.java \
                     java/lang/StringBuilder.java \
                     java/lang/System.java
 
@@ -208,6 +209,16 @@ tests/EnumBasicTest.class tests/EnumBasicTest$$Color.class: tests/EnumBasicTest.
 tests/EnumShimTest.pjvm: tests/EnumShimTest.class tests/EnumShimTest$$Color.class $(BUILDDIR)/picojse.stamp
 	$(PYTHON) pjvmpack.py tests/EnumShimTest.class 'tests/EnumShimTest$$Color.class' \
 		$(PICOJSE_CLASSDIR)/java/lang/Enum.class -o $@ -v
+
+# Java-tier strings: pack the java/lang/String shim; only primitive string
+# natives (length/charAt/equals/construction) are used, so this image runs
+# on builds with PJVM_USE_EXT_STRING_APIS compiled out (e.g. 8085)
+tests/StringShimTest.pjvm: tests/StringShimTest.class $(BUILDDIR)/picojse.stamp
+	$(PYTHON) pjvmpack.py tests/StringShimTest.class \
+		$(PICOJSE_CLASSDIR)/java/lang/String.class -o $@ -v
+
+tests/StringShimTest.class: tests/StringShimTest.java tests/Native.java
+	$(JAVAC) $(JAVAC8FLAGS) -d tests $^
 
 tests/EnumShimTest.class tests/EnumShimTest$$Color.class: tests/EnumShimTest.java tests/Native.java
 	$(JAVAC) $(JAVAC8FLAGS) -d tests $^
@@ -771,6 +782,7 @@ test-sim-smoke:
 	$(MAKE) --no-print-directory test-sim-Fib
 	$(MAKE) --no-print-directory test-sim-RomStringTest
 	$(MAKE) --no-print-directory test-sim-NativeOpsTest
+	$(MAKE) --no-print-directory test-sim-StringShimTest
 
 test-sim-gc-smoke:
 	$(MAKE) --no-print-directory test-sim-Fib \

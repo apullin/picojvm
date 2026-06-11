@@ -113,6 +113,9 @@ STRING_NATIVE_IDS = {
     ("toLowerCase", "()Ljava/lang/String;"): 46,
     ("toCharArray", "()[C"): 47,
     ("contains", "(Ljava/lang/CharSequence;)Z"): 48,
+    # Alias: code compiled against the picoJVM String shim (whose contains
+    # takes String) but packed without it still resolves to the native.
+    ("contains", "(Ljava/lang/String;)Z"): 48,
     ("compareTo", "(Ljava/lang/String;)I"): 49,
     ("indexOf", "(Ljava/lang/String;I)I"): 50,
     ("compareToIgnoreCase", "(Ljava/lang/String;)I"): 51,

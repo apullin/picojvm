@@ -479,6 +479,36 @@ static uint8_t pjvm_string_byte(uint16_t lo, uint16_t hi, uint16_t idx) {
 }
 #endif
 
+/* Primitive-tier string constructors: always compiled, even when the
+ * extended (algorithmic) string APIs are not - pjvmpack rewrites every
+ * new-String allocation to the INIT native family, including allocations
+ * made by the java/lang/String shim's bytecode. */
+static uint16_t pjvm_make_string_from_bytes(uint16_t src, uint16_t off,
+                                            uint16_t len) {
+    PJVM_GC_PROTECT(src, 0);
+    uint16_t a = heap_alloc(g_pjvm, (uint16_t)(PJVM_OBJ_HEADER + len),
+                            PJVM_HEAP_KIND_STRING);
+    w16(a, len); w16((uint16_t)(a + 2), 0);
+    for (uint16_t i = 0; i < len; i++)
+        w8((uint16_t)(a + PJVM_OBJ_HEADER + i),
+           r8((uint16_t)(src + PJVM_OBJ_HEADER + off + i)));
+    PJVM_GC_UNPROTECT(1);
+    return a;
+}
+
+static uint16_t pjvm_make_string_from_chars(uint16_t src, uint16_t off,
+                                            uint16_t len) {
+    PJVM_GC_PROTECT(src, 0);
+    uint16_t a = heap_alloc(g_pjvm, (uint16_t)(PJVM_OBJ_HEADER + len),
+                            PJVM_HEAP_KIND_STRING);
+    w16(a, len); w16((uint16_t)(a + 2), 0);
+    for (uint16_t i = 0; i < len; i++)
+        w8((uint16_t)(a + PJVM_OBJ_HEADER + i),
+           (uint8_t)r16((uint16_t)(src + PJVM_OBJ_HEADER + (off + i) * 2)));
+    PJVM_GC_UNPROTECT(1);
+    return a;
+}
+
 #if PJVM_USE_EXT_STRING_APIS
 static uint8_t pjvm_ascii_lower(uint8_t ch) {
     return (ch >= 'A' && ch <= 'Z') ? (uint8_t)(ch + ('a' - 'A')) : ch;
@@ -561,32 +591,6 @@ static uint8_t pjvm_ascii_upper(uint8_t ch) {
 
 static uint8_t pjvm_ascii_space(uint8_t ch) {
     return ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r' || ch == '\f';
-}
-
-static uint16_t pjvm_make_string_from_bytes(uint16_t src, uint16_t off,
-                                            uint16_t len) {
-    PJVM_GC_PROTECT(src, 0);
-    uint16_t a = heap_alloc(g_pjvm, (uint16_t)(PJVM_OBJ_HEADER + len),
-                            PJVM_HEAP_KIND_STRING);
-    w16(a, len); w16((uint16_t)(a + 2), 0);
-    for (uint16_t i = 0; i < len; i++)
-        w8((uint16_t)(a + PJVM_OBJ_HEADER + i),
-           r8((uint16_t)(src + PJVM_OBJ_HEADER + off + i)));
-    PJVM_GC_UNPROTECT(1);
-    return a;
-}
-
-static uint16_t pjvm_make_string_from_chars(uint16_t src, uint16_t off,
-                                            uint16_t len) {
-    PJVM_GC_PROTECT(src, 0);
-    uint16_t a = heap_alloc(g_pjvm, (uint16_t)(PJVM_OBJ_HEADER + len),
-                            PJVM_HEAP_KIND_STRING);
-    w16(a, len); w16((uint16_t)(a + 2), 0);
-    for (uint16_t i = 0; i < len; i++)
-        w8((uint16_t)(a + PJVM_OBJ_HEADER + i),
-           (uint8_t)r16((uint16_t)(src + PJVM_OBJ_HEADER + (off + i) * 2)));
-    PJVM_GC_UNPROTECT(1);
-    return a;
 }
 
 static uint16_t pjvm_make_case_string(uint16_t lo, uint16_t hi, uint8_t upper) {
@@ -1242,6 +1246,11 @@ static void pjvm_inv(pjvm_method_id_t mi) {
             SPOP_U16(alo);
             spush(pjvm_make_single_char_string((uint8_t)alo), 0);
             break;
+#endif
+        /* String constructors are primitive-tier: pjvmpack rewrites every
+         * new-String allocation to these, including allocations made by the
+         * java/lang/String shim's bytecode, so they stay available when the
+         * extended (algorithmic) APIs are compiled out. */
         case NATIVE_STR_INIT_CHARS: {
             uint16_t src, src_hi;
             SPOP32(src, src_hi);
@@ -1284,7 +1293,6 @@ static void pjvm_inv(pjvm_method_id_t mi) {
         case NATIVE_STR_INIT_EMPTY:
             spush(pjvm_make_string(g_pjvm, (const uint8_t *)0, 0), 0);
             break;
-#endif
         case NATIVE_ARRAYCOPY:
 #if PJVM_USE_ASM_ARRAYCOPY
             pjvm_native_arraycopy();

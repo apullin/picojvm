@@ -295,6 +295,76 @@ def _synthesize_enum_class(classes, verbose=False):
         print("  Synthesized system class java/lang/Enum")
 
 
+def _strip_unused_string_shim_methods(classes, verbose=False):
+    """Drop java/lang/String shim methods nothing in the image references.
+
+    The shim carries the full String API but most programs use a handful of
+    methods. String is final and its methods dispatch directly (string refs
+    carry no class header), so any method without a direct bytecode
+    reference is dead weight. Constructor bodies are javac placeholders -
+    call sites are rewritten to the native init family - and always drop.
+    """
+    scls = classes.get("java/lang/String")
+    if scls is None:
+        return
+
+    def string_method_refs(cls, code_data):
+        cr = ClassReader(code_data)
+        cr.skip_u2(2)
+        code_length = cr.u4()
+        bytecode = cr.read(code_length)
+        refs = set()
+        for _off, _w, _op, cp_idx in bytecode_cp_operands(bytecode):
+            if cp_idx <= 0 or cp_idx >= len(cls.cp):
+                continue
+            entry = cls.cp[cp_idx]
+            if entry is None or entry[0] != "Methodref":
+                continue
+            rc, rm, rd = resolve_method_name(cls.cp, cp_idx)
+            if rc == "java/lang/String":
+                refs.add((rm, rd))
+        return refs
+
+    shim_refs = {}
+    keep = set()
+    for cls_name, cls in classes.items():
+        for _m_access, m_name_idx, m_desc_idx, code_data in cls.methods_raw:
+            if code_data is None:
+                continue
+            mkey = (cls.cp[m_name_idx][1], cls.cp[m_desc_idx][1])
+            refs = string_method_refs(cls, code_data)
+            if cls_name == "java/lang/String":
+                shim_refs[mkey] = refs
+            else:
+                keep |= refs
+
+    # Shim methods calling other shim methods: keep transitively.
+    changed = True
+    while changed:
+        changed = False
+        for k in list(keep):
+            for r in shim_refs.get(k, ()):
+                if r not in keep:
+                    keep.add(r)
+                    changed = True
+
+    kept_raw = []
+    dropped = 0
+    for m in scls.methods_raw:
+        _m_access, m_name_idx, m_desc_idx, code_data = m
+        m_name = scls.cp[m_name_idx][1]
+        m_desc = scls.cp[m_desc_idx][1]
+        if m_name == "<init>" or (
+                code_data is not None and m_name != "<clinit>" and
+                (m_name, m_desc) not in keep):
+            dropped += 1
+            continue
+        kept_raw.append(m)
+    scls.methods_raw = kept_raw
+    if verbose and dropped:
+        print(f"  String shim: stripped {dropped} unused/placeholder methods")
+
+
 def _synthesize_exception_classes(classes, class_order, verbose=False):
     """Append minimal synthetic exception classes to classes/class_order."""
     exc_classes_needed = _with_exception_parents(
@@ -1098,6 +1168,8 @@ def pack_pjvm(class_data_list, verbose=False, v2=False, pin_hints=None,
 
     method_table = []
 
+    _strip_unused_string_shim_methods(classes, verbose=verbose)
+
     def append_native_method(method_name, descriptor, arg_count, native_id,
                              class_id=PJVM_NO_CLASS):
         native_idx = len(method_table)
@@ -1183,9 +1255,12 @@ def pack_pjvm(class_data_list, verbose=False, v2=False, pin_hints=None,
             if m_name == "<clinit>":
                 cls.clinit_mi = global_idx
 
-            # Determine vtable slot
+            # Determine vtable slot. java/lang/String never gets one: string
+            # receivers are tagged refs without a class header, so virtual
+            # dispatch can't read them - and String is final, so dispatching
+            # its methods directly is always correct.
             vtable_slot = PJVM_NO_VTABLE
-            if not is_static and m_name != "<init>":
+            if not is_static and m_name != "<init>" and name != "java/lang/String":
                 key = (m_name, m_desc)
                 if key in cls.method_vtable_slots:
                     # Override parent method
@@ -1358,6 +1433,15 @@ def pack_pjvm(class_data_list, verbose=False, v2=False, pin_hints=None,
 
             elif ref_class == "java/lang/String":
                 str_key = (ref_method, ref_desc)
+                str_cls = classes.get("java/lang/String")
+                if (str_cls is not None and ref_method != "<init>" and
+                        str_key in str_cls.global_methods):
+                    # A packed java/lang/String shim provides this method as
+                    # bytecode; keep it out of native_cache so the class-walk
+                    # resolution below finds the bytecode. Constructors are
+                    # always native: new-String allocation sequences are
+                    # rewritten to the native init family.
+                    continue
                 if str_key in STRING_STATIC_NATIVE_IDS:
                     nm_idx = append_native_method(
                         ref_method, ref_desc, count_args(ref_desc),

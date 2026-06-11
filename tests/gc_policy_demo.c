@@ -20,10 +20,13 @@ void pjvm_platform_trap(uint8_t op, uint16_t pc) {
     (void)pc;
 }
 
+/* Capacity = 25600 bytes = 100 pages: the watermark threshold is tracked
+ * at 256-byte granularity, so the demo heap is the old 100-byte layout
+ * scaled by one page. The 75% watermark lands at exactly 75 pages. */
 static void gc_demo_init(PJVMCtx *j, uint16_t used) {
     memset(j, 0, sizeof(*j));
     j->heap_base = 1;
-    j->heap_limit = 101; /* capacity = 100 bytes */
+    j->heap_limit = 25601;
     j->heap_used = used;
     pjvm_gc_init(j);
 }
@@ -57,11 +60,11 @@ int main(void) {
     expected = (PJVM_GC_TRIGGERS & PJVM_GC_TRIG_ALLOC_FAIL) ? 1 : 0;
     gc_demo_expect("alloc_fail", j.gc_count, expected);
 
-    gc_demo_init(&j, 73);
+    gc_demo_init(&j, 19198);
     pjvm_gc_maybe(&j, PJVM_GC_TRIG_WATERMARK, 1);
     gc_demo_expect("watermark_below", j.gc_count, 0);
 
-    gc_demo_init(&j, 74);
+    gc_demo_init(&j, 19199);
     pjvm_gc_maybe(&j, PJVM_GC_TRIG_WATERMARK, 1);
     expected = (PJVM_GC_TRIGGERS & PJVM_GC_TRIG_WATERMARK) ? 1 : 0;
     gc_demo_expect("watermark_at", j.gc_count, expected);
@@ -71,7 +74,7 @@ int main(void) {
     expected = (PJVM_GC_TRIGGERS & PJVM_GC_TRIG_RETURN) ? 1 : 0;
     gc_demo_expect("return_trigger", j.gc_count, expected);
 
-    gc_demo_init(&j, 90);
+    gc_demo_init(&j, 23040);
     attempts = 0;
     while (attempts < 256 && j.gc_count == 0) {
         pjvm_gc_maybe(&j, PJVM_GC_TRIG_RANDOM_ABOVE_WATERMARK, 0);

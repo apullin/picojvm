@@ -36,21 +36,23 @@ void pjvm_gc_protect(uint16_t lo, uint16_t hi) {
 }
 
 #if PJVM_GC_TRIGGERS & (PJVM_GC_TRIG_WATERMARK | PJVM_GC_TRIG_RANDOM_ABOVE_WATERMARK)
-/* used*100 >= cap*PCT, precomputed at init as a byte threshold: the naive
- * form costs two 32-bit multiplies (libcall on 8085) per allocation. */
-static uint16_t pjvm_gc_watermark_thr;
+/* used*100 >= cap*PCT, precomputed at init as a 256-byte-page threshold:
+ * the naive form costs two 32-bit multiplies (libcall on 8085) per
+ * allocation, and pacing does not need byte granularity. */
+static uint8_t pjvm_gc_watermark_pages;
 
 static uint8_t pjvm_gc_above_watermark(PJVMCtx *j, uint16_t alloc_size) {
-    return pjvm_gc_watermark_thr != 0 &&
-           (uint32_t)j->heap_used + alloc_size >= pjvm_gc_watermark_thr;
+    return pjvm_gc_watermark_pages != 0 &&
+           (((uint32_t)j->heap_used + alloc_size) >> 8) >=
+               pjvm_gc_watermark_pages;
 }
 
 static void pjvm_gc_watermark_init(const PJVMCtx *j) {
     uint32_t limit = j->heap_limit ? (uint32_t)j->heap_limit : 65536u;
     uint32_t base = j->heap_base;
     uint32_t cap = limit > base ? limit - base : 0;
-    pjvm_gc_watermark_thr =
-        (uint16_t)((cap * PJVM_GC_WATERMARK_PCT + 99u) / 100u);
+    uint32_t thr = (cap * PJVM_GC_WATERMARK_PCT + 99u) / 100u;
+    pjvm_gc_watermark_pages = (uint8_t)((thr + 255u) >> 8);
 }
 #endif
 #endif

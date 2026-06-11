@@ -775,7 +775,7 @@ $(BUILDDIR)/crt0.o: $(CRT) | $(BUILDDIR)
 	$(CLANG) --target=i8085-unknown-elf -ffreestanding -fno-builtin -$(TARGET_OPT) -c $< -o $@
 
 $(BUILDDIR)/pjvm.o: src/pjvm.c $(PJVM_HEADERS) | $(BUILDDIR)
-	$(CLANG) --target=i8085-unknown-elf -ffreestanding -fno-builtin -$(TARGET_OPT) $(SIM_CAPS) $(TARGET_VM_OPTS) $(TARGET_ASM_HELPERS_DEF) -c $< -o $@
+	$(CLANG) --target=i8085-unknown-elf -ffreestanding -fno-builtin -ffunction-sections -$(TARGET_OPT) $(SIM_CAPS) $(TARGET_VM_OPTS) $(TARGET_ASM_HELPERS_DEF) -c $< -o $@
 
 $(BUILDDIR)/pjvm_heap.o: src/pjvm_heap.c $(PJVM_HEADERS) | $(BUILDDIR)
 	$(CLANG) --target=i8085-unknown-elf -ffreestanding -fno-builtin -ffunction-sections -$(TARGET_OPT) $(SIM_CAPS) $(TARGET_VM_OPTS) -c $< -o $@
@@ -784,7 +784,7 @@ $(BUILDDIR)/pjvm_gc.o: src/pjvm_gc.c $(PJVM_HEADERS) | $(BUILDDIR)
 	$(CLANG) --target=i8085-unknown-elf -ffreestanding -fno-builtin -ffunction-sections -$(TARGET_OPT) $(SIM_CAPS) $(TARGET_VM_OPTS) -c $< -o $@
 
 $(BUILDDIR)/i8085_sim.o: platform/i8085_sim.c $(PJVM_HEADERS) | $(BUILDDIR)
-	$(CLANG) --target=i8085-unknown-elf -ffreestanding -fno-builtin -$(TARGET_OPT) $(SIM_CAPS) $(TARGET_VM_OPTS) $(TARGET_ASM_HELPERS_DEF) -c $< -o $@
+	$(CLANG) --target=i8085-unknown-elf -ffreestanding -fno-builtin -ffunction-sections -$(TARGET_OPT) $(SIM_CAPS) $(TARGET_VM_OPTS) $(TARGET_ASM_HELPERS_DEF) -c $< -o $@
 
 $(BUILDDIR)/i8085_helpers.o: platform/i8085_helpers.S src/pjvm_opts.h | $(BUILDDIR)
 	$(CLANG) --target=i8085-unknown-elf $(TARGET_VM_OPTS) -DPJVM_ASM_HELPERS -c $< -o $@

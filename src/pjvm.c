@@ -1994,7 +1994,11 @@ static void pjvm_exec(void) {
 #ifdef PJVM_DEBUG_TOOLS
     uint32_t steps = 0;
 #endif
+#if PJVM_FAST_HALT
+    while ((uint8_t)(g_pjvm->pc >> 24) != 0xFFu) {
+#else
     while (g_pjvm->pc != PJVM_PC_HALT) {
+#endif
 #ifdef PJVM_DEBUG_TOOLS
         if (pjvm_step_limit && ++steps > pjvm_step_limit) {
             pjvm_platform_trap(PJVM_TRAP_STEP_LIMIT, g_pjvm->pc);

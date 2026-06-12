@@ -168,6 +168,15 @@
 #error "PJVM_MT_IN_IMAGE reads metadata per access; unusable with PJVM_PAGED"
 #endif
 
+/* Halt detection in the interpreter loop. The fast variant compares one
+ * byte (any pc >= 0xFF000000 reads as halt) instead of all four, on
+ * every executed bytecode. Only an image whose bytecode region reaches
+ * within 16MB of 4GB could collide with the sentinel - far beyond the
+ * format - but the exact compare remains available. */
+#ifndef PJVM_FAST_HALT
+#define PJVM_FAST_HALT 1
+#endif
+
 /* Platform I/O native groups: deployment knobs, not feature cuts. A
  * cartridge-style target without disk drops the file natives; a headless
  * target drops the terminal group. Calls into a compiled-out group trap

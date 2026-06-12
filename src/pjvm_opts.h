@@ -156,6 +156,17 @@
 #define PJVM_GC_BITMAP_SPAN 0x10000
 #endif
 
+/* Platform I/O native groups: deployment knobs, not feature cuts. A
+ * cartridge-style target without disk drops the file natives; a headless
+ * target drops the terminal group. Calls into a compiled-out group trap
+ * BAD_NATIVE loudly. */
+#ifndef PJVM_USE_FILE_NATIVES
+#define PJVM_USE_FILE_NATIVES 1
+#endif
+#ifndef PJVM_USE_TERM_NATIVES
+#define PJVM_USE_TERM_NATIVES 1
+#endif
+
 /* Enum natives back javac enums when no java/lang/Enum class is packed.
  * Images packed with the java/lang/Enum.java shim run enums as ordinary
  * bytecode and never call these, so a build committed to shim-packed

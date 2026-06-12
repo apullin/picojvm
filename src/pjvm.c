@@ -1385,6 +1385,7 @@ static void pjvm_inv(pjvm_method_id_t mi) {
         }
 #endif
             break;
+#if PJVM_USE_FILE_NATIVES
         case NATIVE_FILE_OPEN: {
             /* fileOpen(byte[] name, int nameLen, int mode) → int status */
             uint16_t mode, nameLen, nameRef;
@@ -1459,6 +1460,8 @@ static void pjvm_inv(pjvm_method_id_t mi) {
             pjvm_push32(result);
             break;
         }
+#endif /* PJVM_USE_FILE_NATIVES */
+#if PJVM_USE_TERM_NATIVES
         case NATIVE_TERM_INFO: {
             uint16_t code;
             SPOP_U16(code);
@@ -1471,6 +1474,7 @@ static void pjvm_inv(pjvm_method_id_t mi) {
         case NATIVE_TICKS:
             pjvm_push32(pjvm_platform_ticks());
             break;
+#endif /* PJVM_USE_TERM_NATIVES */
 #if PJVM_USE_ENUM_NATIVES
         case NATIVE_ENUM_INIT: {
             uint16_t obj, obj_hi, name_lo, name_hi, ord_lo, ord_hi;

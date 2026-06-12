@@ -112,6 +112,41 @@ static uint8_t pjvm_gc_mark_payload(PJVMCtx *j, uint16_t lo, uint16_t hi) {
     return 1;
 }
 
+#if PJVM_GC_ENABLED
+/* Stride index for the conservative walk: block address at the start of
+ * each 1/Nth of the heap, rebuilt once per collection (the chain cannot
+ * change mid-collect). Validation of an ambiguous root walks at most one
+ * stride instead of the whole chain. Fixed 2*N bytes regardless of heap
+ * size. */
+#ifndef PJVM_GC_STRIDE_N
+#define PJVM_GC_STRIDE_N 32
+#endif
+static uint16_t pjvm_gc_stride[PJVM_GC_STRIDE_N];
+static uint8_t pjvm_gc_stride_shift;
+
+static void pjvm_gc_stride_build(PJVMCtx *j) {
+    uint32_t end = pjvm_gc_heap_limit_full(j);
+    uint32_t cap = end - j->heap_base;
+    uint32_t blk32 = j->heap_base;
+    uint8_t shift = 4;
+    uint8_t n = 0;
+
+    while ((cap >> shift) > PJVM_GC_STRIDE_N) shift++;
+    pjvm_gc_stride_shift = shift;
+
+    while (blk32 < end && n < PJVM_GC_STRIDE_N) {
+        uint16_t size = pjvm_gc_blk_size((uint16_t)blk32);
+        if (size < PJVM_HEAP_FREE_HDR || blk32 + size > end) break;
+        while (n < PJVM_GC_STRIDE_N &&
+               (uint32_t)j->heap_base + ((uint32_t)n << shift) < blk32 + size)
+            pjvm_gc_stride[n++] = (uint16_t)blk32;
+        blk32 += size;
+    }
+    while (n < PJVM_GC_STRIDE_N)
+        pjvm_gc_stride[n++] = (uint16_t)j->heap_base;
+}
+#endif
+
 /* Conservative marking for ambiguous words (stack/locals/temp roots and
  * objects without ref bitmaps): an int can alias a heap address, so the
  * candidate only counts if the block walk proves it is a payload start. */
@@ -125,9 +160,20 @@ static uint8_t pjvm_gc_mark_ref(PJVMCtx *j, uint16_t lo, uint16_t hi) {
     if (lo < (uint16_t)(j->heap_base + PJVM_HEAP_ALLOC_HDR) || (uint32_t)lo >= end)
         return 0;
 
-    for (blk32 = j->heap_base; blk32 < end; ) {
+#if PJVM_GC_ENABLED
+    {
+        uint32_t bkt = ((uint32_t)lo - j->heap_base) >> pjvm_gc_stride_shift;
+        if (bkt >= PJVM_GC_STRIDE_N) bkt = PJVM_GC_STRIDE_N - 1;
+        blk32 = pjvm_gc_stride[bkt];
+    }
+#else
+    blk32 = j->heap_base;
+#endif
+    for (; blk32 < end; ) {
         uint16_t blk = (uint16_t)blk32;
-        uint16_t size = pjvm_gc_blk_size(blk);
+        uint16_t size;
+        if (blk32 > lo) return 0; /* blocks ascend; we passed it */
+        size = pjvm_gc_blk_size(blk);
         if (size < PJVM_HEAP_FREE_HDR || blk32 + size > end) return 0;
         if (pjvm_gc_blk_is_allocated(blk) &&
             (uint16_t)(blk + PJVM_HEAP_ALLOC_HDR) == lo)
@@ -330,6 +376,9 @@ uint8_t pjvm_gc_collect(PJVMCtx *j, uint8_t reason) {
     (void)reason;
 
 #if PJVM_HEAP_MODE == PJVM_HEAP_FREELIST
+#if PJVM_GC_ENABLED
+    pjvm_gc_stride_build(j);
+#endif
     pjvm_gc_mark_roots(j);
     pjvm_gc_trace(j);
     reclaimed = pjvm_gc_sweep(j);

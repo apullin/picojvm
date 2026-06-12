@@ -9,8 +9,8 @@
 
 #include "pjvm.h"
 
-static uint32_t pjvm_heap_limit_value(const PJVMCtx *j) {
-    return j->heap_limit ? (uint32_t)j->heap_limit : 65536u;
+static uint32_t pjvm_heap_limit_value(void) {
+    return g_pjvm->heap_limit ? (uint32_t)g_pjvm->heap_limit : 65536u;
 }
 
 static void pjvm_heap_zero(uint16_t a, uint16_t size) {
@@ -21,13 +21,13 @@ static void pjvm_heap_zero(uint16_t a, uint16_t size) {
 /* Exact allocation bitmap: one bit per 2-byte-aligned payload start. */
 uint8_t pjvm_gc_alloc_bm[PJVM_GC_BITMAP_SPAN >> 4];
 
-void pjvm_gc_bm_set(const PJVMCtx *j, uint16_t payload) {
-    uint16_t bit = (uint16_t)((uint16_t)(payload - j->heap_base) >> 1);
+void pjvm_gc_bm_set(uint16_t payload) {
+    uint16_t bit = (uint16_t)((uint16_t)(payload - g_pjvm->heap_base) >> 1);
     pjvm_gc_alloc_bm[bit >> 3] |= (uint8_t)(1u << (bit & 7u));
 }
 
-void pjvm_gc_bm_clear(const PJVMCtx *j, uint16_t payload) {
-    uint16_t bit = (uint16_t)((uint16_t)(payload - j->heap_base) >> 1);
+void pjvm_gc_bm_clear(uint16_t payload) {
+    uint16_t bit = (uint16_t)((uint16_t)(payload - g_pjvm->heap_base) >> 1);
     pjvm_gc_alloc_bm[bit >> 3] &= (uint8_t)~(1u << (bit & 7u));
 }
 #endif
@@ -61,9 +61,9 @@ static void pjvm_blk_set_next(uint16_t blk, uint16_t next) {
     w16((uint16_t)(blk + 2), next);
 }
 
-static void pjvm_heap_insert_free(PJVMCtx *j, uint16_t blk) {
+static void pjvm_heap_insert_free(uint16_t blk) {
     uint16_t prev = 0;
-    uint16_t cur = j->heap_free_head;
+    uint16_t cur = g_pjvm->heap_free_head;
 
     while (cur != 0 && cur < blk) {
         prev = cur;
@@ -72,7 +72,7 @@ static void pjvm_heap_insert_free(PJVMCtx *j, uint16_t blk) {
 
     pjvm_blk_set_next(blk, cur);
     if (prev != 0) pjvm_blk_set_next(prev, blk);
-    else j->heap_free_head = blk;
+    else g_pjvm->heap_free_head = blk;
 
     if (cur != 0 && (uint16_t)(blk + pjvm_blk_size(blk)) == cur) {
         pjvm_blk_set_size(blk, (uint16_t)(pjvm_blk_size(blk) + pjvm_blk_size(cur)), 0);
@@ -87,20 +87,21 @@ static void pjvm_heap_insert_free(PJVMCtx *j, uint16_t blk) {
 #endif
 
 void pjvm_heap_init(PJVMCtx *j, uint16_t start, uint16_t limit) {
-    j->heap_limit = limit;
-    j->heap_free_head = 0;
-    j->heap_used = 0;
+    g_pjvm = j;
+    g_pjvm->heap_limit = limit;
+    g_pjvm->heap_free_head = 0;
+    g_pjvm->heap_used = 0;
 
 #if PJVM_HEAP_MODE == PJVM_HEAP_FREELIST
     {
         uint16_t base = pjvm_heap_align2(start);
-        uint32_t end = pjvm_heap_limit_value(j);
+        uint32_t end = pjvm_heap_limit_value();
         uint32_t span = end > base ? end - base : 0;
         uint16_t total = (uint16_t)(span & ~1u);
 
-        j->heap_ptr = base;
-        j->heap_base = base;
-        pjvm_gc_init(j);
+        g_pjvm->heap_ptr = base;
+        g_pjvm->heap_base = base;
+        pjvm_gc_init();
 
 #if PJVM_GC_ALLOC_BITMAP
         if (span > PJVM_GC_BITMAP_SPAN) {
@@ -112,69 +113,68 @@ void pjvm_heap_init(PJVMCtx *j, uint16_t start, uint16_t limit) {
 #endif
 
         if (total >= PJVM_HEAP_FREE_HDR) {
-            j->heap_free_head = base;
+            g_pjvm->heap_free_head = base;
             pjvm_blk_set_size(base, total, 0);
             pjvm_blk_set_next(base, 0);
         }
     }
 #else
-    j->heap_ptr = start;
-    j->heap_base = start;
-    pjvm_gc_init(j);
+    g_pjvm->heap_ptr = start;
+    g_pjvm->heap_base = start;
+    pjvm_gc_init();
 #endif
 }
 
 #if PJVM_HEAP_MODE == PJVM_HEAP_BUMP
-static uint16_t pjvm_heap_alloc_bump(PJVMCtx *j, uint16_t size, uint8_t kind) {
+static uint16_t pjvm_heap_alloc_bump(uint16_t size, uint8_t kind) {
     (void)kind;
 #if PJVM_GC_ENABLED
-    pjvm_gc_maybe(j,
+    pjvm_gc_maybe(
                   (uint8_t)(PJVM_GC_TRIG_WATERMARK | PJVM_GC_TRIG_RANDOM_ABOVE_WATERMARK),
                   size);
 #endif
 
     {
-        uint32_t end = (uint32_t)j->heap_ptr + size;
-        if (end > pjvm_heap_limit_value(j)) {
+        uint32_t end = (uint32_t)g_pjvm->heap_ptr + size;
+        if (end > pjvm_heap_limit_value()) {
 #if PJVM_GC_ENABLED
-            pjvm_gc_maybe(j, PJVM_GC_TRIG_ALLOC_FAIL, size);
-            end = (uint32_t)j->heap_ptr + size;
-            if (end > pjvm_heap_limit_value(j)) return 0;
+            pjvm_gc_maybe(PJVM_GC_TRIG_ALLOC_FAIL, size);
+            end = (uint32_t)g_pjvm->heap_ptr + size;
+            if (end > pjvm_heap_limit_value()) return 0;
 #else
             return 0;
 #endif
         }
 
         {
-            uint16_t a = j->heap_ptr;
-            j->heap_ptr = (uint16_t)end;
-            j->heap_used = (uint16_t)(j->heap_ptr - j->heap_base);
+            uint16_t a = g_pjvm->heap_ptr;
+            g_pjvm->heap_ptr = (uint16_t)end;
+            g_pjvm->heap_used = (uint16_t)(g_pjvm->heap_ptr - g_pjvm->heap_base);
             pjvm_heap_zero(a, size);
             return a;
         }
     }
 }
 
-static void pjvm_heap_free_bump(PJVMCtx *j, uint16_t a) {
-    (void)j;
+static void pjvm_heap_free_bump(uint16_t a) {
     (void)a;
 }
 #endif
 
 #if PJVM_HEAP_MODE == PJVM_HEAP_FREELIST
-static uint16_t pjvm_heap_alloc_freelist(PJVMCtx *j, uint16_t size, uint8_t kind) {
+static uint16_t pjvm_heap_alloc_freelist(uint16_t size, uint8_t kind) {
     uint16_t want = pjvm_heap_align2((uint16_t)(size + PJVM_HEAP_ALLOC_HDR));
 
 #if PJVM_GC_ENABLED
     uint8_t tried_gc = 0;
-    pjvm_gc_maybe(j,
+    pjvm_gc_maybe(
                   (uint8_t)(PJVM_GC_TRIG_WATERMARK | PJVM_GC_TRIG_RANDOM_ABOVE_WATERMARK),
                   size);
 #endif
 
     for (;;) {
         uint16_t prev = 0;
-        uint16_t cur = j->heap_free_head;
+        uint16_t cur = g_pjvm->heap_free_head;
 
         while (cur != 0) {
             uint16_t blk_size = pjvm_blk_size(cur);
@@ -187,21 +187,21 @@ static uint16_t pjvm_heap_alloc_freelist(PJVMCtx *j, uint16_t size, uint8_t kind
                     pjvm_blk_set_size(new_free, remain, 0);
                     pjvm_blk_set_next(new_free, next);
                     if (prev != 0) pjvm_blk_set_next(prev, new_free);
-                    else j->heap_free_head = new_free;
+                    else g_pjvm->heap_free_head = new_free;
                     pjvm_blk_set_size(cur, want, 1);
                 } else {
                     if (prev != 0) pjvm_blk_set_next(prev, next);
-                    else j->heap_free_head = next;
+                    else g_pjvm->heap_free_head = next;
                     pjvm_blk_set_size(cur, blk_size, 1);
                     want = blk_size;
                 }
 
                 pjvm_blk_set_meta(cur, (uint16_t)(kind & PJVM_HEAP_META_KIND_MASK));
-                j->heap_used = (uint16_t)(j->heap_used + want);
+                g_pjvm->heap_used = (uint16_t)(g_pjvm->heap_used + want);
                 {
                     uint16_t payload = (uint16_t)(cur + PJVM_HEAP_ALLOC_HDR);
 #if PJVM_GC_ALLOC_BITMAP
-                    pjvm_gc_bm_set(j, payload);
+                    pjvm_gc_bm_set(payload);
 #endif
                     pjvm_heap_zero(payload, (uint16_t)(want - PJVM_HEAP_ALLOC_HDR));
                     return payload;
@@ -214,7 +214,7 @@ static uint16_t pjvm_heap_alloc_freelist(PJVMCtx *j, uint16_t size, uint8_t kind
 #if PJVM_GC_ENABLED
         if (!tried_gc) {
             tried_gc = 1;
-            pjvm_gc_maybe(j, PJVM_GC_TRIG_ALLOC_FAIL, size);
+            pjvm_gc_maybe(PJVM_GC_TRIG_ALLOC_FAIL, size);
             continue;
         }
 #endif
@@ -222,11 +222,11 @@ static uint16_t pjvm_heap_alloc_freelist(PJVMCtx *j, uint16_t size, uint8_t kind
     }
 }
 
-static void pjvm_heap_free_freelist(PJVMCtx *j, uint16_t a) {
+static void pjvm_heap_free_freelist(uint16_t a) {
     uint16_t blk;
     uint16_t size;
 
-    if (a == 0 || a < (uint16_t)(j->heap_base + PJVM_HEAP_ALLOC_HDR)) return;
+    if (a == 0 || a < (uint16_t)(g_pjvm->heap_base + PJVM_HEAP_ALLOC_HDR)) return;
 
     blk = (uint16_t)(a - PJVM_HEAP_ALLOC_HDR);
     if (!pjvm_blk_is_allocated(blk)) return;
@@ -236,27 +236,27 @@ static void pjvm_heap_free_freelist(PJVMCtx *j, uint16_t a) {
 
     pjvm_blk_set_size(blk, size, 0);
     pjvm_blk_set_next(blk, 0);
-    if (j->heap_used >= size) j->heap_used = (uint16_t)(j->heap_used - size);
-    else j->heap_used = 0;
+    if (g_pjvm->heap_used >= size) g_pjvm->heap_used = (uint16_t)(g_pjvm->heap_used - size);
+    else g_pjvm->heap_used = 0;
 #if PJVM_GC_ALLOC_BITMAP
-    pjvm_gc_bm_clear(j, a);
+    pjvm_gc_bm_clear(a);
 #endif
-    pjvm_heap_insert_free(j, blk);
+    pjvm_heap_insert_free(blk);
 }
 #endif
 
-uint16_t pjvm_heap_alloc(PJVMCtx *j, uint16_t size, uint8_t kind) {
+uint16_t pjvm_heap_alloc(uint16_t size, uint8_t kind) {
 #if PJVM_HEAP_MODE == PJVM_HEAP_FREELIST
-    return pjvm_heap_alloc_freelist(j, size, kind);
+    return pjvm_heap_alloc_freelist(size, kind);
 #else
-    return pjvm_heap_alloc_bump(j, size, kind);
+    return pjvm_heap_alloc_bump(size, kind);
 #endif
 }
 
-void pjvm_heap_free(PJVMCtx *j, uint16_t a) {
+void pjvm_heap_free(uint16_t a) {
 #if PJVM_HEAP_MODE == PJVM_HEAP_FREELIST
-    pjvm_heap_free_freelist(j, a);
+    pjvm_heap_free_freelist(a);
 #else
-    pjvm_heap_free_bump(j, a);
+    pjvm_heap_free_bump(a);
 #endif
 }

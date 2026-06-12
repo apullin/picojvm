@@ -33,9 +33,9 @@ extern uint8_t _end[];
 
 #include "../src/pjvm.h"
 
-uint16_t heap_alloc(PJVMCtx *j, uint16_t size, uint8_t kind) {
-    uint16_t a = pjvm_heap_alloc(j, size, kind);
-    if (a == 0) pjvm_platform_trap(0xFE, 0);
+uint16_t heap_alloc(uint16_t size, uint8_t kind) {
+    uint16_t a = pjvm_heap_alloc(size, kind);
+    if (a == 0) pjvm_platform_trap(0xFE, size);
     return a;
 }
 

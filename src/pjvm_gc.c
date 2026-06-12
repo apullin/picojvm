@@ -16,11 +16,11 @@
 
 #if PJVM_GC_ENABLED
 #if PJVM_GC_TRIGGERS & PJVM_GC_TRIG_RANDOM_ABOVE_WATERMARK
-static uint16_t pjvm_gc_next_random(PJVMCtx *j) {
-    uint16_t lfsr = j->gc_lfsr ? j->gc_lfsr : 0xACE1u;
+static uint16_t pjvm_gc_next_random(void) {
+    uint16_t lfsr = g_pjvm->gc_lfsr ? g_pjvm->gc_lfsr : 0xACE1u;
     uint16_t bit = (uint16_t)(((lfsr >> 0) ^ (lfsr >> 2) ^ (lfsr >> 3) ^ (lfsr >> 5)) & 1u);
     lfsr = (uint16_t)((lfsr >> 1) | (bit << 15));
-    j->gc_lfsr = lfsr;
+    g_pjvm->gc_lfsr = lfsr;
     return lfsr;
 }
 #endif
@@ -45,15 +45,15 @@ void pjvm_gc_protect(uint16_t lo, uint16_t hi) {
  * allocation, and pacing does not need byte granularity. */
 static uint8_t pjvm_gc_watermark_pages;
 
-static uint8_t pjvm_gc_above_watermark(PJVMCtx *j, uint16_t alloc_size) {
+static uint8_t pjvm_gc_above_watermark(uint16_t alloc_size) {
     return pjvm_gc_watermark_pages != 0 &&
-           (((uint32_t)j->heap_used + alloc_size) >> 8) >=
+           (((uint32_t)g_pjvm->heap_used + alloc_size) >> 8) >=
                pjvm_gc_watermark_pages;
 }
 
-static void pjvm_gc_watermark_init(const PJVMCtx *j) {
-    uint32_t limit = j->heap_limit ? (uint32_t)j->heap_limit : 65536u;
-    uint32_t base = j->heap_base;
+static void pjvm_gc_watermark_init(void) {
+    uint32_t limit = g_pjvm->heap_limit ? (uint32_t)g_pjvm->heap_limit : 65536u;
+    uint32_t base = g_pjvm->heap_base;
     uint32_t cap = limit > base ? limit - base : 0;
     uint32_t thr = (cap * PJVM_GC_WATERMARK_PCT + 99u) / 100u;
     pjvm_gc_watermark_pages = (uint8_t)((thr + 255u) >> 8);
@@ -86,8 +86,8 @@ static void pjvm_gc_blk_set_next(uint16_t blk, uint16_t next) {
     w16((uint16_t)(blk + 2), next);
 }
 
-static uint32_t pjvm_gc_heap_limit_full(const PJVMCtx *j) {
-    return j->heap_limit ? (uint32_t)j->heap_limit : 65536u;
+static uint32_t pjvm_gc_heap_limit_full(void) {
+    return g_pjvm->heap_limit ? (uint32_t)g_pjvm->heap_limit : 65536u;
 }
 
 /* Trusted marking: `lo` came from a typed reference slot (ref-bitmapped
@@ -95,13 +95,13 @@ static uint32_t pjvm_gc_heap_limit_full(const PJVMCtx *j) {
  * payload pointer by construction and the block header sits at lo-4. The
  * range and ALLOC-flag checks stay (they are cheap and keep the collector
  * itself memory-safe against a corrupted slot); only the search goes. */
-static GNI uint8_t pjvm_gc_mark_payload(PJVMCtx *j, uint16_t lo, uint16_t hi) {
+static GNI uint8_t pjvm_gc_mark_payload(uint16_t lo, uint16_t hi) {
     uint16_t blk, meta;
     uint8_t kind;
 
     if (hi != 0 || lo == 0) return 0;
-    if (lo < (uint16_t)(j->heap_base + PJVM_HEAP_ALLOC_HDR) ||
-        (uint32_t)lo >= pjvm_gc_heap_limit_full(j))
+    if (lo < (uint16_t)(g_pjvm->heap_base + PJVM_HEAP_ALLOC_HDR) ||
+        (uint32_t)lo >= pjvm_gc_heap_limit_full())
         return 0;
 
     blk = (uint16_t)(lo - PJVM_HEAP_ALLOC_HDR);
@@ -120,7 +120,7 @@ static GNI uint8_t pjvm_gc_mark_payload(PJVMCtx *j, uint16_t lo, uint16_t hi) {
 /* Conservative marking for ambiguous words (stack/locals/temp roots and
  * objects without ref bitmaps): an int can alias a heap address, so the
  * candidate only counts if the block walk proves it is a payload start. */
-static GNI uint8_t pjvm_gc_mark_ref(PJVMCtx *j, uint16_t lo, uint16_t hi) {
+static GNI uint8_t pjvm_gc_mark_ref(uint16_t lo, uint16_t hi) {
     uint32_t end;
 #if !PJVM_GC_ALLOC_BITMAP
     uint32_t blk32;
@@ -128,21 +128,21 @@ static GNI uint8_t pjvm_gc_mark_ref(PJVMCtx *j, uint16_t lo, uint16_t hi) {
 
     if (hi != 0 || lo == 0) return 0;
 
-    end = pjvm_gc_heap_limit_full(j);
-    if (lo < (uint16_t)(j->heap_base + PJVM_HEAP_ALLOC_HDR) || (uint32_t)lo >= end)
+    end = pjvm_gc_heap_limit_full();
+    if (lo < (uint16_t)(g_pjvm->heap_base + PJVM_HEAP_ALLOC_HDR) || (uint32_t)lo >= end)
         return 0;
 
 #if PJVM_GC_ALLOC_BITMAP
     /* Exact O(1) validation: the bit is set only at true payload starts. */
     if ((lo & 1u) != 0) return 0;
     {
-        uint16_t bit = (uint16_t)((uint16_t)(lo - j->heap_base) >> 1);
+        uint16_t bit = (uint16_t)((uint16_t)(lo - g_pjvm->heap_base) >> 1);
         if ((pjvm_gc_alloc_bm[bit >> 3] & (uint8_t)(1u << (bit & 7u))) == 0)
             return 0;
     }
-    return pjvm_gc_mark_payload(j, lo, hi);
+    return pjvm_gc_mark_payload(lo, hi);
 #else
-    blk32 = j->heap_base;
+    blk32 = g_pjvm->heap_base;
     for (; blk32 < end; ) {
         uint16_t blk = (uint16_t)blk32;
         uint16_t size;
@@ -151,31 +151,31 @@ static GNI uint8_t pjvm_gc_mark_ref(PJVMCtx *j, uint16_t lo, uint16_t hi) {
         if (size < PJVM_HEAP_FREE_HDR || blk32 + size > end) return 0;
         if (pjvm_gc_blk_is_allocated(blk) &&
             (uint16_t)(blk + PJVM_HEAP_ALLOC_HDR) == lo)
-            return pjvm_gc_mark_payload(j, lo, hi);
+            return pjvm_gc_mark_payload(lo, hi);
         blk32 += size;
     }
     return 0;
 #endif
 }
 
-static void pjvm_gc_scan_words(PJVMCtx *j, uint16_t start, uint16_t size) {
+static void pjvm_gc_scan_words(uint16_t start, uint16_t size) {
     for (uint16_t off = 0; off + 3u < size; off = (uint16_t)(off + 4u)) {
         uint16_t lo = r16((uint16_t)(start + off));
         uint16_t hi = r16((uint16_t)(start + off + 2u));
-        (void)pjvm_gc_mark_ref(j, lo, hi);
+        (void)pjvm_gc_mark_ref(lo, hi);
     }
 }
 
 /* Trusted variant of scan_words for ref arrays: every slot is a ref. */
-static void pjvm_gc_scan_refs(PJVMCtx *j, uint16_t start, uint16_t size) {
+static void pjvm_gc_scan_refs(uint16_t start, uint16_t size) {
     for (uint16_t off = 0; off + 3u < size; off = (uint16_t)(off + 4u)) {
         uint16_t lo = r16((uint16_t)(start + off));
         uint16_t hi = r16((uint16_t)(start + off + 2u));
-        (void)pjvm_gc_mark_payload(j, lo, hi);
+        (void)pjvm_gc_mark_payload(lo, hi);
     }
 }
 
-static void pjvm_gc_scan_object(PJVMCtx *j, uint16_t payload, uint16_t payload_size) {
+static void pjvm_gc_scan_object(uint16_t payload, uint16_t payload_size) {
     pjvm_class_id_t ci;
     pjvm_count_t nf;
     pjvm_rbo_t bitmap_off;
@@ -184,7 +184,7 @@ static void pjvm_gc_scan_object(PJVMCtx *j, uint16_t payload, uint16_t payload_s
 
     ci = (pjvm_class_id_t)r16(payload);
     if (ci >= n_classes) {
-        pjvm_gc_scan_words(j,
+        pjvm_gc_scan_words(
                            (uint16_t)(payload + PJVM_OBJ_HEADER),
                            (uint16_t)(payload_size - PJVM_OBJ_HEADER));
         return;
@@ -193,7 +193,7 @@ static void pjvm_gc_scan_object(PJVMCtx *j, uint16_t payload, uint16_t payload_s
     nf = cls_nf[ci];
     bitmap_off = cls_rbo[ci];
     if ((region_flags & PJVM_RF_REF_BITMAPS) == 0 || bitmap_off == 0) {
-        pjvm_gc_scan_words(j,
+        pjvm_gc_scan_words(
                            (uint16_t)(payload + PJVM_OBJ_HEADER),
                            (uint16_t)(payload_size - PJVM_OBJ_HEADER));
         return;
@@ -205,12 +205,12 @@ static void pjvm_gc_scan_object(PJVMCtx *j, uint16_t payload, uint16_t payload_s
             uint16_t addr = (uint16_t)(payload + PJVM_OBJ_HEADER + (uint16_t)slot * 4u);
             uint16_t lo = r16(addr);
             uint16_t hi = r16((uint16_t)(addr + 2u));
-            (void)pjvm_gc_mark_payload(j, lo, hi);
+            (void)pjvm_gc_mark_payload(lo, hi);
         }
     }
 }
 
-static void pjvm_gc_scan_block(PJVMCtx *j, uint16_t blk) {
+static void pjvm_gc_scan_block(uint16_t blk) {
     uint16_t meta = pjvm_gc_blk_meta(blk);
     uint8_t kind = (uint8_t)(meta & PJVM_HEAP_META_KIND_MASK);
     uint16_t payload = (uint16_t)(blk + PJVM_HEAP_ALLOC_HDR);
@@ -221,20 +221,20 @@ static void pjvm_gc_scan_block(PJVMCtx *j, uint16_t blk) {
     if (payload_size <= PJVM_OBJ_HEADER) return;
 
     if (kind == PJVM_HEAP_KIND_OBJECT) {
-        pjvm_gc_scan_object(j, payload, payload_size);
+        pjvm_gc_scan_object(payload, payload_size);
     } else if (kind == PJVM_HEAP_KIND_REF_ARRAY) {
-        pjvm_gc_scan_refs(j,
+        pjvm_gc_scan_refs(
                           (uint16_t)(payload + PJVM_OBJ_HEADER),
                           (uint16_t)(payload_size - PJVM_OBJ_HEADER));
     }
 }
 
-static GNI void pjvm_gc_mark_roots(PJVMCtx *j) {
-    for (uint16_t i = 0; i < j->sp; i++)
-        (void)pjvm_gc_mark_ref(j, j->stk_lo[i], j->stk_hi[i]);
+static GNI void pjvm_gc_mark_roots(void) {
+    for (uint16_t i = 0; i < g_pjvm->sp; i++)
+        (void)pjvm_gc_mark_ref(g_pjvm->stk_lo[i], g_pjvm->stk_hi[i]);
 
-    for (uint16_t i = 0; i < j->lt; i++)
-        (void)pjvm_gc_mark_ref(j, j->loc_lo[i], j->loc_hi[i]);
+    for (uint16_t i = 0; i < g_pjvm->lt; i++)
+        (void)pjvm_gc_mark_ref(g_pjvm->loc_lo[i], g_pjvm->loc_hi[i]);
 
     if ((region_flags & PJVM_RF_STATIC_REF_BITMAP) != 0 && pjvm_srb_off != 0) {
         /* The image says which static slots are refs: mark them exactly
@@ -242,26 +242,26 @@ static GNI void pjvm_gc_mark_roots(PJVMCtx *j) {
         for (uint16_t i = 0; i < n_static_fields; i++) {
             uint8_t bits = pjvm_prog_read(pjvm_srb_off + (uint32_t)(i >> 3));
             if ((bits & (uint8_t)(1u << (i & 7u))) != 0)
-                (void)pjvm_gc_mark_payload(j, j->sf_lo[i], j->sf_hi[i]);
+                (void)pjvm_gc_mark_payload(g_pjvm->sf_lo[i], g_pjvm->sf_hi[i]);
         }
     } else {
         for (uint16_t i = 0; i < PJVM_STATIC_CAP; i++)
-            (void)pjvm_gc_mark_ref(j, j->sf_lo[i], j->sf_hi[i]);
+            (void)pjvm_gc_mark_ref(g_pjvm->sf_lo[i], g_pjvm->sf_hi[i]);
     }
 
 #if PJVM_GC_ENABLED
     for (uint8_t i = 0; i < pjvm_gc_temp_count; i++)
-        (void)pjvm_gc_mark_ref(j, pjvm_gc_temp_lo[i], pjvm_gc_temp_hi[i]);
+        (void)pjvm_gc_mark_ref(pjvm_gc_temp_lo[i], pjvm_gc_temp_hi[i]);
 #endif
 }
 
-static GNI void pjvm_gc_trace(PJVMCtx *j) {
-    uint32_t end = pjvm_gc_heap_limit_full(j);
+static GNI void pjvm_gc_trace(void) {
+    uint32_t end = pjvm_gc_heap_limit_full();
     uint8_t progress;
 
     do {
         progress = 0;
-        for (uint32_t blk32 = j->heap_base; blk32 < end; ) {
+        for (uint32_t blk32 = g_pjvm->heap_base; blk32 < end; ) {
             uint16_t blk = (uint16_t)blk32;
             uint16_t size = pjvm_gc_blk_size(blk);
             if (size < PJVM_HEAP_FREE_HDR || blk32 + size > end) return;
@@ -269,7 +269,7 @@ static GNI void pjvm_gc_trace(PJVMCtx *j) {
                 uint16_t meta = pjvm_gc_blk_meta(blk);
                 if ((meta & (PJVM_HEAP_META_MARK | PJVM_HEAP_META_PENDING)) ==
                     (PJVM_HEAP_META_MARK | PJVM_HEAP_META_PENDING)) {
-                    pjvm_gc_scan_block(j, blk);
+                    pjvm_gc_scan_block(blk);
                     progress = 1;
                 }
             }
@@ -278,14 +278,14 @@ static GNI void pjvm_gc_trace(PJVMCtx *j) {
     } while (progress);
 }
 
-static GNI uint8_t pjvm_gc_sweep(PJVMCtx *j) {
-    uint32_t end = pjvm_gc_heap_limit_full(j);
+static GNI uint8_t pjvm_gc_sweep(void) {
+    uint32_t end = pjvm_gc_heap_limit_full();
     uint16_t free_head = 0;
     uint16_t free_tail = 0;
     uint16_t live_used = 0;
     uint8_t reclaimed = 0;
 
-    for (uint32_t blk32 = j->heap_base; blk32 < end; ) {
+    for (uint32_t blk32 = g_pjvm->heap_base; blk32 < end; ) {
         uint16_t blk = (uint16_t)blk32;
         uint16_t size = pjvm_gc_blk_size(blk);
         uint8_t make_free = 0;
@@ -306,7 +306,7 @@ static GNI uint8_t pjvm_gc_sweep(PJVMCtx *j) {
                 pjvm_gc_blk_set_size(blk, size, 0);
                 pjvm_gc_blk_set_next(blk, 0);
 #if PJVM_GC_ALLOC_BITMAP
-                pjvm_gc_bm_clear(j, (uint16_t)(blk + PJVM_HEAP_ALLOC_HDR));
+                pjvm_gc_bm_clear((uint16_t)(blk + PJVM_HEAP_ALLOC_HDR));
 #endif
             }
         } else {
@@ -332,40 +332,39 @@ static GNI uint8_t pjvm_gc_sweep(PJVMCtx *j) {
         blk32 += size;
     }
 
-    j->heap_free_head = free_head;
-    j->heap_used = live_used;
+    g_pjvm->heap_free_head = free_head;
+    g_pjvm->heap_used = live_used;
     return reclaimed;
 }
 #endif
 
-void pjvm_gc_init(PJVMCtx *j) {
-    j->gc_lfsr = (uint16_t)(j->heap_base ? j->heap_base : 0xACE1u);
-    j->gc_count = 0;
+void pjvm_gc_init(void) {
+    g_pjvm->gc_lfsr = (uint16_t)(g_pjvm->heap_base ? g_pjvm->heap_base : 0xACE1u);
+    g_pjvm->gc_count = 0;
 #if PJVM_GC_ENABLED
     pjvm_gc_temp_count = 0;
 #if PJVM_GC_TRIGGERS & (PJVM_GC_TRIG_WATERMARK | PJVM_GC_TRIG_RANDOM_ABOVE_WATERMARK)
-    pjvm_gc_watermark_init(j);
+    pjvm_gc_watermark_init();
 #endif
 #endif
 }
 
-uint8_t pjvm_gc_collect(PJVMCtx *j, uint8_t reason) {
+uint8_t pjvm_gc_collect(uint8_t reason) {
     uint8_t reclaimed = 0;
     (void)reason;
 
 #if PJVM_HEAP_MODE == PJVM_HEAP_FREELIST
-    pjvm_gc_mark_roots(j);
-    pjvm_gc_trace(j);
-    reclaimed = pjvm_gc_sweep(j);
+    pjvm_gc_mark_roots();
+    pjvm_gc_trace();
+    reclaimed = pjvm_gc_sweep();
 #endif
 
-    j->gc_count++;
+    g_pjvm->gc_count++;
     return reclaimed;
 }
 
-void pjvm_gc_maybe(PJVMCtx *j, uint8_t reason, uint16_t alloc_size) {
+void pjvm_gc_maybe(uint8_t reason, uint16_t alloc_size) {
 #if !PJVM_GC_ENABLED
-    (void)j;
     (void)reason;
     (void)alloc_size;
 #else
@@ -383,7 +382,7 @@ void pjvm_gc_maybe(PJVMCtx *j, uint8_t reason, uint16_t alloc_size) {
 #if PJVM_GC_TRIGGERS & PJVM_GC_TRIG_WATERMARK
     if (!should_collect &&
         (reason & PJVM_GC_TRIG_WATERMARK) != 0 &&
-        pjvm_gc_above_watermark(j, alloc_size))
+        pjvm_gc_above_watermark(alloc_size))
         should_collect = 1;
 #endif
 
@@ -396,11 +395,11 @@ void pjvm_gc_maybe(PJVMCtx *j, uint8_t reason, uint16_t alloc_size) {
 #if PJVM_GC_TRIGGERS & PJVM_GC_TRIG_RANDOM_ABOVE_WATERMARK
     if (!should_collect &&
         (reason & PJVM_GC_TRIG_RANDOM_ABOVE_WATERMARK) != 0 &&
-        pjvm_gc_above_watermark(j, alloc_size) &&
-        (pjvm_gc_next_random(j) & PJVM_GC_RANDOM_MASK) == 0)
+        pjvm_gc_above_watermark(alloc_size) &&
+        (pjvm_gc_next_random() & PJVM_GC_RANDOM_MASK) == 0)
         should_collect = 1;
 #endif
 
-    if (should_collect) (void)pjvm_gc_collect(j, reason);
+    if (should_collect) (void)pjvm_gc_collect(reason);
 #endif
 }

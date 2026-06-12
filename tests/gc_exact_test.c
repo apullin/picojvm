@@ -5,6 +5,7 @@
 
 static uint8_t heap_mem[256];
 static int failed;
+PJVMCtx *g_pjvm;
 
 static const uint8_t legacy_prog[] = {
     0x85, 0x4C, 0x00, 0x00,
@@ -25,8 +26,8 @@ static const uint8_t exact_prog[] = {
     0x00, 0x00,
 };
 
-uint16_t heap_alloc(PJVMCtx *j, uint16_t size, uint8_t kind) {
-    return pjvm_heap_alloc(j, size, kind);
+uint16_t heap_alloc(uint16_t size, uint8_t kind) {
+    return pjvm_heap_alloc(size, kind);
 }
 
 uint8_t r8(uint16_t a) {
@@ -117,9 +118,9 @@ static void run_case(const char *label, const uint8_t *prog, uint32_t prog_size_
 
     pjvm_heap_init(&j, 1, 129);
 
-    root = pjvm_heap_alloc(&j, (uint16_t)(PJVM_OBJ_HEADER + 8), PJVM_HEAP_KIND_OBJECT);
-    live = pjvm_heap_alloc(&j, (uint16_t)(PJVM_OBJ_HEADER + 4), PJVM_HEAP_KIND_STRING);
-    dead = pjvm_heap_alloc(&j, (uint16_t)(PJVM_OBJ_HEADER + 4), PJVM_HEAP_KIND_STRING);
+    root = pjvm_heap_alloc((uint16_t)(PJVM_OBJ_HEADER + 8), PJVM_HEAP_KIND_OBJECT);
+    live = pjvm_heap_alloc((uint16_t)(PJVM_OBJ_HEADER + 4), PJVM_HEAP_KIND_STRING);
+    dead = pjvm_heap_alloc((uint16_t)(PJVM_OBJ_HEADER + 4), PJVM_HEAP_KIND_STRING);
 
     w16(root, 0);
     w16((uint16_t)(root + 2), 0);
@@ -137,8 +138,8 @@ static void run_case(const char *label, const uint8_t *prog, uint32_t prog_size_
     j.loc_hi[0] = 0;
     j.lt = 1;
 
-    (void)pjvm_gc_collect(&j, PJVM_GC_TRIG_ALLOC_FAIL);
-    fresh = pjvm_heap_alloc(&j, (uint16_t)(PJVM_OBJ_HEADER + 4), PJVM_HEAP_KIND_STRING);
+    (void)pjvm_gc_collect(PJVM_GC_TRIG_ALLOC_FAIL);
+    fresh = pjvm_heap_alloc((uint16_t)(PJVM_OBJ_HEADER + 4), PJVM_HEAP_KIND_STRING);
 
     expect_addr_mode(label, fresh, dead, expect_dead_reclaimed);
     expect_u16("live_still_len", r16(live), 4);

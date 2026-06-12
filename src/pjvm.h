@@ -279,18 +279,21 @@ extern uint8_t *sc;
 void pjvm_parse(uint8_t *data);
 void pjvm_run(PJVMCtx *j);
 uint8_t pjvm_prog_read(uint32_t off);
+/* Binds j as the current VM (g_pjvm).  The heap, GC, and interpreter all
+ * operate on the bound context, so a future scheduler switches green
+ * threads by rebinding before resuming.  Call before pjvm_run(). */
 void pjvm_heap_init(PJVMCtx *j, uint16_t start, uint16_t limit);
-uint16_t pjvm_heap_alloc(PJVMCtx *j, uint16_t size, uint8_t kind);
-void pjvm_heap_free(PJVMCtx *j, uint16_t a);
+uint16_t pjvm_heap_alloc(uint16_t size, uint8_t kind);
+void pjvm_heap_free(uint16_t a);
 #if PJVM_GC_ENABLED || defined(PJVM_GC_IMPL)
-void pjvm_gc_init(PJVMCtx *j);
-uint8_t pjvm_gc_collect(PJVMCtx *j, uint8_t reason);
-void pjvm_gc_maybe(PJVMCtx *j, uint8_t reason, uint16_t alloc_size);
+void pjvm_gc_init(void);
+uint8_t pjvm_gc_collect(uint8_t reason);
+void pjvm_gc_maybe(uint8_t reason, uint16_t alloc_size);
 #else
-#define pjvm_gc_init(j) ((void)(j))
-#define pjvm_gc_collect(j, reason) ((void)(j), (void)(reason), 0)
-#define pjvm_gc_maybe(j, reason, alloc_size) \
-    ((void)(j), (void)(reason), (void)(alloc_size))
+#define pjvm_gc_init() ((void)0)
+#define pjvm_gc_collect(reason) ((void)(reason), 0)
+#define pjvm_gc_maybe(reason, alloc_size) \
+    ((void)(reason), (void)(alloc_size))
 #endif
 
 /*
@@ -316,8 +319,8 @@ void pjvm_gc_protect(uint16_t lo, uint16_t hi);
 
 #if PJVM_GC_ALLOC_BITMAP
 extern uint8_t pjvm_gc_alloc_bm[PJVM_GC_BITMAP_SPAN >> 4];
-void pjvm_gc_bm_set(const PJVMCtx *j, uint16_t payload);
-void pjvm_gc_bm_clear(const PJVMCtx *j, uint16_t payload);
+void pjvm_gc_bm_set(uint16_t payload);
+void pjvm_gc_bm_clear(uint16_t payload);
 #endif
 
 #ifdef PJVM_PAGED
@@ -326,7 +329,7 @@ void pjvm_pin_chunk(PJVMPager *p, uint16_t chunk);
 #endif
 
 /* --- platform callbacks (implemented by each platform .c) ------------- */
-uint16_t heap_alloc(PJVMCtx *j, uint16_t size, uint8_t kind);
+uint16_t heap_alloc(uint16_t size, uint8_t kind);
 uint8_t  r8(uint16_t a);
 void     w8(uint16_t a, uint8_t v);
 uint16_t r16(uint16_t a);

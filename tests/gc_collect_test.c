@@ -24,8 +24,8 @@ uint8_t pjvm_prog_read(uint32_t off) {
     return 0;
 }
 
-uint16_t heap_alloc(PJVMCtx *j, uint16_t size, uint8_t kind) {
-    return pjvm_heap_alloc(j, size, kind);
+uint16_t heap_alloc(uint16_t size, uint8_t kind) {
+    return pjvm_heap_alloc(size, kind);
 }
 
 uint8_t r8(uint16_t a) {
@@ -92,16 +92,16 @@ int main(void) {
 
     pjvm_heap_init(&j, 1, 129);
 
-    root = pjvm_heap_alloc(&j, (uint16_t)(PJVM_OBJ_HEADER + 8), PJVM_HEAP_KIND_REF_ARRAY);
+    root = pjvm_heap_alloc((uint16_t)(PJVM_OBJ_HEADER + 8), PJVM_HEAP_KIND_REF_ARRAY);
     w16(root, 2);
     w16((uint16_t)(root + 2), 0);
 
-    child = pjvm_heap_alloc(&j, (uint16_t)(PJVM_OBJ_HEADER + 4), PJVM_HEAP_KIND_BYTE_ARRAY);
+    child = pjvm_heap_alloc((uint16_t)(PJVM_OBJ_HEADER + 4), PJVM_HEAP_KIND_BYTE_ARRAY);
     w16(child, 4);
     w16((uint16_t)(child + 2), 0);
     w8((uint16_t)(child + PJVM_OBJ_HEADER), 0x41);
 
-    dead = pjvm_heap_alloc(&j, (uint16_t)(PJVM_OBJ_HEADER + 8), PJVM_HEAP_KIND_STRING);
+    dead = pjvm_heap_alloc((uint16_t)(PJVM_OBJ_HEADER + 8), PJVM_HEAP_KIND_STRING);
     w16(dead, 8);
     w16((uint16_t)(dead + 2), 0);
 
@@ -115,7 +115,7 @@ int main(void) {
     j.sp = 1;
 
     used_before = j.heap_used;
-    reclaimed = pjvm_gc_collect(&j, PJVM_GC_TRIG_ALLOC_FAIL);
+    reclaimed = pjvm_gc_collect(PJVM_GC_TRIG_ALLOC_FAIL);
 
     expect_u16("gc_count", j.gc_count, 1);
     expect_u16("reclaimed", reclaimed, 1);
@@ -124,7 +124,7 @@ int main(void) {
     expect_u16("child_len", r16(child), 4);
     expect_u16("root_child", r16((uint16_t)(root + PJVM_OBJ_HEADER)), child);
 
-    fresh = pjvm_heap_alloc(&j, (uint16_t)(PJVM_OBJ_HEADER + 8), PJVM_HEAP_KIND_STRING);
+    fresh = pjvm_heap_alloc((uint16_t)(PJVM_OBJ_HEADER + 8), PJVM_HEAP_KIND_STRING);
     expect_u16("fresh_reuses_dead", fresh, dead);
 
     return failed ? 1 : 0;

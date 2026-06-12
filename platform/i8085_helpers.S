@@ -729,34 +729,24 @@ pjvm_native_string_from_bytes:
     PUSH B                          ; save len
     PUSH H                          ; save src_addr
 
-    /* heap_alloc(g_pjvm, len + 4, PJVM_HEAP_KIND_STRING) */
+    /* heap_alloc(len + 4, PJVM_HEAP_KIND_STRING) — ctx is implicit
+     * (the C side reads g_pjvm), so the arg area is size(2) + kind(1) */
     MOV H, B
     MOV L, C
     LXI D, 4
     DAD D                           ; HL = len + 4
     XCHG                            ; DE = size
-    LXI H, 65531
+    LXI H, 65533
     DAD SP
-    SPHL                            ; reserve 5-byte arg area
-    MOV C, L
-    MOV B, H                        ; BC = arg base
-    INX H
-    INX H
+    SPHL                            ; reserve 3-byte arg area
     MOV M, E
     INX H
-    MOV M, D                        ; [sp+2..3] = size
+    MOV M, D                        ; [sp+0..1] = size
     MVI A, 6                        ; PJVM_HEAP_KIND_STRING
     INX H
-    MOV M, A                        ; [sp+4] = kind
-    LHLD g_pjvm
-    XCHG                            ; DE = j
-    MOV H, B
-    MOV L, C                        ; HL = arg base
-    MOV M, E
-    INX H
-    MOV M, D                        ; [sp+0..1] = j
+    MOV M, A                        ; [sp+2] = kind
     CALL heap_alloc                 ; BC = a (allocated address)
-    LXI H, 5
+    LXI H, 3
     DAD SP
     SPHL                            ; release arg area
 

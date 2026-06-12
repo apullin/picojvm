@@ -24,8 +24,8 @@ uint8_t pjvm_prog_read(uint32_t off) {
     return 0;
 }
 
-uint16_t heap_alloc(PJVMCtx *j, uint16_t size, uint8_t kind) {
-    return pjvm_heap_alloc(j, size, kind);
+uint16_t heap_alloc(uint16_t size, uint8_t kind) {
+    return pjvm_heap_alloc(size, kind);
 }
 
 uint8_t r8(uint16_t a) {
@@ -93,11 +93,11 @@ int main(void) {
 
     pjvm_heap_init(&j, 1, 129);
 
-    root = pjvm_heap_alloc(&j, (uint16_t)(PJVM_OBJ_HEADER + 4), PJVM_HEAP_KIND_REF_ARRAY);
-    live = pjvm_heap_alloc(&j, (uint16_t)(PJVM_OBJ_HEADER + 4), PJVM_HEAP_KIND_BYTE_ARRAY);
-    dead_a = pjvm_heap_alloc(&j, (uint16_t)(PJVM_OBJ_HEADER + 4), PJVM_HEAP_KIND_REF_ARRAY);
-    dead_b = pjvm_heap_alloc(&j, (uint16_t)(PJVM_OBJ_HEADER + 4), PJVM_HEAP_KIND_REF_ARRAY);
-    dead_c = pjvm_heap_alloc(&j, (uint16_t)(PJVM_OBJ_HEADER + 20), PJVM_HEAP_KIND_STRING);
+    root = pjvm_heap_alloc((uint16_t)(PJVM_OBJ_HEADER + 4), PJVM_HEAP_KIND_REF_ARRAY);
+    live = pjvm_heap_alloc((uint16_t)(PJVM_OBJ_HEADER + 4), PJVM_HEAP_KIND_BYTE_ARRAY);
+    dead_a = pjvm_heap_alloc((uint16_t)(PJVM_OBJ_HEADER + 4), PJVM_HEAP_KIND_REF_ARRAY);
+    dead_b = pjvm_heap_alloc((uint16_t)(PJVM_OBJ_HEADER + 4), PJVM_HEAP_KIND_REF_ARRAY);
+    dead_c = pjvm_heap_alloc((uint16_t)(PJVM_OBJ_HEADER + 20), PJVM_HEAP_KIND_STRING);
 
     w16(root, 1);
     w16(live, 4);
@@ -119,14 +119,14 @@ int main(void) {
     j.lt = 1;
 
     used_before = j.heap_used;
-    (void)pjvm_gc_collect(&j, PJVM_GC_TRIG_ALLOC_FAIL);
+    (void)pjvm_gc_collect(PJVM_GC_TRIG_ALLOC_FAIL);
 
     expect_u16("gc_count", j.gc_count, 1);
     expect_true("heap_used_dropped", (uint8_t)(j.heap_used < used_before));
     expect_u16("root_live", r16((uint16_t)(root + PJVM_OBJ_HEADER)), live);
     expect_u16("live_marker", r8((uint16_t)(live + PJVM_OBJ_HEADER)), 0x5A);
 
-    fresh = pjvm_heap_alloc(&j, (uint16_t)(PJVM_OBJ_HEADER + 44), PJVM_HEAP_KIND_STRING);
+    fresh = pjvm_heap_alloc((uint16_t)(PJVM_OBJ_HEADER + 44), PJVM_HEAP_KIND_STRING);
     expect_true("fresh_allocated", (uint8_t)(fresh != 0));
     expect_u16("fresh_reuses_coalesced_dead", fresh, dead_a);
 

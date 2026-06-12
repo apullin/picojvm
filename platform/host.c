@@ -94,12 +94,12 @@ static int32_t pjvm_host_term_read_byte(void) {
     return -1;
 }
 
-uint16_t heap_alloc(PJVMCtx *j, uint16_t size, uint8_t kind) {
-    uint16_t a = pjvm_heap_alloc(j, size, kind);
+uint16_t heap_alloc(uint16_t size, uint8_t kind) {
+    uint16_t a = pjvm_heap_alloc(size, kind);
     if (a == 0) {
-        uint32_t end = j->heap_limit ? j->heap_limit : 65536u;
+        uint32_t end = g_pjvm->heap_limit ? g_pjvm->heap_limit : 65536u;
         fprintf(stderr, "JVM heap allocation failed (%u bytes; used=%u limit=%u)\n",
-                (unsigned)size, (unsigned)j->heap_used, (unsigned)end);
+                (unsigned)size, (unsigned)g_pjvm->heap_used, (unsigned)end);
         exit(1);
     }
 
@@ -108,7 +108,7 @@ uint16_t heap_alloc(PJVMCtx *j, uint16_t size, uint8_t kind) {
     if (getenv("PJVM_HEAP_TRACE"))
         fprintf(stderr, "HEAP | alloc #%u: %u bytes at %u (heap_used=%u, mi=%u)\n",
                 (unsigned)heap_alloc_count, (unsigned)size, (unsigned)a,
-                (unsigned)j->heap_used, (unsigned)g_pjvm->cur_mi);
+                (unsigned)g_pjvm->heap_used, (unsigned)g_pjvm->cur_mi);
     return a;
 }
 

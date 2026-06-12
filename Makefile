@@ -139,6 +139,39 @@ TARGET_ASM_HELPERS_DEF =
 TARGET_HELPER_OBJS =
 endif
 
+# --- TMS9900 target toolchain ---
+TMS_LLVM_BIN = $(ROOT)/llvm-project/build/bin
+TMS_CLANG    = $(TMS_LLVM_BIN)/clang
+TMS_LLD      = $(TMS_LLVM_BIN)/ld.lld
+TMS_OBJCOPY  = $(TMS_LLVM_BIN)/llvm-objcopy
+TMS_SIZE     = $(TMS_LLVM_BIN)/llvm-size
+TMS_TRACE    = $(HOME)/personal/ti99/tms9900-trace/build/tms9900-trace
+TMS_BUILTINS = $(ROOT)/libtms9900/builtins/build/libbuiltins.a
+TMS_TARGET_OPT ?= 2
+TMS_LTO ?= 0
+TMS_TARGET_VM_OPTS ?=
+TMS_SIM_CAPS = -DPJVM_METHOD_CAP=64 -DPJVM_CLASS_CAP=16 -DPJVM_VTABLE_CAP=128 \
+               -DPJVM_STATIC_CAP=32 -DPJVM_MAX_STACK=64 -DPJVM_MAX_LOCALS=128 \
+               -DPJVM_MAX_FRAMES=16
+ifeq ($(TMS_TARGET_OPT),0)
+TMS_EXTRA_CFLAGS = -mno-relax-all
+endif
+ifeq ($(TMS_LTO),1)
+TMS_LTO_CFLAGS = -flto
+TMS_LTO_SUFFIX = -lto
+TMS_LTO_OPT = $(if $(filter s z,$(TMS_TARGET_OPT)),2,$(TMS_TARGET_OPT))
+TMS_LTO_LDFLAGS = --lto-O$(TMS_LTO_OPT)
+endif
+TMS_SECTION_FLAGS = -ffunction-sections -fdata-sections
+TMS_TARGET_CFLAGS = --target=tms9900 -O$(TMS_TARGET_OPT) -ffreestanding -fno-builtin -nostdlib $(TMS_EXTRA_CFLAGS) $(TMS_SECTION_FLAGS) $(TMS_LTO_CFLAGS)
+TMS_LDFLAGS = -T picojvm_tms9900.ld --gc-sections $(TMS_LTO_LDFLAGS)
+PJVM_FILE ?= tests/Fib.pjvm
+TMS_PJVM_NAME = $(basename $(notdir $(PJVM_FILE)))
+TMS_BUILDDIR = build-tms9900/$(TMS_PJVM_NAME)-O$(TMS_TARGET_OPT)$(TMS_LTO_SUFFIX)
+TMS_OUTPUT_ADDR = 0xEF00
+TMS_OUTPUT_LEN  = 256
+TMS_TARGET_ALLFLAGS = $(TMS_TARGET_OPT) $(TMS_LTO_CFLAGS) $(TMS_SIM_CAPS) $(TMS_TARGET_VM_OPTS)
+
 PICOJVM_PAGED = ./picojvm-paged
 HOST_VM_LARGE_OPTS ?= -DPJVM_ENABLE_V4=1 -DPJVM_METHOD_CAP=20000 \
                       -DPJVM_CLASS_CAP=2048 -DPJVM_VTABLE_CAP=20000 \
@@ -932,9 +965,67 @@ size-report: | $(BUILDDIR)
 
 .PHONY: size-report
 
+# --- TMS9900 simulator target ---
+
+$(TMS_BUILDDIR):
+	mkdir -p $(TMS_BUILDDIR)
+
+$(TMS_BUILDDIR)/.targetvm.flags: FORCE | $(TMS_BUILDDIR)
+	@printf '%s\n' '$(TMS_TARGET_ALLFLAGS)' | cmp -s - $@ 2>/dev/null || \
+		{ printf '%s\n' '$(TMS_TARGET_ALLFLAGS)' > $@; \
+		  rm -f $(TMS_BUILDDIR)/pjvm.o $(TMS_BUILDDIR)/pjvm_heap.o \
+		        $(TMS_BUILDDIR)/pjvm_gc.o $(TMS_BUILDDIR)/tms9900_sim.o \
+		        $(TMS_BUILDDIR)/*.elf $(TMS_BUILDDIR)/*.bin; }
+
+$(TMS_BUILDDIR)/pjvm_data.c: $(PJVM_FILE) | $(TMS_BUILDDIR)
+	@echo "// Auto-generated — .pjvm program data" > $@
+	@echo "#include <stdint.h>" >> $@
+	@echo "const uint8_t pjvm_program[] = {" >> $@
+	@$(PYTHON) -c "import sys; d=open(sys.argv[1],'rb').read(); \
+		lines=['    '+', '.join(f'0x{b:02x}' for b in d[i:i+16]) for i in range(0,len(d),16)]; \
+		print(',\n'.join(lines))" $(PJVM_FILE) >> $@
+	@echo "};" >> $@
+
+$(TMS_BUILDDIR)/crt0_tms9900.o: crt0_tms9900.S | $(TMS_BUILDDIR)
+	$(TMS_CLANG) --target=tms9900 -ffreestanding $(TMS_LTO_CFLAGS) -c $< -o $@
+
+$(TMS_BUILDDIR)/pjvm.o: src/pjvm.c src/pjvm.h src/pjvm_opts.h $(TMS_BUILDDIR)/.targetvm.flags | $(TMS_BUILDDIR)
+	$(TMS_CLANG) $(TMS_TARGET_CFLAGS) $(TMS_SIM_CAPS) $(TMS_TARGET_VM_OPTS) -c $< -o $@
+
+$(TMS_BUILDDIR)/pjvm_heap.o: src/pjvm_heap.c src/pjvm.h src/pjvm_opts.h $(TMS_BUILDDIR)/.targetvm.flags | $(TMS_BUILDDIR)
+	$(TMS_CLANG) $(TMS_TARGET_CFLAGS) $(TMS_SIM_CAPS) $(TMS_TARGET_VM_OPTS) -c $< -o $@
+
+$(TMS_BUILDDIR)/pjvm_gc.o: src/pjvm_gc.c src/pjvm.h src/pjvm_opts.h $(TMS_BUILDDIR)/.targetvm.flags | $(TMS_BUILDDIR)
+	$(TMS_CLANG) $(TMS_TARGET_CFLAGS) $(TMS_SIM_CAPS) $(TMS_TARGET_VM_OPTS) -c $< -o $@
+
+$(TMS_BUILDDIR)/tms9900_sim.o: platform/tms9900_sim.c src/pjvm.h src/pjvm_opts.h $(TMS_BUILDDIR)/.targetvm.flags | $(TMS_BUILDDIR)
+	$(TMS_CLANG) $(TMS_TARGET_CFLAGS) $(TMS_SIM_CAPS) $(TMS_TARGET_VM_OPTS) -c $< -o $@
+
+$(TMS_BUILDDIR)/pjvm_data.o: $(TMS_BUILDDIR)/pjvm_data.c | $(TMS_BUILDDIR)
+	$(TMS_CLANG) $(TMS_TARGET_CFLAGS) -c $< -o $@
+
+$(TMS_BUILDDIR)/picojvm.elf: $(TMS_BUILDDIR)/crt0_tms9900.o $(TMS_BUILDDIR)/pjvm.o $(TMS_BUILDDIR)/pjvm_heap.o $(TMS_BUILDDIR)/pjvm_gc.o $(TMS_BUILDDIR)/tms9900_sim.o $(TMS_BUILDDIR)/pjvm_data.o $(TMS_BUILTINS)
+	$(TMS_LLD) $(TMS_LDFLAGS) -o $@ $^
+
+$(TMS_BUILDDIR)/picojvm.bin: $(TMS_BUILDDIR)/picojvm.elf
+	$(TMS_OBJCOPY) -O binary $< $@
+
+tms9900-bin: $(TMS_BUILDDIR)/picojvm.bin
+
+tms9900-sim: $(TMS_BUILDDIR)/picojvm.bin
+	@$(TMS_SIZE) $(TMS_BUILDDIR)/picojvm.elf
+	@echo "--- Running on TMS9900 simulator ---"
+	$(TMS_TRACE) -e 0x0000 -l 0x0000 -n 50000000 -S -q -d $(TMS_OUTPUT_ADDR):$(TMS_OUTPUT_LEN) $(TMS_BUILDDIR)/picojvm.bin
+
+tms9900-sim-%: tests/%.pjvm
+	$(MAKE) tms9900-sim PJVM_FILE=tests/$*.pjvm
+
+tms9900-test: $(PICOJVM)
+	$(PYTHON) run_tests_tms9900.py --opt $(TMS_TARGET_OPT) $(if $(filter 1,$(TMS_LTO)),--lto,)
+
 clean:
 	rm -f $(PICOJVM) $(PICOJVM_PAGED) tests/*.class tests/*.pjvm tests/*.pjvmmap
-	rm -rf $(BUILDDIR)
+	rm -rf $(BUILDDIR) build-tms9900
 
 .PHONY: FORCE
 .PHONY: all test test-paged test-paged-stress clean sim
@@ -942,3 +1033,4 @@ clean:
 .PHONY: gc-policy-test test-gc-collect test-gc-fragment test-gc-exact test-v4 test-pjvmpack-package test-alloc-heavy test-paged-alloc-heavy test-gc-alloc-heavy
 .PHONY: test-gc-graph test-gc-temp-roots test-gc-alloc-bitmap test-gc-host-compat test-gc-host-suite test-sim-smoke test-sim-gc-smoke test-legacy-string-natives test-mt-in-image
 .PHONY: test-sim-gc-alloc-heavy test-gc-sim-suite test-gc-suite
+.PHONY: tms9900-bin tms9900-sim tms9900-test

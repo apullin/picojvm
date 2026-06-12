@@ -2,12 +2,14 @@ picojvm
 picojvm-large
 picojvm-paged
 build/
+build-tms9900/
 __pycache__/
 *.pyc
 tests/*.class
 tests/*.pjvm
 tests/*.pjvmmap
 tests/java/
+tests/pj/
 *.dSYM/
 \#*\#
 .\#*

@@ -64,6 +64,7 @@ class ClassInfo:
     class_id: int = -1
     parent_class_id: int = PJVM_NO_CLASS
     static_fields: list = field(default_factory=list)
+    static_field_descs: list = field(default_factory=list)
     const_fields: set = field(default_factory=set)
     own_instance_fields: list = field(default_factory=list)
     all_instance_fields: list = field(default_factory=list)

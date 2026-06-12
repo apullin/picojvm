@@ -101,6 +101,7 @@
 #define PJVM_RF_REF_BITMAPS 0x02  /* bit 1: per-class ref bitmaps present */
 #define PJVM_RF_CONST_DATA 0x04   /* bit 2: const_data section present */
 #define PJVM_RF_PACKED_METHOD_TABLE 0x08 /* bit 3: v4 ULEB method table */
+#define PJVM_RF_STATIC_REF_BITMAP 0x10 /* bit 4: static-slot ref bitmap */
 
 /* CP resolution string flag / mask (16-bit) */
 #define PJVM_CP_STR_FLAG_16  0x8000
@@ -244,6 +245,8 @@ extern uint32_t bytecodes_size;
 extern uint32_t bc_off, cpr_off, ic_off, sc_off, et_off, cd_off;
 extern PJVMCtx *g_pjvm;
 extern uint8_t  region_flags;
+extern uint16_t n_static_fields;
+extern uint32_t pjvm_srb_off;  /* static-ref bitmap offset (0 = absent) */
 extern pjvm_count_t cls_nf[PJVM_CLASS_CAP];
 extern pjvm_rbo_t cls_rbo[PJVM_CLASS_CAP];
 

@@ -80,6 +80,7 @@ from .constants import (
     PJVM_RF_PACKED_METHOD_TABLE,
     PJVM_RF_PIN_HINTS,
     PJVM_RF_REF_BITMAPS,
+    PJVM_RF_STATIC_REF_BITMAP,
     PJVM_VERSION_V3,
     PJVM_VERSION_V4,
     STRING_NATIVE_IDS,
@@ -1143,6 +1144,7 @@ def pack_pjvm(class_data_list, verbose=False, v2=False, pin_hints=None,
             field_desc = cls.cp[f_desc_idx][1]
             if f_access & ACC_STATIC:  # ACC_STATIC
                 cls.static_fields.append(field_name)
+                cls.static_field_descs.append(field_desc)
                 if f_is_const:
                     cls.const_fields.add(field_name)
             else:
@@ -1794,6 +1796,8 @@ def pack_pjvm(class_data_list, verbose=False, v2=False, pin_hints=None,
     if pin_hints:
         region_flags |= PJVM_RF_PIN_HINTS
     region_flags |= PJVM_RF_REF_BITMAPS
+    if total_static_fields > 0:
+        region_flags |= PJVM_RF_STATIC_REF_BITMAP
     if const_arrays:
         region_flags |= PJVM_RF_CONST_DATA
     if pack_method_table and emit_v4:
@@ -1929,6 +1933,22 @@ def pack_pjvm(class_data_list, verbose=False, v2=False, pin_hints=None,
             out.append(1 if i in pin_set else 0)
         if verbose:
             print(f"  Pin hints: methods {sorted(pin_set)}")
+
+    # Static-ref bitmap (after pin hints): one bit per global static slot,
+    # set when the slot holds a reference. Lets the collector treat static
+    # roots as exact instead of conservatively walking the heap per slot.
+    if region_flags & PJVM_RF_STATIC_REF_BITMAP:
+        srb = bytearray((total_static_fields + 7) >> 3)
+        slot = 0
+        for name in class_order:
+            for desc in classes[name].static_field_descs:
+                if is_ref_descriptor(desc):
+                    srb[slot >> 3] |= 1 << (slot & 7)
+                slot += 1
+        out.extend(srb)
+        if verbose:
+            print(f"  Static-ref bitmap: {len(srb)} bytes "
+                  f"({total_static_fields} slots)")
 
     # const_data section (after pin hints)
     cd_init_entries = []  # (static_field_slot, lo, hi)

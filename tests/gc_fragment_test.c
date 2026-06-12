@@ -14,6 +14,8 @@ uint32_t bytecodes_size;
 uint32_t bc_off, cpr_off, ic_off, sc_off, et_off, cd_off;
 PJVMCtx *g_pjvm;
 uint8_t region_flags;
+uint16_t n_static_fields;
+uint32_t pjvm_srb_off;
 pjvm_count_t cls_nf[PJVM_CLASS_CAP];
 pjvm_rbo_t cls_rbo[PJVM_CLASS_CAP];
 

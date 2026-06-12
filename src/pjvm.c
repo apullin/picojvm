@@ -152,9 +152,10 @@ uint8_t *sc;
 #endif
 
 /* --- internal globals (file-scope) ------------------------------------ */
-static uint16_t n_static_fields;
+uint16_t n_static_fields;
 static pjvm_count_t n_int_constants, n_string_constants;
 uint8_t  region_flags;  /* byte 9: bit0=pin_hints, bit1=ref bitmaps, bit2=const_data */
+uint32_t pjvm_srb_off;  /* static-ref bitmap offset (0 = absent) */
 /* Constant-fold the format flag when only one loader is compiled in. */
 #if PJVM_ENABLE_V3 && PJVM_ENABLE_V4
 static uint8_t pjvm_format_v4;
@@ -735,6 +736,14 @@ static void pjvm_parse_v3(uint8_t *data) {
         if (region_flags & PJVM_RF_PIN_HINTS)
             p += n_methods;
 
+        /* Static-ref bitmap (one bit per static slot) */
+        if (region_flags & PJVM_RF_STATIC_REF_BITMAP) {
+            pjvm_srb_off = (uint32_t)(p - data);
+            p += (uint16_t)((n_static_fields + 7u) >> 3);
+        } else {
+            pjvm_srb_off = 0;
+        }
+
         /* const_data section offset */
         if (region_flags & PJVM_RF_CONST_DATA)
             cd_off = (uint32_t)(p - data);
@@ -903,6 +912,12 @@ static void pjvm_parse_v4(uint8_t *data) {
         p += n_exc * PJVM_ET_ENTRY_V4;
         if (region_flags & PJVM_RF_PIN_HINTS)
             p += n_methods;
+        if (region_flags & PJVM_RF_STATIC_REF_BITMAP) {
+            pjvm_srb_off = (uint32_t)(p - data);
+            p += (uint16_t)((n_static_fields + 7u) >> 3);
+        } else {
+            pjvm_srb_off = 0;
+        }
         cd_off = (region_flags & PJVM_RF_CONST_DATA) ? (uint32_t)(p - data) : 0;
     }
 

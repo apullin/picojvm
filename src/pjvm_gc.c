@@ -215,8 +215,18 @@ static void pjvm_gc_mark_roots(PJVMCtx *j) {
     for (uint16_t i = 0; i < j->lt; i++)
         (void)pjvm_gc_mark_ref(j, j->loc_lo[i], j->loc_hi[i]);
 
-    for (uint16_t i = 0; i < PJVM_STATIC_CAP; i++)
-        (void)pjvm_gc_mark_ref(j, j->sf_lo[i], j->sf_hi[i]);
+    if ((region_flags & PJVM_RF_STATIC_REF_BITMAP) != 0 && pjvm_srb_off != 0) {
+        /* The image says which static slots are refs: mark them exactly
+         * and skip int statics entirely. */
+        for (uint16_t i = 0; i < n_static_fields; i++) {
+            uint8_t bits = pjvm_prog_read(pjvm_srb_off + (uint32_t)(i >> 3));
+            if ((bits & (uint8_t)(1u << (i & 7u))) != 0)
+                (void)pjvm_gc_mark_payload(j, j->sf_lo[i], j->sf_hi[i]);
+        }
+    } else {
+        for (uint16_t i = 0; i < PJVM_STATIC_CAP; i++)
+            (void)pjvm_gc_mark_ref(j, j->sf_lo[i], j->sf_hi[i]);
+    }
 
 #if PJVM_GC_ENABLED
     for (uint8_t i = 0; i < pjvm_gc_temp_count; i++)

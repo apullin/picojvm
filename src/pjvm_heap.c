@@ -17,6 +17,21 @@ static void pjvm_heap_zero(uint16_t a, uint16_t size) {
     for (uint16_t i = 0; i < size; i++) w8((uint16_t)(a + i), 0);
 }
 
+#if PJVM_GC_ALLOC_BITMAP
+/* Exact allocation bitmap: one bit per 2-byte-aligned payload start. */
+uint8_t pjvm_gc_alloc_bm[PJVM_GC_BITMAP_SPAN >> 4];
+
+void pjvm_gc_bm_set(const PJVMCtx *j, uint16_t payload) {
+    uint16_t bit = (uint16_t)((uint16_t)(payload - j->heap_base) >> 1);
+    pjvm_gc_alloc_bm[bit >> 3] |= (uint8_t)(1u << (bit & 7u));
+}
+
+void pjvm_gc_bm_clear(const PJVMCtx *j, uint16_t payload) {
+    uint16_t bit = (uint16_t)((uint16_t)(payload - j->heap_base) >> 1);
+    pjvm_gc_alloc_bm[bit >> 3] &= (uint8_t)~(1u << (bit & 7u));
+}
+#endif
+
 #if PJVM_HEAP_MODE == PJVM_HEAP_FREELIST
 static uint16_t pjvm_heap_align2(uint16_t v) {
     return (uint16_t)((v + 1u) & ~1u);
@@ -86,6 +101,15 @@ void pjvm_heap_init(PJVMCtx *j, uint16_t start, uint16_t limit) {
         j->heap_ptr = base;
         j->heap_base = base;
         pjvm_gc_init(j);
+
+#if PJVM_GC_ALLOC_BITMAP
+        if (span > PJVM_GC_BITMAP_SPAN) {
+            pjvm_platform_trap(PJVM_TRAP_CAPACITY, (uint16_t)(span >> 8));
+            return;
+        }
+        for (uint16_t i = 0; i < (uint16_t)(sizeof pjvm_gc_alloc_bm); i++)
+            pjvm_gc_alloc_bm[i] = 0;
+#endif
 
         if (total >= PJVM_HEAP_FREE_HDR) {
             j->heap_free_head = base;
@@ -176,6 +200,9 @@ static uint16_t pjvm_heap_alloc_freelist(PJVMCtx *j, uint16_t size, uint8_t kind
                 j->heap_used = (uint16_t)(j->heap_used + want);
                 {
                     uint16_t payload = (uint16_t)(cur + PJVM_HEAP_ALLOC_HDR);
+#if PJVM_GC_ALLOC_BITMAP
+                    pjvm_gc_bm_set(j, payload);
+#endif
                     pjvm_heap_zero(payload, (uint16_t)(want - PJVM_HEAP_ALLOC_HDR));
                     return payload;
                 }
@@ -211,6 +238,9 @@ static void pjvm_heap_free_freelist(PJVMCtx *j, uint16_t a) {
     pjvm_blk_set_next(blk, 0);
     if (j->heap_used >= size) j->heap_used = (uint16_t)(j->heap_used - size);
     else j->heap_used = 0;
+#if PJVM_GC_ALLOC_BITMAP
+    pjvm_gc_bm_clear(j, a);
+#endif
     pjvm_heap_insert_free(j, blk);
 }
 #endif

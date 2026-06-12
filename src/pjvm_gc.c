@@ -112,12 +112,12 @@ static uint8_t pjvm_gc_mark_payload(PJVMCtx *j, uint16_t lo, uint16_t hi) {
     return 1;
 }
 
-#if PJVM_GC_ENABLED
+#if PJVM_GC_ENABLED && !PJVM_GC_ALLOC_BITMAP
 /* Stride index for the conservative walk: block address at the start of
  * each 1/Nth of the heap, rebuilt once per collection (the chain cannot
  * change mid-collect). Validation of an ambiguous root walks at most one
  * stride instead of the whole chain. Fixed 2*N bytes regardless of heap
- * size. */
+ * size. (Superseded by the exact bitmap when PJVM_GC_ALLOC_BITMAP=1.) */
 #ifndef PJVM_GC_STRIDE_N
 #define PJVM_GC_STRIDE_N 32
 #endif
@@ -152,7 +152,9 @@ static void pjvm_gc_stride_build(PJVMCtx *j) {
  * candidate only counts if the block walk proves it is a payload start. */
 static uint8_t pjvm_gc_mark_ref(PJVMCtx *j, uint16_t lo, uint16_t hi) {
     uint32_t end;
+#if !PJVM_GC_ALLOC_BITMAP
     uint32_t blk32;
+#endif
 
     if (hi != 0 || lo == 0) return 0;
 
@@ -160,6 +162,16 @@ static uint8_t pjvm_gc_mark_ref(PJVMCtx *j, uint16_t lo, uint16_t hi) {
     if (lo < (uint16_t)(j->heap_base + PJVM_HEAP_ALLOC_HDR) || (uint32_t)lo >= end)
         return 0;
 
+#if PJVM_GC_ALLOC_BITMAP
+    /* Exact O(1) validation: the bit is set only at true payload starts. */
+    if ((lo & 1u) != 0) return 0;
+    {
+        uint16_t bit = (uint16_t)((uint16_t)(lo - j->heap_base) >> 1);
+        if ((pjvm_gc_alloc_bm[bit >> 3] & (uint8_t)(1u << (bit & 7u))) == 0)
+            return 0;
+    }
+    return pjvm_gc_mark_payload(j, lo, hi);
+#else
 #if PJVM_GC_ENABLED
     {
         uint32_t bkt = ((uint32_t)lo - j->heap_base) >> pjvm_gc_stride_shift;
@@ -181,6 +193,7 @@ static uint8_t pjvm_gc_mark_ref(PJVMCtx *j, uint16_t lo, uint16_t hi) {
         blk32 += size;
     }
     return 0;
+#endif
 }
 
 static void pjvm_gc_scan_words(PJVMCtx *j, uint16_t start, uint16_t size) {
@@ -330,6 +343,9 @@ static uint8_t pjvm_gc_sweep(PJVMCtx *j) {
                 reclaimed = 1;
                 pjvm_gc_blk_set_size(blk, size, 0);
                 pjvm_gc_blk_set_next(blk, 0);
+#if PJVM_GC_ALLOC_BITMAP
+                pjvm_gc_bm_clear(j, (uint16_t)(blk + PJVM_HEAP_ALLOC_HDR));
+#endif
             }
         } else {
             make_free = 1;
@@ -376,7 +392,7 @@ uint8_t pjvm_gc_collect(PJVMCtx *j, uint8_t reason) {
     (void)reason;
 
 #if PJVM_HEAP_MODE == PJVM_HEAP_FREELIST
-#if PJVM_GC_ENABLED
+#if PJVM_GC_ENABLED && !PJVM_GC_ALLOC_BITMAP
     pjvm_gc_stride_build(j);
 #endif
     pjvm_gc_mark_roots(j);

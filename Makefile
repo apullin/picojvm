@@ -740,6 +740,12 @@ test-gc-temp-roots:
 	$(MAKE) --no-print-directory test-GcTempRootTest \
 		HOST_VM_OPTS='$(HOST_VM_FEATURES) $(GC_DEFAULT_OPTS) -DPJVM_HOST_HEAP_LIMIT=$(GC_HOST_PRESSURE_LIMIT)'
 
+# Exact-allocation-bitmap config: O(1) conservative root validation
+test-gc-alloc-bitmap:
+	$(MAKE) --no-print-directory clean
+	$(MAKE) --no-print-directory test-GcTempRootTest test-GCGraphTest test-AllocHeavyTest \
+		HOST_VM_OPTS='$(HOST_VM_FEATURES) $(GC_DEFAULT_OPTS) -DPJVM_GC_ALLOC_BITMAP=1 -DPJVM_HOST_HEAP_LIMIT=$(GC_HOST_PRESSURE_LIMIT)'
+
 test-gc-alloc-heavy:
 	$(MAKE) --no-print-directory clean
 	$(MAKE) --no-print-directory test-AllocHeavyTest \
@@ -758,6 +764,7 @@ test-gc-host-suite:
 	$(MAKE) --no-print-directory test-gc-alloc-heavy
 	$(MAKE) --no-print-directory test-gc-graph
 	$(MAKE) --no-print-directory test-gc-temp-roots
+	$(MAKE) --no-print-directory test-gc-alloc-bitmap
 
 # --- 8085 simulator target ---
 
@@ -891,5 +898,5 @@ clean:
 .PHONY: all test test-paged test-paged-stress clean sim
 .PHONY: gc-demo-manual gc-demo-allocfail gc-demo-watermark75 gc-demo-return gc-demo-random
 .PHONY: gc-policy-test test-gc-collect test-gc-fragment test-gc-exact test-v4 test-pjvmpack-package test-alloc-heavy test-paged-alloc-heavy test-gc-alloc-heavy
-.PHONY: test-gc-graph test-gc-temp-roots test-gc-host-compat test-gc-host-suite test-sim-smoke test-sim-gc-smoke test-legacy-string-natives
+.PHONY: test-gc-graph test-gc-temp-roots test-gc-alloc-bitmap test-gc-host-compat test-gc-host-suite test-sim-smoke test-sim-gc-smoke test-legacy-string-natives
 .PHONY: test-sim-gc-alloc-heavy test-gc-sim-suite test-gc-suite

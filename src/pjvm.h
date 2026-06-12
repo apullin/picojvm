@@ -175,6 +175,11 @@ typedef uint16_t pjvm_rbo_t;
 #define PJVM_HEAP_META_PENDING   0x0020u
 #endif
 
+#if PJVM_GC_ALLOC_BITMAP && \
+    (!PJVM_GC_ENABLED || PJVM_HEAP_MODE != PJVM_HEAP_FREELIST)
+#error "PJVM_GC_ALLOC_BITMAP requires the freelist heap and GC triggers"
+#endif
+
 /* --- per-execution context -------------------------------------------- */
 typedef struct {
     uint32_t pc;
@@ -294,6 +299,12 @@ void pjvm_gc_protect(uint16_t lo, uint16_t hi);
 #else
 #define PJVM_GC_PROTECT(lo, hi) ((void)(lo), (void)(hi))
 #define PJVM_GC_UNPROTECT(n) ((void)0)
+#endif
+
+#if PJVM_GC_ALLOC_BITMAP
+extern uint8_t pjvm_gc_alloc_bm[PJVM_GC_BITMAP_SPAN >> 4];
+void pjvm_gc_bm_set(const PJVMCtx *j, uint16_t payload);
+void pjvm_gc_bm_clear(const PJVMCtx *j, uint16_t payload);
 #endif
 
 #ifdef PJVM_PAGED

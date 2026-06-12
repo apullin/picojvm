@@ -144,6 +144,18 @@
 #endif
 #endif
 
+/* Optional exact allocation bitmap: one bit per 2-byte-aligned payload
+ * start, kept current by alloc/free/sweep. Conservative root validation
+ * becomes an O(1) bit test instead of a block-chain walk, at a RAM cost
+ * of PJVM_GC_BITMAP_SPAN/16 bytes (4KB for a full 64K span; size the
+ * span to the target's real heap window). Requires freelist heap + GC. */
+#ifndef PJVM_GC_ALLOC_BITMAP
+#define PJVM_GC_ALLOC_BITMAP 0
+#endif
+#ifndef PJVM_GC_BITMAP_SPAN
+#define PJVM_GC_BITMAP_SPAN 0x10000
+#endif
+
 /* Enum natives back javac enums when no java/lang/Enum class is packed.
  * Images packed with the java/lang/Enum.java shim run enums as ordinary
  * bytecode and never call these, so a build committed to shim-packed

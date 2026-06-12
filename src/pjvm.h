@@ -180,6 +180,19 @@ typedef uint16_t pjvm_rbo_t;
 #error "PJVM_GC_ALLOC_BITMAP requires the freelist heap and GC triggers"
 #endif
 
+/* Boot overlay: with a linker script that places .pjvmboot inside the
+ * heap window (ldscripts/i8085-64k-flat-boot.ld), the .pjvm loader is
+ * reclaimed as heap after it runs - it executes exactly once, before
+ * pjvm_heap_init. No-op unless the build opts in. */
+#ifndef PJVM_BOOT_OVERLAY
+#define PJVM_BOOT_OVERLAY 0
+#endif
+#if PJVM_BOOT_OVERLAY
+#define PJVM_BOOT_FN __attribute__((section(".pjvmboot")))
+#else
+#define PJVM_BOOT_FN
+#endif
+
 /* --- per-execution context -------------------------------------------- */
 typedef struct {
     uint32_t pc;

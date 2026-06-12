@@ -743,7 +743,7 @@ static uint16_t pjvm_make_main_args(PJVMCtx *j) {
 }
 
 /* --- .pjvm loader ----------------------------------------------------- */
-static uint8_t pjvm_check_caps(void) {
+PJVM_BOOT_FN static uint8_t pjvm_check_caps(void) {
     if ((uint32_t)n_methods > (uint32_t)PJVM_METHOD_CAP ||
         (uint32_t)n_classes > (uint32_t)PJVM_CLASS_CAP ||
         (uint32_t)n_static_fields > (uint32_t)PJVM_STATIC_CAP)
@@ -752,7 +752,7 @@ static uint8_t pjvm_check_caps(void) {
 }
 
 #if PJVM_ENABLE_V3
-static void pjvm_parse_v3(uint8_t *data) {
+PJVM_BOOT_FN static void pjvm_parse_v3(uint8_t *data) {
 #if PJVM_ENABLE_V4
     pjvm_format_v4 = 0;
 #endif
@@ -870,7 +870,7 @@ static void pjvm_parse_v3(uint8_t *data) {
 
 #if PJVM_ENABLE_V4
 #if !PJVM_MT_IN_IMAGE
-static uint32_t pjvm_read_uleb(uint8_t **pp) {
+PJVM_BOOT_FN static uint32_t pjvm_read_uleb(uint8_t **pp) {
     uint32_t v = 0;
     uint8_t shift = 0;
 
@@ -884,7 +884,7 @@ static uint32_t pjvm_read_uleb(uint8_t **pp) {
 }
 #endif /* !PJVM_MT_IN_IMAGE */
 
-static void pjvm_parse_v4(uint8_t *data) {
+PJVM_BOOT_FN static void pjvm_parse_v4(uint8_t *data) {
 #if PJVM_ENABLE_V3
     pjvm_format_v4 = 1;
 #endif
@@ -1058,7 +1058,7 @@ static void pjvm_parse_v4(uint8_t *data) {
 }
 #endif
 
-void pjvm_parse(uint8_t *data) {
+PJVM_BOOT_FN void pjvm_parse(uint8_t *data) {
     if (data[0] != PJVM_MAGIC) {
         pjvm_platform_trap(PJVM_TRAP_BAD_VERSION, data[0]);
         return;

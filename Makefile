@@ -81,7 +81,7 @@ GC_SIM_OUTPUT_BASE ?= 0xE000
 GC_SIM_SMOKE_HEAP_END ?= 0xE000
 GC_SIM_HEAP_END ?= 0xE000
 GC_SIM_TRAP_BASE ?= 0xE080
-GC_SIM_FLAT_LDSCRIPT = $(ROOT)/sysroot/ldscripts/i8085-64k-flat.ld
+GC_SIM_FLAT_LDSCRIPT = ldscripts/i8085-64k-flat-boot.ld
 GC_SIM_SMOKE_OPTS = $(GC_DEFAULT_OPTS) -DPJVM_SIM_HEAP_END=$(GC_SIM_SMOKE_HEAP_END) -DPJVM_SIM_OUTPUT_BASE=$(GC_SIM_OUTPUT_BASE) -DPJVM_SIM_TRAP_BASE=$(GC_SIM_TRAP_BASE)
 GC_SIM_STRESS_OPTS = $(GC_DEFAULT_OPTS) -DPJVM_SIM_HEAP_END=$(GC_SIM_HEAP_END) -DPJVM_SIM_OUTPUT_BASE=$(GC_SIM_OUTPUT_BASE) -DPJVM_SIM_TRAP_BASE=$(GC_SIM_TRAP_BASE)
 CLANG    = $(ROOT)/llvm-project/build-clang-8085/bin/clang
@@ -93,10 +93,12 @@ SIM_VERIFY = $(ROOT)/tooling/examples/verify_dump.py
 CRT      = $(ROOT)/sysroot/crt/crt0.S
 LIBGCC   = $(ROOT)/sysroot/lib/libgcc.a
 LIBC     = $(ROOT)/sysroot/lib/libc.a
-# 64K flat map: the VM image (~35K text+rodata with hardening + GC) no
-# longer fits the 32K ROM split; real-hardware footprint validation lives
-# in the outer pjvm8085-asm suite.
-LDSCRIPT = $(ROOT)/sysroot/ldscripts/i8085-64k-flat.ld
+# 64K flat map with the boot overlay: the .pjvm loader links inside the
+# heap window and is reclaimed after it runs (it executes once, before
+# pjvm_heap_init). The VM image (~35K+ with hardening + GC) no longer
+# fits the 32K ROM split; real-hardware footprint validation lives in
+# the outer pjvm8085-asm suite.
+LDSCRIPT = ldscripts/i8085-64k-flat-boot.ld
 TARGET_OPT = Oz
 BUILDDIR = build
 TARGET_VM_OPTS ?=
@@ -124,7 +126,7 @@ HOST_VM_LARGE_OPTS ?= -DPJVM_ENABLE_V4=1 -DPJVM_METHOD_CAP=20000 \
 # Capacity overrides for 8085 target (smaller than host defaults)
 SIM_CAPS = -DPJVM_METHOD_CAP=64 -DPJVM_CLASS_CAP=16 -DPJVM_VTABLE_CAP=128 \
            -DPJVM_STATIC_CAP=32 -DPJVM_MAX_STACK=64 -DPJVM_MAX_LOCALS=128 \
-           -DPJVM_MAX_FRAMES=16
+           -DPJVM_MAX_FRAMES=16 -DPJVM_BOOT_OVERLAY=1
 
 all: $(PICOJVM)
 

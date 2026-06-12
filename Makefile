@@ -109,6 +109,19 @@ TARGET_OUTLINE_FLAGS = -mllvm -enable-machine-outliner=always
 else
 TARGET_OUTLINE_FLAGS =
 endif
+# Full LTO for 8085 target builds: C objects carry bitcode and codegen runs
+# at link time over one merged module, so the outliner sees cross-TU repeats
+# (~-2.6K ROM, ~+2.2K heap on the flagship sim). Codegen -mllvm flags must
+# reach the LINKER. Requires an lld built from the same backend tree as
+# clang: a stale lld silently codegens without the outliner hooks.
+TARGET_LTO ?= 0
+ifeq ($(TARGET_LTO),1)
+TARGET_LTO_CFLAGS = -flto
+TARGET_LTO_LDFLAGS = $(TARGET_OUTLINE_FLAGS)
+else
+TARGET_LTO_CFLAGS =
+TARGET_LTO_LDFLAGS =
+endif
 BUILDDIR = build
 TARGET_VM_OPTS ?=
 TARGET_ASM_HELPERS ?= 1
@@ -789,6 +802,17 @@ test-gc-host-suite:
 $(BUILDDIR):
 	mkdir -p $(BUILDDIR)
 
+# Target objects depend on the flags they were built with, like the host
+# stamp above. TARGET_LTO additionally changes the object FORMAT (bitcode
+# vs native), so stale objects must be removed, not just relinked.
+TARGET_VM_ALLFLAGS = $(TARGET_OPT) $(TARGET_LTO_CFLAGS) $(TARGET_OUTLINE_FLAGS) $(SIM_CAPS) $(TARGET_VM_OPTS) $(TARGET_ASM_HELPERS_DEF)
+$(BUILDDIR)/.targetvm.flags: FORCE | $(BUILDDIR)
+	@printf '%s\n' '$(TARGET_VM_ALLFLAGS)' | cmp -s - $@ 2>/dev/null || \
+		{ printf '%s\n' '$(TARGET_VM_ALLFLAGS)' > $@; \
+		  rm -f $(BUILDDIR)/pjvm.o $(BUILDDIR)/pjvm_heap.o \
+		        $(BUILDDIR)/pjvm_gc.o $(BUILDDIR)/i8085_sim.o \
+		        $(BUILDDIR)/i8085_helpers.o $(BUILDDIR)/*.elf $(BUILDDIR)/*.bin; }
+
 # Convert .pjvm binary to C source with const array
 $(PJVM_DATA_C): FORCE $(PJVM_FILE) | $(BUILDDIR)
 	@$(PYTHON) -c "import pathlib, sys; d = pathlib.Path(sys.argv[1]).read_bytes(); \
@@ -799,19 +823,19 @@ pathlib.Path(sys.argv[2]).write_text('// Auto-generated — .pjvm program data\\
 $(BUILDDIR)/crt0.o: $(CRT) | $(BUILDDIR)
 	$(CLANG) --target=i8085-unknown-elf -ffreestanding -fno-builtin -$(TARGET_OPT) -c $< -o $@
 
-$(BUILDDIR)/pjvm.o: src/pjvm.c $(PJVM_HEADERS) | $(BUILDDIR)
-	$(CLANG) --target=i8085-unknown-elf -ffreestanding -fno-builtin -ffunction-sections $(TARGET_OUTLINE_FLAGS) -$(TARGET_OPT) $(SIM_CAPS) $(TARGET_VM_OPTS) $(TARGET_ASM_HELPERS_DEF) -c $< -o $@
+$(BUILDDIR)/pjvm.o: src/pjvm.c $(PJVM_HEADERS) $(BUILDDIR)/.targetvm.flags | $(BUILDDIR)
+	$(CLANG) --target=i8085-unknown-elf -ffreestanding -fno-builtin -ffunction-sections $(TARGET_LTO_CFLAGS) $(TARGET_OUTLINE_FLAGS) -$(TARGET_OPT) $(SIM_CAPS) $(TARGET_VM_OPTS) $(TARGET_ASM_HELPERS_DEF) -c $< -o $@
 
-$(BUILDDIR)/pjvm_heap.o: src/pjvm_heap.c $(PJVM_HEADERS) | $(BUILDDIR)
-	$(CLANG) --target=i8085-unknown-elf -ffreestanding -fno-builtin -ffunction-sections $(TARGET_OUTLINE_FLAGS) -$(TARGET_OPT) $(SIM_CAPS) $(TARGET_VM_OPTS) -c $< -o $@
+$(BUILDDIR)/pjvm_heap.o: src/pjvm_heap.c $(PJVM_HEADERS) $(BUILDDIR)/.targetvm.flags | $(BUILDDIR)
+	$(CLANG) --target=i8085-unknown-elf -ffreestanding -fno-builtin -ffunction-sections $(TARGET_LTO_CFLAGS) $(TARGET_OUTLINE_FLAGS) -$(TARGET_OPT) $(SIM_CAPS) $(TARGET_VM_OPTS) -c $< -o $@
 
-$(BUILDDIR)/pjvm_gc.o: src/pjvm_gc.c $(PJVM_HEADERS) | $(BUILDDIR)
-	$(CLANG) --target=i8085-unknown-elf -ffreestanding -fno-builtin -ffunction-sections $(TARGET_OUTLINE_FLAGS) -$(TARGET_OPT) $(SIM_CAPS) $(TARGET_VM_OPTS) -c $< -o $@
+$(BUILDDIR)/pjvm_gc.o: src/pjvm_gc.c $(PJVM_HEADERS) $(BUILDDIR)/.targetvm.flags | $(BUILDDIR)
+	$(CLANG) --target=i8085-unknown-elf -ffreestanding -fno-builtin -ffunction-sections $(TARGET_LTO_CFLAGS) $(TARGET_OUTLINE_FLAGS) -$(TARGET_OPT) $(SIM_CAPS) $(TARGET_VM_OPTS) -c $< -o $@
 
-$(BUILDDIR)/i8085_sim.o: platform/i8085_sim.c $(PJVM_HEADERS) | $(BUILDDIR)
-	$(CLANG) --target=i8085-unknown-elf -ffreestanding -fno-builtin -ffunction-sections $(TARGET_OUTLINE_FLAGS) -$(TARGET_OPT) $(SIM_CAPS) $(TARGET_VM_OPTS) $(TARGET_ASM_HELPERS_DEF) -c $< -o $@
+$(BUILDDIR)/i8085_sim.o: platform/i8085_sim.c $(PJVM_HEADERS) $(BUILDDIR)/.targetvm.flags | $(BUILDDIR)
+	$(CLANG) --target=i8085-unknown-elf -ffreestanding -fno-builtin -ffunction-sections $(TARGET_LTO_CFLAGS) $(TARGET_OUTLINE_FLAGS) -$(TARGET_OPT) $(SIM_CAPS) $(TARGET_VM_OPTS) $(TARGET_ASM_HELPERS_DEF) -c $< -o $@
 
-$(BUILDDIR)/i8085_helpers.o: platform/i8085_helpers.S src/pjvm_opts.h | $(BUILDDIR)
+$(BUILDDIR)/i8085_helpers.o: platform/i8085_helpers.S src/pjvm_opts.h $(BUILDDIR)/.targetvm.flags | $(BUILDDIR)
 	$(CLANG) --target=i8085-unknown-elf $(TARGET_VM_OPTS) -DPJVM_ASM_HELPERS -c $< -o $@
 
 $(PJVM_DATA_O): $(PJVM_DATA_C) | $(BUILDDIR)
@@ -827,7 +851,7 @@ $(BUILDDIR)/AllocHeavyTest.gc-sim.dump: FORCE tests/AllocHeavyTest.pjvm | $(BUIL
 		TARGET_VM_OPTS="$(GC_SIM_STRESS_OPTS)" > $@ 2>&1
 
 $(TARGET_ELF): $(BUILDDIR)/crt0.o $(BUILDDIR)/pjvm.o $(BUILDDIR)/pjvm_heap.o $(BUILDDIR)/pjvm_gc.o $(BUILDDIR)/i8085_sim.o $(TARGET_HELPER_OBJS) $(PJVM_DATA_O) $(LIBGCC) $(LIBC)
-	$(LLD) -m i8085elf --gc-sections -T $(LDSCRIPT) -o $@ $^ $(LIBGCC)
+	$(LLD) $(TARGET_LTO_LDFLAGS) -m i8085elf --gc-sections -T $(LDSCRIPT) -o $@ $^ $(LIBGCC)
 
 $(TARGET_BIN): $(TARGET_ELF)
 	$(OBJCOPY) -O binary $< $@

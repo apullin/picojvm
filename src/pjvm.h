@@ -188,7 +188,10 @@ typedef uint16_t pjvm_rbo_t;
 #define PJVM_BOOT_OVERLAY 0
 #endif
 #if PJVM_BOOT_OVERLAY
-#define PJVM_BOOT_FN __attribute__((section(".pjvmboot")))
+/* noinline keeps loader code in the overlay section under whole-program
+ * compilation (LTO): inlining a boot fn into a .text caller would strand
+ * its bytes outside the reclaimable window. */
+#define PJVM_BOOT_FN __attribute__((section(".pjvmboot"), noinline))
 #else
 #define PJVM_BOOT_FN
 #endif

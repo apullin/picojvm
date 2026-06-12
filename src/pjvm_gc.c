@@ -10,6 +10,10 @@
 #define PJVM_GC_IMPL 1
 #include "pjvm.h"
 
+/* noinline for multi-call-site helpers only: single-site helpers inline
+ * with no duplication, and 8085 call overhead is not free */
+#define GNI __attribute__((noinline))
+
 #if PJVM_GC_ENABLED
 #if PJVM_GC_TRIGGERS & PJVM_GC_TRIG_RANDOM_ABOVE_WATERMARK
 static uint16_t pjvm_gc_next_random(PJVMCtx *j) {
@@ -91,7 +95,7 @@ static uint32_t pjvm_gc_heap_limit_full(const PJVMCtx *j) {
  * payload pointer by construction and the block header sits at lo-4. The
  * range and ALLOC-flag checks stay (they are cheap and keep the collector
  * itself memory-safe against a corrupted slot); only the search goes. */
-static uint8_t pjvm_gc_mark_payload(PJVMCtx *j, uint16_t lo, uint16_t hi) {
+static GNI uint8_t pjvm_gc_mark_payload(PJVMCtx *j, uint16_t lo, uint16_t hi) {
     uint16_t blk, meta;
     uint8_t kind;
 
@@ -112,45 +116,11 @@ static uint8_t pjvm_gc_mark_payload(PJVMCtx *j, uint16_t lo, uint16_t hi) {
     return 1;
 }
 
-#if PJVM_GC_ENABLED && !PJVM_GC_ALLOC_BITMAP
-/* Stride index for the conservative walk: block address at the start of
- * each 1/Nth of the heap, rebuilt once per collection (the chain cannot
- * change mid-collect). Validation of an ambiguous root walks at most one
- * stride instead of the whole chain. Fixed 2*N bytes regardless of heap
- * size. (Superseded by the exact bitmap when PJVM_GC_ALLOC_BITMAP=1.) */
-#ifndef PJVM_GC_STRIDE_N
-#define PJVM_GC_STRIDE_N 32
-#endif
-static uint16_t pjvm_gc_stride[PJVM_GC_STRIDE_N];
-static uint8_t pjvm_gc_stride_shift;
-
-static void pjvm_gc_stride_build(PJVMCtx *j) {
-    uint32_t end = pjvm_gc_heap_limit_full(j);
-    uint32_t cap = end - j->heap_base;
-    uint32_t blk32 = j->heap_base;
-    uint8_t shift = 4;
-    uint8_t n = 0;
-
-    while ((cap >> shift) > PJVM_GC_STRIDE_N) shift++;
-    pjvm_gc_stride_shift = shift;
-
-    while (blk32 < end && n < PJVM_GC_STRIDE_N) {
-        uint16_t size = pjvm_gc_blk_size((uint16_t)blk32);
-        if (size < PJVM_HEAP_FREE_HDR || blk32 + size > end) break;
-        while (n < PJVM_GC_STRIDE_N &&
-               (uint32_t)j->heap_base + ((uint32_t)n << shift) < blk32 + size)
-            pjvm_gc_stride[n++] = (uint16_t)blk32;
-        blk32 += size;
-    }
-    while (n < PJVM_GC_STRIDE_N)
-        pjvm_gc_stride[n++] = (uint16_t)j->heap_base;
-}
-#endif
 
 /* Conservative marking for ambiguous words (stack/locals/temp roots and
  * objects without ref bitmaps): an int can alias a heap address, so the
  * candidate only counts if the block walk proves it is a payload start. */
-static uint8_t pjvm_gc_mark_ref(PJVMCtx *j, uint16_t lo, uint16_t hi) {
+static GNI uint8_t pjvm_gc_mark_ref(PJVMCtx *j, uint16_t lo, uint16_t hi) {
     uint32_t end;
 #if !PJVM_GC_ALLOC_BITMAP
     uint32_t blk32;
@@ -172,15 +142,7 @@ static uint8_t pjvm_gc_mark_ref(PJVMCtx *j, uint16_t lo, uint16_t hi) {
     }
     return pjvm_gc_mark_payload(j, lo, hi);
 #else
-#if PJVM_GC_ENABLED
-    {
-        uint32_t bkt = ((uint32_t)lo - j->heap_base) >> pjvm_gc_stride_shift;
-        if (bkt >= PJVM_GC_STRIDE_N) bkt = PJVM_GC_STRIDE_N - 1;
-        blk32 = pjvm_gc_stride[bkt];
-    }
-#else
     blk32 = j->heap_base;
-#endif
     for (; blk32 < end; ) {
         uint16_t blk = (uint16_t)blk32;
         uint16_t size;
@@ -267,7 +229,7 @@ static void pjvm_gc_scan_block(PJVMCtx *j, uint16_t blk) {
     }
 }
 
-static void pjvm_gc_mark_roots(PJVMCtx *j) {
+static GNI void pjvm_gc_mark_roots(PJVMCtx *j) {
     for (uint16_t i = 0; i < j->sp; i++)
         (void)pjvm_gc_mark_ref(j, j->stk_lo[i], j->stk_hi[i]);
 
@@ -293,7 +255,7 @@ static void pjvm_gc_mark_roots(PJVMCtx *j) {
 #endif
 }
 
-static void pjvm_gc_trace(PJVMCtx *j) {
+static GNI void pjvm_gc_trace(PJVMCtx *j) {
     uint32_t end = pjvm_gc_heap_limit_full(j);
     uint8_t progress;
 
@@ -316,7 +278,7 @@ static void pjvm_gc_trace(PJVMCtx *j) {
     } while (progress);
 }
 
-static uint8_t pjvm_gc_sweep(PJVMCtx *j) {
+static GNI uint8_t pjvm_gc_sweep(PJVMCtx *j) {
     uint32_t end = pjvm_gc_heap_limit_full(j);
     uint16_t free_head = 0;
     uint16_t free_tail = 0;
@@ -392,9 +354,6 @@ uint8_t pjvm_gc_collect(PJVMCtx *j, uint8_t reason) {
     (void)reason;
 
 #if PJVM_HEAP_MODE == PJVM_HEAP_FREELIST
-#if PJVM_GC_ENABLED && !PJVM_GC_ALLOC_BITMAP
-    pjvm_gc_stride_build(j);
-#endif
     pjvm_gc_mark_roots(j);
     pjvm_gc_trace(j);
     reclaimed = pjvm_gc_sweep(j);

@@ -164,19 +164,15 @@ static uint8_t pjvm_format_v4;
 #else
 #define pjvm_format_v4 0
 #endif
-static pjvm_count_t m_ml[PJVM_METHOD_CAP], m_ac[PJVM_METHOD_CAP];
-static pjvm_flags_t m_fl[PJVM_METHOD_CAP];
-static pjvm_vslot_t m_vs[PJVM_METHOD_CAP];
-static pjvm_vmid_t m_vmid[PJVM_METHOD_CAP];
-static pjvm_count_t m_ec[PJVM_METHOD_CAP], m_eo[PJVM_METHOD_CAP];
-static uint32_t m_co[PJVM_METHOD_CAP];
-static pjvm_cpbase_t m_cb[PJVM_METHOD_CAP];
 static pjvm_class_id_t cls_pid[PJVM_CLASS_CAP];
 pjvm_count_t cls_nf[PJVM_CLASS_CAP];
-static pjvm_count_t cls_vb[PJVM_CLASS_CAP], cls_vs[PJVM_CLASS_CAP];
+static pjvm_count_t cls_vs[PJVM_CLASS_CAP];
 static pjvm_method_id_t cls_ci[PJVM_CLASS_CAP];
 pjvm_rbo_t cls_rbo[PJVM_CLASS_CAP];
+#if !PJVM_MT_IN_IMAGE
+static pjvm_count_t cls_vb[PJVM_CLASS_CAP];
 static pjvm_method_id_t vt[PJVM_VTABLE_CAP];
+#endif
 
 /* --- program image access macro --------------------------------------- */
 #ifdef PJVM_PAGED
@@ -197,6 +193,102 @@ static pjvm_class_id_t pjvm_ref_class_id(uint16_t lo, uint16_t hi) {
 }
 #else
 #define ROM_OFF(hi, lo) (((uint32_t)((hi) - 1) << 16) | (lo))
+#endif
+
+#if PJVM_MT_IN_IMAGE
+/* Method metadata is read straight from the image's fixed-width method
+ * table (v3: 14B entries, v4: 24B) instead of being unpacked into ~22
+ * bytes of RAM per method. Requires an unpacked table (the ULEB-packed
+ * v4 variant is delta-coded and cannot be random-accessed). */
+static uint32_t pjvm_mt_off;
+static pjvm_rbo_t cls_vto[PJVM_CLASS_CAP]; /* per-class vtable image offset */
+
+NI static uint32_t pjvm_mt_entry(pjvm_method_id_t mi) {
+    /* x24 and x14 decompose into constant shifts */
+    if (pjvm_format_v4)
+        return pjvm_mt_off + (((uint32_t)mi << 4) + ((uint32_t)mi << 3));
+    return pjvm_mt_off + (((uint32_t)mi << 4) - ((uint32_t)mi << 1));
+}
+NI static pjvm_count_t pjvm_mt_ml(pjvm_method_id_t mi) {
+    uint32_t e = pjvm_mt_entry(mi);
+    return pjvm_format_v4 ? PROG16(e) : PROG(e);
+}
+NI static pjvm_count_t pjvm_mt_ac(pjvm_method_id_t mi) {
+    uint32_t e = pjvm_mt_entry(mi);
+    return pjvm_format_v4 ? PROG16(e + 4) : PROG(e + 2);
+}
+NI static pjvm_flags_t pjvm_mt_fl(pjvm_method_id_t mi) {
+    uint32_t e = pjvm_mt_entry(mi);
+    return pjvm_format_v4 ? PROG16(e + 6) : PROG(e + 3);
+}
+NI static uint32_t pjvm_mt_co(pjvm_method_id_t mi) {
+    uint32_t e = pjvm_mt_entry(mi) + (pjvm_format_v4 ? 8u : 4u);
+    return (uint32_t)PROG16(e) | ((uint32_t)PROG16(e + 2) << 16);
+}
+NI static pjvm_cpbase_t pjvm_mt_cb(pjvm_method_id_t mi) {
+    uint32_t e = pjvm_mt_entry(mi);
+    if (pjvm_format_v4)
+        return (pjvm_cpbase_t)((uint32_t)PROG16(e + 12) |
+                               ((uint32_t)PROG16(e + 14) << 16));
+    return (pjvm_cpbase_t)PROG16(e + 8);
+}
+NI static pjvm_vslot_t pjvm_mt_vs(pjvm_method_id_t mi) {
+    uint32_t e = pjvm_mt_entry(mi);
+    if (pjvm_format_v4) return (pjvm_vslot_t)PROG16(e + 16);
+    {
+        uint8_t v = PROG(e + 10);
+        return v == 0xFFu ? PJVM_NO_VTABLE : (pjvm_vslot_t)v;
+    }
+}
+NI static pjvm_vmid_t pjvm_mt_vmid(pjvm_method_id_t mi) {
+    uint32_t e = pjvm_mt_entry(mi);
+    if (pjvm_format_v4) return (pjvm_vmid_t)PROG16(e + 18);
+    {
+        uint8_t v = PROG(e + 11);
+        return v == 0xFFu ? PJVM_NO_VTABLE : (pjvm_vmid_t)v;
+    }
+}
+NI static pjvm_count_t pjvm_mt_ec(pjvm_method_id_t mi) {
+    uint32_t e = pjvm_mt_entry(mi);
+    return pjvm_format_v4 ? PROG16(e + 20) : PROG(e + 12);
+}
+NI static pjvm_count_t pjvm_mt_eo(pjvm_method_id_t mi) {
+    uint32_t e = pjvm_mt_entry(mi);
+    return pjvm_format_v4 ? PROG16(e + 22) : PROG(e + 13);
+}
+NI static pjvm_method_id_t pjvm_vt_at(pjvm_class_id_t ci, pjvm_vslot_t slot) {
+    if (pjvm_format_v4)
+        return (pjvm_method_id_t)PROG16(cls_vto[ci] + ((uint32_t)slot << 1));
+    return (pjvm_method_id_t)PROG(cls_vto[ci] + slot);
+}
+#define M_ML(i) pjvm_mt_ml(i)
+#define M_AC(i) pjvm_mt_ac(i)
+#define M_FL(i) pjvm_mt_fl(i)
+#define M_VS(i) pjvm_mt_vs(i)
+#define M_VMID(i) pjvm_mt_vmid(i)
+#define M_EC(i) pjvm_mt_ec(i)
+#define M_EO(i) pjvm_mt_eo(i)
+#define M_CO(i) pjvm_mt_co(i)
+#define M_CB(i) pjvm_mt_cb(i)
+#define VT_AT(ci, slot) pjvm_vt_at(ci, slot)
+#else
+static pjvm_count_t m_ml[PJVM_METHOD_CAP], m_ac[PJVM_METHOD_CAP];
+static pjvm_flags_t m_fl[PJVM_METHOD_CAP];
+static pjvm_vslot_t m_vs[PJVM_METHOD_CAP];
+static pjvm_vmid_t m_vmid[PJVM_METHOD_CAP];
+static pjvm_count_t m_ec[PJVM_METHOD_CAP], m_eo[PJVM_METHOD_CAP];
+static uint32_t m_co[PJVM_METHOD_CAP];
+static pjvm_cpbase_t m_cb[PJVM_METHOD_CAP];
+#define M_ML(i) m_ml[i]
+#define M_AC(i) m_ac[i]
+#define M_FL(i) m_fl[i]
+#define M_VS(i) m_vs[i]
+#define M_VMID(i) m_vmid[i]
+#define M_EC(i) m_ec[i]
+#define M_EO(i) m_eo[i]
+#define M_CO(i) m_co[i]
+#define M_CB(i) m_cb[i]
+#define VT_AT(ci, slot) vt[cls_vb[(ci)] + (slot)]
 #endif
 
 /* --- paged mode implementation ---------------------------------------- */
@@ -678,7 +770,9 @@ static void pjvm_parse_v3(uint8_t *data) {
     }
 
     uint8_t *p = data + PJVM_HDR_SIZE_V3;
+#if !PJVM_MT_IN_IMAGE
     uint32_t vo = 0;
+#endif
 
     for (pjvm_class_id_t i = 0; i < n_classes; i++) {
         uint8_t pid = *p++;
@@ -689,6 +783,10 @@ static void pjvm_parse_v3(uint8_t *data) {
             uint8_t ci = *p++;
             cls_ci[i] = ci == 0xFFu ? PJVM_NO_CLINIT : ci;
         }
+#if PJVM_MT_IN_IMAGE
+        cls_vto[i] = (pjvm_rbo_t)(p - data);
+        p += cls_vs[i];
+#else
         if ((uint32_t)vo + cls_vs[i] > PJVM_VTABLE_CAP) {
             pjvm_platform_trap(PJVM_TRAP_CAPACITY, data[1]);
             return;
@@ -696,6 +794,7 @@ static void pjvm_parse_v3(uint8_t *data) {
         cls_vb[i] = (pjvm_count_t)vo;
         for (pjvm_count_t jj = 0; jj < cls_vs[i]; jj++)
             vt[vo++] = *p++;
+#endif
         if (region_flags & PJVM_RF_REF_BITMAPS) {
             cls_rbo[i] = (pjvm_rbo_t)(p - data);
             p += (uint16_t)((cls_nf[i] + 7u) >> 3);
@@ -704,6 +803,10 @@ static void pjvm_parse_v3(uint8_t *data) {
         }
     }
 
+#if PJVM_MT_IN_IMAGE
+    pjvm_mt_off = (uint32_t)(p - data);
+    p += (uint32_t)n_methods * PJVM_MT_ENTRY;
+#else
     for (pjvm_method_id_t i = 0; i < n_methods; i++) {
         m_ml[i] = p[0]; m_ac[i] = p[2]; m_fl[i] = p[3];
         m_co[i] = RD32LE(p + 4);
@@ -712,6 +815,7 @@ static void pjvm_parse_v3(uint8_t *data) {
         m_vmid[i] = p[11] == 0xFFu ? PJVM_NO_VTABLE : p[11];
         m_ec[i] = p[12]; m_eo[i] = p[13]; p += PJVM_MT_ENTRY;
     }
+#endif
 
     uint16_t cpc = RD16LE(p);
     p += 2;
@@ -729,7 +833,7 @@ static void pjvm_parse_v3(uint8_t *data) {
     {
         /* Count exception entries: sum of m_ec[] */
         uint32_t n_exc = 0;
-        for (pjvm_method_id_t i = 0; i < n_methods; i++) n_exc += m_ec[i];
+        for (pjvm_method_id_t i = 0; i < n_methods; i++) n_exc += M_EC(i);
         p += n_exc * PJVM_ET_ENTRY;
 
         /* Skip pin hints if present (1 byte per method) */
@@ -765,6 +869,7 @@ static void pjvm_parse_v3(uint8_t *data) {
 #endif /* PJVM_ENABLE_V3 */
 
 #if PJVM_ENABLE_V4
+#if !PJVM_MT_IN_IMAGE
 static uint32_t pjvm_read_uleb(uint8_t **pp) {
     uint32_t v = 0;
     uint8_t shift = 0;
@@ -777,6 +882,7 @@ static uint32_t pjvm_read_uleb(uint8_t **pp) {
         shift += 7;
     }
 }
+#endif /* !PJVM_MT_IN_IMAGE */
 
 static void pjvm_parse_v4(uint8_t *data) {
 #if PJVM_ENABLE_V3
@@ -796,7 +902,9 @@ static void pjvm_parse_v4(uint8_t *data) {
     }
 
     uint8_t *p = data + PJVM_HDR_SIZE_V4;
+#if !PJVM_MT_IN_IMAGE
     uint32_t vo = 0;
+#endif
 
     for (pjvm_class_id_t i = 0; i < n_classes; i++) {
         uint16_t pid = RD16LE(p); p += 2;
@@ -807,6 +915,10 @@ static void pjvm_parse_v4(uint8_t *data) {
             uint16_t ci = RD16LE(p); p += 2;
             cls_ci[i] = ci == 0xFFFFu ? PJVM_NO_CLINIT : ci;
         }
+#if PJVM_MT_IN_IMAGE
+        cls_vto[i] = (pjvm_rbo_t)(p - data);
+        p += (uint32_t)cls_vs[i] * 2u;
+#else
         if ((uint32_t)vo + cls_vs[i] > PJVM_VTABLE_CAP) {
             pjvm_platform_trap(PJVM_TRAP_CAPACITY, data[1]);
             return;
@@ -816,6 +928,7 @@ static void pjvm_parse_v4(uint8_t *data) {
             vt[vo++] = RD16LE(p);
             p += 2;
         }
+#endif
         if (region_flags & PJVM_RF_REF_BITMAPS) {
             cls_rbo[i] = (pjvm_rbo_t)(p - data);
             p += (uint16_t)((cls_nf[i] + 7u) >> 3);
@@ -825,6 +938,12 @@ static void pjvm_parse_v4(uint8_t *data) {
     }
 
     if (region_flags & PJVM_RF_PACKED_METHOD_TABLE) {
+#if PJVM_MT_IN_IMAGE
+        /* Delta-coded ULEB entries cannot be random-accessed; repack the
+         * image with a fixed-width method table for this build. */
+        pjvm_platform_trap(PJVM_TRAP_UNSUPPORTED, PJVM_RF_PACKED_METHOD_TABLE);
+        return;
+#else
         uint8_t *mt_end = p + 4 + RD32LE(p);
         uint32_t prev_code_offset = 0;
         uint32_t prev_cp_base = 0;
@@ -875,7 +994,12 @@ static void pjvm_parse_v4(uint8_t *data) {
             }
         }
         p = mt_end;
+#endif
     } else {
+#if PJVM_MT_IN_IMAGE
+        pjvm_mt_off = (uint32_t)(p - data);
+        p += (uint32_t)n_methods * PJVM_MT_ENTRY_V4;
+#else
         for (pjvm_method_id_t i = 0; i < n_methods; i++) {
             m_ml[i] = RD16LE(p);
             m_ac[i] = RD16LE(p + 4);
@@ -892,6 +1016,7 @@ static void pjvm_parse_v4(uint8_t *data) {
             m_eo[i] = RD16LE(p + 22);
             p += PJVM_MT_ENTRY_V4;
         }
+#endif
     }
 
     uint32_t cpc = RD32LE(p);
@@ -908,7 +1033,7 @@ static void pjvm_parse_v4(uint8_t *data) {
 
     {
         uint32_t n_exc = 0;
-        for (pjvm_method_id_t i = 0; i < n_methods; i++) n_exc += m_ec[i];
+        for (pjvm_method_id_t i = 0; i < n_methods; i++) n_exc += M_EC(i);
         p += n_exc * PJVM_ET_ENTRY_V4;
         if (region_flags & PJVM_RF_PIN_HINTS)
             p += n_methods;
@@ -972,8 +1097,8 @@ static void pjvm_inv(pjvm_method_id_t mi) {
 
     PJVM_CHECK_METHOD_ID(mi);
 
-    if (m_fl[mi] & 1) {
-        uint8_t nid = (uint8_t)(m_fl[mi] >> 1);
+    if (M_FL(mi) & 1) {
+        uint8_t nid = (uint8_t)(M_FL(mi) >> 1);
         switch (nid) {
         case NATIVE_PUTCHAR:
             alo = spop_lo();
@@ -1003,7 +1128,7 @@ static void pjvm_inv(pjvm_method_id_t mi) {
             g_pjvm->fdepth = 0; g_pjvm->pc = PJVM_PC_HALT;
             break;
         case NATIVE_OBJECT_INIT:
-            g_pjvm->sp = (uint16_t)(g_pjvm->sp - m_ac[mi]);
+            g_pjvm->sp = (uint16_t)(g_pjvm->sp - M_AC(mi));
             break;
         case NATIVE_STR_LENGTH:
             SPOP32(alo, ahi);
@@ -1591,7 +1716,7 @@ static void pjvm_inv(pjvm_method_id_t mi) {
     }
 
     if (g_pjvm->fdepth >= PJVM_FDEPTH_LIMIT ||
-        (uint16_t)(g_pjvm->lt + m_ml[mi]) > PJVM_MAX_LOCALS ||
+        (uint16_t)(g_pjvm->lt + M_ML(mi)) > PJVM_MAX_LOCALS ||
         g_pjvm->sp > (uint16_t)(PJVM_MAX_STACK - PJVM_STACK_HEADROOM)) {
         pjvm_platform_trap(PJVM_TRAP_STACK_OVERFLOW, g_pjvm->pc);
         g_pjvm->pc = PJVM_PC_HALT;
@@ -1600,26 +1725,26 @@ static void pjvm_inv(pjvm_method_id_t mi) {
 
     PJVMFrame *f = &g_pjvm->frames[g_pjvm->fdepth];
     f->pc = g_pjvm->pc; f->mi = g_pjvm->cur_mi; f->lb = g_pjvm->cur_lb;
-    f->so = (uint16_t)(g_pjvm->sp - m_ac[mi]); f->cb = g_pjvm->cur_cb;
+    f->so = (uint16_t)(g_pjvm->sp - M_AC(mi)); f->cb = g_pjvm->cur_cb;
     g_pjvm->fdepth++;
     if (g_pjvm->fdepth > g_pjvm->fdepth_max) g_pjvm->fdepth_max = (uint8_t)g_pjvm->fdepth;
 
     uint16_t nb = g_pjvm->lt;
-    g_pjvm->lt += m_ml[mi];
+    g_pjvm->lt += M_ML(mi);
     if (g_pjvm->lt > g_pjvm->lt_max) g_pjvm->lt_max = g_pjvm->lt;
 #if PJVM_GC_ENABLED
-    for (pjvm_count_t i = 0; i < m_ml[mi]; i++) {
+    for (pjvm_count_t i = 0; i < M_ML(mi); i++) {
         g_pjvm->loc_lo[nb + i] = 0;
         g_pjvm->loc_hi[nb + i] = 0;
     }
 #endif
-    for (int32_t i = (int32_t)m_ac[mi] - 1; i >= 0; i--) {
+    for (int32_t i = (int32_t)M_AC(mi) - 1; i >= 0; i--) {
         g_pjvm->sp--;
         g_pjvm->loc_lo[nb + i] = g_pjvm->stk_lo[g_pjvm->sp];
         g_pjvm->loc_hi[nb + i] = g_pjvm->stk_hi[g_pjvm->sp];
     }
     g_pjvm->cur_mi = mi; g_pjvm->cur_lb = nb;
-    g_pjvm->cur_cb = m_cb[mi]; g_pjvm->pc = m_co[mi];
+    g_pjvm->cur_cb = M_CB(mi); g_pjvm->pc = M_CO(mi);
 }
 
 static void pjvm_ret(uint8_t has_val) {
@@ -1645,9 +1770,9 @@ static void pjvm_throw(uint16_t exc_ref, uint32_t throw_pc) {
     pjvm_class_id_t ci = (pjvm_class_id_t)r16(exc_ref);
 
     for (;;) {
-        pjvm_count_t count = m_ec[g_pjvm->cur_mi];
-        pjvm_count_t base = m_eo[g_pjvm->cur_mi];
-        uint32_t rel_pc = throw_pc - m_co[g_pjvm->cur_mi];
+        pjvm_count_t count = M_EC(g_pjvm->cur_mi);
+        pjvm_count_t base = M_EO(g_pjvm->cur_mi);
+        uint32_t rel_pc = throw_pc - M_CO(g_pjvm->cur_mi);
 
         for (pjvm_count_t i = 0; i < count; i++) {
             uint32_t eoff = et_off + (uint32_t)(base + i) *
@@ -1679,7 +1804,7 @@ static void pjvm_throw(uint16_t exc_ref, uint32_t throw_pc) {
                         ? g_pjvm->frames[g_pjvm->fdepth - 1].so
                         : 0;
                     spush(exc_ref, 0);
-                    g_pjvm->pc = m_co[g_pjvm->cur_mi] + e_handler;
+                    g_pjvm->pc = M_CO(g_pjvm->cur_mi) + e_handler;
                     return;
                 }
             }
@@ -1790,11 +1915,11 @@ void pjvm_run(PJVMCtx *j) {
     for (pjvm_class_id_t ci = 0; ci < n_classes; ci++) {
         if (cls_ci[ci] == PJVM_NO_CLINIT) continue;
         pjvm_method_id_t mi = cls_ci[ci];
-        j->cur_mi = mi; j->cur_lb = 0; j->cur_cb = m_cb[mi];
-        j->lt = m_ml[mi]; j->pc = m_co[mi];
+        j->cur_mi = mi; j->cur_lb = 0; j->cur_cb = M_CB(mi);
+        j->lt = M_ML(mi); j->pc = M_CO(mi);
         j->fdepth = 0; j->sp = 0;
 #if PJVM_GC_ENABLED
-        for (pjvm_count_t i = 0; i < m_ml[mi]; i++) {
+        for (pjvm_count_t i = 0; i < M_ML(mi); i++) {
             j->loc_lo[i] = 0;
             j->loc_hi[i] = 0;
         }
@@ -1804,17 +1929,17 @@ void pjvm_run(PJVMCtx *j) {
     }
 
     /* Run main */
-    j->cur_mi = main_mi; j->cur_lb = 0; j->cur_cb = m_cb[main_mi];
-    j->lt = m_ml[main_mi]; j->pc = m_co[main_mi];
+    j->cur_mi = main_mi; j->cur_lb = 0; j->cur_cb = M_CB(main_mi);
+    j->lt = M_ML(main_mi); j->pc = M_CO(main_mi);
     j->fdepth = 0; j->sp = 0;
 #if PJVM_GC_ENABLED
-    for (pjvm_count_t i = 0; i < m_ml[main_mi]; i++) {
+    for (pjvm_count_t i = 0; i < M_ML(main_mi); i++) {
         j->loc_lo[i] = 0;
         j->loc_hi[i] = 0;
     }
 #endif
     if (j->lt > j->lt_max) j->lt_max = j->lt;
-    if (m_ac[main_mi] > 0) {
+    if (M_AC(main_mi) > 0) {
         uint16_t args_ref = pjvm_make_main_args(j);
         j->loc_lo[0] = args_ref;
         j->loc_hi[0] = 0;
@@ -2257,7 +2382,7 @@ static void pjvm_exec(void) {
 
         /* --- switches ----------------------------------------------------- */
         case OP_TABLESWITCH: {
-            uint32_t base = m_co[g_pjvm->cur_mi];
+            uint32_t base = M_CO(g_pjvm->cur_mi);
             g_pjvm->pc = base + (((g_pjvm->pc - base) + 3) & ~3u);
             g_pjvm->pc += 2; int16_t def_off = bread();
             int16_t low_hw = bread();
@@ -2279,7 +2404,7 @@ static void pjvm_exec(void) {
             break;
         }
         case OP_LOOKUPSWITCH: {
-            uint32_t base = m_co[g_pjvm->cur_mi];
+            uint32_t base = M_CO(g_pjvm->cur_mi);
             g_pjvm->pc = base + (((g_pjvm->pc - base) + 3) & ~3u);
             g_pjvm->pc += 2; int16_t def_off = bread();
             g_pjvm->pc += 2; int16_t npairs = bread();
@@ -2366,17 +2491,17 @@ static void pjvm_exec(void) {
         case OP_INVOKEVIRTUAL: {
             pjvm_method_id_t bmi = cpread();
             PJVM_CHECK_METHOD_ID(bmi);
-            pjvm_vslot_t vs = m_vs[bmi];
+            pjvm_vslot_t vs = M_VS(bmi);
             if (vs == PJVM_NO_VTABLE) { pjvm_inv(bmi); }
             else {
-                uint16_t argi = (uint16_t)(g_pjvm->sp - m_ac[bmi]);
+                uint16_t argi = (uint16_t)(g_pjvm->sp - M_AC(bmi));
 #if PJVM_USE_CONST_OBJECT_ARRAYS
                 pjvm_class_id_t ci = pjvm_ref_class_id(
                     g_pjvm->stk_lo[argi], g_pjvm->stk_hi[argi]);
 #else
                 pjvm_class_id_t ci = (pjvm_class_id_t)r16(g_pjvm->stk_lo[argi]);
 #endif
-                pjvm_inv(vt[cls_vb[ci] + vs]);
+                pjvm_inv(VT_AT(ci, vs));
             }
             break;
         }
@@ -2384,8 +2509,8 @@ static void pjvm_exec(void) {
             pjvm_method_id_t bmi = cpread();
             bcread(); bcread();
             PJVM_CHECK_METHOD_ID(bmi);
-            pjvm_vmid_t vid = m_vmid[bmi];
-            uint16_t argi = (uint16_t)(g_pjvm->sp - m_ac[bmi]);
+            pjvm_vmid_t vid = M_VMID(bmi);
+            uint16_t argi = (uint16_t)(g_pjvm->sp - M_AC(bmi));
 #if PJVM_USE_CONST_OBJECT_ARRAYS
             pjvm_class_id_t ci = pjvm_ref_class_id(
                 g_pjvm->stk_lo[argi], g_pjvm->stk_hi[argi]);
@@ -2394,8 +2519,8 @@ static void pjvm_exec(void) {
 #endif
             pjvm_method_id_t found = PJVM_NO_VTABLE;
             for (pjvm_count_t k = 0; k < cls_vs[ci]; k++) {
-                if (m_vmid[vt[cls_vb[ci] + k]] == vid) {
-                    found = vt[cls_vb[ci] + k]; break;
+                if (M_VMID(VT_AT(ci, k)) == vid) {
+                    found = VT_AT(ci, k); break;
                 }
             }
             if (found != PJVM_NO_VTABLE) pjvm_inv(found);

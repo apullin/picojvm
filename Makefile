@@ -740,6 +740,13 @@ test-gc-temp-roots:
 	$(MAKE) --no-print-directory test-GcTempRootTest \
 		HOST_VM_OPTS='$(HOST_VM_FEATURES) $(GC_DEFAULT_OPTS) -DPJVM_HOST_HEAP_LIMIT=$(GC_HOST_PRESSURE_LIMIT)'
 
+# Method-table read-through: metadata served from the image, ~22B/method
+# of RAM saved; full suite must behave identically
+test-mt-in-image:
+	$(MAKE) --no-print-directory clean
+	$(MAKE) --no-print-directory test \
+		HOST_VM_OPTS='$(HOST_VM_FEATURES) -DPJVM_MT_IN_IMAGE=1'
+
 # Exact-allocation-bitmap config: O(1) conservative root validation
 test-gc-alloc-bitmap:
 	$(MAKE) --no-print-directory clean
@@ -898,5 +905,5 @@ clean:
 .PHONY: all test test-paged test-paged-stress clean sim
 .PHONY: gc-demo-manual gc-demo-allocfail gc-demo-watermark75 gc-demo-return gc-demo-random
 .PHONY: gc-policy-test test-gc-collect test-gc-fragment test-gc-exact test-v4 test-pjvmpack-package test-alloc-heavy test-paged-alloc-heavy test-gc-alloc-heavy
-.PHONY: test-gc-graph test-gc-temp-roots test-gc-alloc-bitmap test-gc-host-compat test-gc-host-suite test-sim-smoke test-sim-gc-smoke test-legacy-string-natives
+.PHONY: test-gc-graph test-gc-temp-roots test-gc-alloc-bitmap test-gc-host-compat test-gc-host-suite test-sim-smoke test-sim-gc-smoke test-legacy-string-natives test-mt-in-image
 .PHONY: test-sim-gc-alloc-heavy test-gc-sim-suite test-gc-suite

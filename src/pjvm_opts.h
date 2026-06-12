@@ -156,6 +156,18 @@
 #define PJVM_GC_BITMAP_SPAN 0x10000
 #endif
 
+/* Read method metadata directly from the image's fixed-width method
+ * table instead of unpacking ~22 bytes per method into RAM (plus the RAM
+ * vtable). Big-cap configs save kilobytes of bss; each metadata access
+ * becomes a computed image read (slower invokes, same semantics).
+ * Requires unpacked method tables; incompatible with PJVM_PAGED. */
+#ifndef PJVM_MT_IN_IMAGE
+#define PJVM_MT_IN_IMAGE 0
+#endif
+#if PJVM_MT_IN_IMAGE && defined(PJVM_PAGED)
+#error "PJVM_MT_IN_IMAGE reads metadata per access; unusable with PJVM_PAGED"
+#endif
+
 /* Platform I/O native groups: deployment knobs, not feature cuts. A
  * cartridge-style target without disk drops the file natives; a headless
  * target drops the terminal group. Calls into a compiled-out group trap

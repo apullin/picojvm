@@ -100,6 +100,15 @@ LIBC     = $(ROOT)/sysroot/lib/libc.a
 # the outer pjvm8085-asm suite.
 LDSCRIPT = ldscripts/i8085-64k-flat-boot.ld
 TARGET_OPT = Oz
+# I8085 MachineOutliner (implemented in the local LLVM backend, stages 1-3:
+# conservative + SP-relative repair + tail-outlining). Roughly -30% VM text;
+# validated by the sim suites. TARGET_OUTLINE=0 disables.
+TARGET_OUTLINE ?= 1
+ifeq ($(TARGET_OUTLINE),1)
+TARGET_OUTLINE_FLAGS = -mllvm -enable-machine-outliner=always
+else
+TARGET_OUTLINE_FLAGS =
+endif
 BUILDDIR = build
 TARGET_VM_OPTS ?=
 TARGET_ASM_HELPERS ?= 1
@@ -791,16 +800,16 @@ $(BUILDDIR)/crt0.o: $(CRT) | $(BUILDDIR)
 	$(CLANG) --target=i8085-unknown-elf -ffreestanding -fno-builtin -$(TARGET_OPT) -c $< -o $@
 
 $(BUILDDIR)/pjvm.o: src/pjvm.c $(PJVM_HEADERS) | $(BUILDDIR)
-	$(CLANG) --target=i8085-unknown-elf -ffreestanding -fno-builtin -ffunction-sections -$(TARGET_OPT) $(SIM_CAPS) $(TARGET_VM_OPTS) $(TARGET_ASM_HELPERS_DEF) -c $< -o $@
+	$(CLANG) --target=i8085-unknown-elf -ffreestanding -fno-builtin -ffunction-sections $(TARGET_OUTLINE_FLAGS) -$(TARGET_OPT) $(SIM_CAPS) $(TARGET_VM_OPTS) $(TARGET_ASM_HELPERS_DEF) -c $< -o $@
 
 $(BUILDDIR)/pjvm_heap.o: src/pjvm_heap.c $(PJVM_HEADERS) | $(BUILDDIR)
-	$(CLANG) --target=i8085-unknown-elf -ffreestanding -fno-builtin -ffunction-sections -$(TARGET_OPT) $(SIM_CAPS) $(TARGET_VM_OPTS) -c $< -o $@
+	$(CLANG) --target=i8085-unknown-elf -ffreestanding -fno-builtin -ffunction-sections $(TARGET_OUTLINE_FLAGS) -$(TARGET_OPT) $(SIM_CAPS) $(TARGET_VM_OPTS) -c $< -o $@
 
 $(BUILDDIR)/pjvm_gc.o: src/pjvm_gc.c $(PJVM_HEADERS) | $(BUILDDIR)
-	$(CLANG) --target=i8085-unknown-elf -ffreestanding -fno-builtin -ffunction-sections -$(TARGET_OPT) $(SIM_CAPS) $(TARGET_VM_OPTS) -c $< -o $@
+	$(CLANG) --target=i8085-unknown-elf -ffreestanding -fno-builtin -ffunction-sections $(TARGET_OUTLINE_FLAGS) -$(TARGET_OPT) $(SIM_CAPS) $(TARGET_VM_OPTS) -c $< -o $@
 
 $(BUILDDIR)/i8085_sim.o: platform/i8085_sim.c $(PJVM_HEADERS) | $(BUILDDIR)
-	$(CLANG) --target=i8085-unknown-elf -ffreestanding -fno-builtin -ffunction-sections -$(TARGET_OPT) $(SIM_CAPS) $(TARGET_VM_OPTS) $(TARGET_ASM_HELPERS_DEF) -c $< -o $@
+	$(CLANG) --target=i8085-unknown-elf -ffreestanding -fno-builtin -ffunction-sections $(TARGET_OUTLINE_FLAGS) -$(TARGET_OPT) $(SIM_CAPS) $(TARGET_VM_OPTS) $(TARGET_ASM_HELPERS_DEF) -c $< -o $@
 
 $(BUILDDIR)/i8085_helpers.o: platform/i8085_helpers.S src/pjvm_opts.h | $(BUILDDIR)
 	$(CLANG) --target=i8085-unknown-elf $(TARGET_VM_OPTS) -DPJVM_ASM_HELPERS -c $< -o $@
@@ -889,7 +898,7 @@ size-report: | $(BUILDDIR)
 	  "big-v4only+GC|$(SIZEREP_BIG) -DPJVM_ENABLE_V3=0 $(SIZEREP_GC)"; do \
 	  name=$${cfg%%|*}; flags=$${cfg#*|}; total=0; \
 	  for f in src/pjvm.c src/pjvm_heap.c src/pjvm_gc.c; do \
-	    $(CLANG) --target=i8085-unknown-elf -ffreestanding -fno-builtin -Oz \
+	    $(CLANG) --target=i8085-unknown-elf -ffreestanding -fno-builtin $(TARGET_OUTLINE_FLAGS) -Oz \
 	      $$flags -c $$f -o $(BUILDDIR)/.sizerep.o 2>/dev/null || exit 1; \
 	    t=$$($(SIZE) $(BUILDDIR)/.sizerep.o | awk 'NR==2{print $$1}'); \
 	    total=$$((total + t)); \

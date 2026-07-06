@@ -246,6 +246,7 @@ typedef struct {
     uint16_t heap_limit;      /* exclusive end; 0 means 0x10000 */
     uint16_t heap_free_head;  /* allocator-private; free-list head */
     uint16_t heap_used;       /* allocator-private; estimated live bytes */
+    uint16_t heap_used_max;   /* high-water heap_used value */
     uint16_t gc_lfsr;         /* GC trigger PRNG state */
     uint16_t gc_count;        /* number of completed collections */
     uint16_t sp_max, lt_max;

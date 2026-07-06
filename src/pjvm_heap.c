@@ -13,6 +13,11 @@ static uint32_t pjvm_heap_limit_value(void) {
     return g_pjvm->heap_limit ? (uint32_t)g_pjvm->heap_limit : 65536u;
 }
 
+static void pjvm_heap_record_peak(void) {
+    if (g_pjvm->heap_used > g_pjvm->heap_used_max)
+        g_pjvm->heap_used_max = g_pjvm->heap_used;
+}
+
 static void pjvm_heap_zero(uint16_t a, uint16_t size) {
     for (uint16_t i = 0; i < size; i++) w8((uint16_t)(a + i), 0);
 }
@@ -91,6 +96,7 @@ void pjvm_heap_init(PJVMCtx *j, uint16_t start, uint16_t limit) {
     g_pjvm->heap_limit = limit;
     g_pjvm->heap_free_head = 0;
     g_pjvm->heap_used = 0;
+    g_pjvm->heap_used_max = 0;
 
 #if PJVM_HEAP_MODE == PJVM_HEAP_FREELIST
     {
@@ -150,6 +156,7 @@ static uint16_t pjvm_heap_alloc_bump(uint16_t size, uint8_t kind) {
             uint16_t a = g_pjvm->heap_ptr;
             g_pjvm->heap_ptr = (uint16_t)end;
             g_pjvm->heap_used = (uint16_t)(g_pjvm->heap_ptr - g_pjvm->heap_base);
+            pjvm_heap_record_peak();
             pjvm_heap_zero(a, size);
             return a;
         }
@@ -198,6 +205,7 @@ static uint16_t pjvm_heap_alloc_freelist(uint16_t size, uint8_t kind) {
 
                 pjvm_blk_set_meta(cur, (uint16_t)(kind & PJVM_HEAP_META_KIND_MASK));
                 g_pjvm->heap_used = (uint16_t)(g_pjvm->heap_used + want);
+                pjvm_heap_record_peak();
                 {
                     uint16_t payload = (uint16_t)(cur + PJVM_HEAP_ALLOC_HDR);
 #if PJVM_GC_ALLOC_BITMAP

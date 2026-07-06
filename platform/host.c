@@ -98,17 +98,19 @@ uint16_t heap_alloc(uint16_t size, uint8_t kind) {
     uint16_t a = pjvm_heap_alloc(size, kind);
     if (a == 0) {
         uint32_t end = g_pjvm->heap_limit ? g_pjvm->heap_limit : 65536u;
-        fprintf(stderr, "JVM heap allocation failed (%u bytes; used=%u limit=%u)\n",
-                (unsigned)size, (unsigned)g_pjvm->heap_used, (unsigned)end);
+        fprintf(stderr, "JVM heap allocation failed (%u bytes; live=%u peak=%u limit=%u)\n",
+                (unsigned)size, (unsigned)g_pjvm->heap_used,
+                (unsigned)g_pjvm->heap_used_max, (unsigned)end);
         exit(1);
     }
 
     heap_alloc_count++;
     heap_bytes_used += size;
     if (getenv("PJVM_HEAP_TRACE"))
-        fprintf(stderr, "HEAP | alloc #%u: %u bytes at %u (heap_used=%u, mi=%u)\n",
+        fprintf(stderr, "HEAP | alloc #%u: %u bytes at %u (live=%u peak=%u, mi=%u)\n",
                 (unsigned)heap_alloc_count, (unsigned)size, (unsigned)a,
-                (unsigned)g_pjvm->heap_used, (unsigned)g_pjvm->cur_mi);
+                (unsigned)g_pjvm->heap_used, (unsigned)g_pjvm->heap_used_max,
+                (unsigned)g_pjvm->cur_mi);
     return a;
 }
 
@@ -584,8 +586,10 @@ int main(int argc, char **argv) {
     }
 
     fprintf(stderr,
-            "HALT | heap: %u obj, %uB | stack: %u/%u slots | locals: %u/%u | frames: %u/%u",
+            "HALT | heap: %u obj, %uB alloc, %uB live, %uB peak/%uB limit | stack: %u/%u slots | locals: %u/%u | frames: %u/%u",
             (unsigned)heap_alloc_count, (unsigned)heap_bytes_used,
+            (unsigned)ctx.heap_used, (unsigned)ctx.heap_used_max,
+            (unsigned)(ctx.heap_limit ? ctx.heap_limit : 65536u),
             (unsigned)ctx.sp_max, (unsigned)PJVM_MAX_STACK,
             (unsigned)ctx.lt_max, (unsigned)PJVM_MAX_LOCALS,
             (unsigned)ctx.fdepth_max, (unsigned)PJVM_MAX_FRAMES);

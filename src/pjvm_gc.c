@@ -334,6 +334,8 @@ static GNI uint8_t pjvm_gc_sweep(void) {
 
     g_pjvm->heap_free_head = free_head;
     g_pjvm->heap_used = live_used;
+    if (g_pjvm->heap_used > g_pjvm->heap_used_max)
+        g_pjvm->heap_used_max = g_pjvm->heap_used;
     return reclaimed;
 }
 #endif

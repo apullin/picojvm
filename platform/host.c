@@ -52,6 +52,9 @@ static struct termios term_saved;
 
 #include "../src/pjvm.h"
 
+static uint16_t heap_kind_alloc_count[PJVM_HEAP_KIND_COUNT];
+static uint32_t heap_kind_alloc_bytes[PJVM_HEAP_KIND_COUNT];
+
 static void pjvm_host_term_restore(void) {
     if (term_raw_active) {
         tcsetattr(STDIN_FILENO, TCSANOW, &term_saved);
@@ -94,6 +97,39 @@ static int32_t pjvm_host_term_read_byte(void) {
     return -1;
 }
 
+static uint8_t pjvm_host_heap_kind(uint8_t kind) {
+    if (kind < PJVM_HEAP_KIND_COUNT) return kind;
+    return 0;
+}
+
+static const char *pjvm_host_heap_kind_name(uint8_t kind) {
+    switch (kind) {
+        case PJVM_HEAP_KIND_OBJECT: return "object";
+        case PJVM_HEAP_KIND_BYTE_ARRAY: return "byte[]";
+        case PJVM_HEAP_KIND_SHORT_ARRAY: return "short[]";
+        case PJVM_HEAP_KIND_INT_ARRAY: return "int[]";
+        case PJVM_HEAP_KIND_REF_ARRAY: return "ref[]";
+        case PJVM_HEAP_KIND_STRING: return "string";
+        default: return "unknown";
+    }
+}
+
+static void pjvm_host_heap_print_breakdown(const PJVMCtx *ctx) {
+    fprintf(stderr, "HEAP | by-kind:");
+    for (uint8_t i = 0; i < PJVM_HEAP_KIND_COUNT; i++) {
+        if (heap_kind_alloc_count[i] || ctx->heap_kind_live[i] || ctx->heap_kind_peak[i]) {
+            fprintf(stderr,
+                    " %s=%uobj/%uB alloc/%uB live/%uB peak",
+                    pjvm_host_heap_kind_name(i),
+                    (unsigned)heap_kind_alloc_count[i],
+                    (unsigned)heap_kind_alloc_bytes[i],
+                    (unsigned)ctx->heap_kind_live[i],
+                    (unsigned)ctx->heap_kind_peak[i]);
+        }
+    }
+    fprintf(stderr, "\n");
+}
+
 uint16_t heap_alloc(uint16_t size, uint8_t kind) {
     uint16_t a = pjvm_heap_alloc(size, kind);
     if (a == 0) {
@@ -106,9 +142,15 @@ uint16_t heap_alloc(uint16_t size, uint8_t kind) {
 
     heap_alloc_count++;
     heap_bytes_used += size;
+    {
+        uint8_t k = pjvm_host_heap_kind(kind);
+        heap_kind_alloc_count[k]++;
+        heap_kind_alloc_bytes[k] += size;
+    }
     if (getenv("PJVM_HEAP_TRACE"))
-        fprintf(stderr, "HEAP | alloc #%u: %u bytes at %u (live=%u peak=%u, mi=%u)\n",
+        fprintf(stderr, "HEAP | alloc #%u: %u bytes at %u kind=%s (live=%u peak=%u, mi=%u)\n",
                 (unsigned)heap_alloc_count, (unsigned)size, (unsigned)a,
+                pjvm_host_heap_kind_name(pjvm_host_heap_kind(kind)),
                 (unsigned)g_pjvm->heap_used, (unsigned)g_pjvm->heap_used_max,
                 (unsigned)g_pjvm->cur_mi);
     return a;
@@ -596,6 +638,7 @@ int main(int argc, char **argv) {
     if (ctx.gc_count)
         fprintf(stderr, " | gc: %u", (unsigned)ctx.gc_count);
     fprintf(stderr, "\n");
+    pjvm_host_heap_print_breakdown(&ctx);
 
 #ifdef PJVM_PAGED
     fprintf(stderr,

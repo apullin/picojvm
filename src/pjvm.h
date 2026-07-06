@@ -164,6 +164,7 @@ typedef uint16_t pjvm_rbo_t;
 #define PJVM_HEAP_KIND_INT_ARRAY   4u
 #define PJVM_HEAP_KIND_REF_ARRAY   5u
 #define PJVM_HEAP_KIND_STRING      6u
+#define PJVM_HEAP_KIND_COUNT       7u
 
 #if PJVM_HEAP_MODE == PJVM_HEAP_FREELIST
 #define PJVM_HEAP_ALLOC_FLAG  0x0001u
@@ -247,6 +248,8 @@ typedef struct {
     uint16_t heap_free_head;  /* allocator-private; free-list head */
     uint16_t heap_used;       /* allocator-private; estimated live bytes */
     uint16_t heap_used_max;   /* high-water heap_used value */
+    uint16_t heap_kind_live[PJVM_HEAP_KIND_COUNT];
+    uint16_t heap_kind_peak[PJVM_HEAP_KIND_COUNT];
     uint16_t gc_lfsr;         /* GC trigger PRNG state */
     uint16_t gc_count;        /* number of completed collections */
     uint16_t sp_max, lt_max;

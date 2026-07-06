@@ -90,6 +90,20 @@ static uint32_t pjvm_gc_heap_limit_full(void) {
     return g_pjvm->heap_limit ? (uint32_t)g_pjvm->heap_limit : 65536u;
 }
 
+static uint8_t pjvm_gc_kind(uint8_t kind) {
+    if (kind < PJVM_HEAP_KIND_COUNT) return kind;
+    return 0;
+}
+
+static void pjvm_gc_kind_add(uint8_t kind, uint16_t size) {
+    uint8_t k = pjvm_gc_kind(kind);
+    uint32_t live = (uint32_t)g_pjvm->heap_kind_live[k] + size;
+    if (live > 65535u) live = 65535u;
+    g_pjvm->heap_kind_live[k] = (uint16_t)live;
+    if (g_pjvm->heap_kind_live[k] > g_pjvm->heap_kind_peak[k])
+        g_pjvm->heap_kind_peak[k] = g_pjvm->heap_kind_live[k];
+}
+
 /* Trusted marking: `lo` came from a typed reference slot (ref-bitmapped
  * object field or ref array), so under this non-moving collector it is a
  * payload pointer by construction and the block header sits at lo-4. The
@@ -285,6 +299,9 @@ static GNI uint8_t pjvm_gc_sweep(void) {
     uint16_t live_used = 0;
     uint8_t reclaimed = 0;
 
+    for (uint8_t i = 0; i < PJVM_HEAP_KIND_COUNT; i++)
+        g_pjvm->heap_kind_live[i] = 0;
+
     for (uint32_t blk32 = g_pjvm->heap_base; blk32 < end; ) {
         uint16_t blk = (uint16_t)blk32;
         uint16_t size = pjvm_gc_blk_size(blk);
@@ -300,6 +317,7 @@ static GNI uint8_t pjvm_gc_sweep(void) {
                                                 (uint16_t)~(PJVM_HEAP_META_MARK |
                                                             PJVM_HEAP_META_PENDING)));
                 live_used = (uint16_t)(live_used + size);
+                pjvm_gc_kind_add((uint8_t)(meta & PJVM_HEAP_META_KIND_MASK), size);
             } else {
                 make_free = 1;
                 reclaimed = 1;

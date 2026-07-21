@@ -995,7 +995,7 @@ public class Expr {
 				int sizeType2 = pExpr();
 				if (sizeType2 == 0) Lexer.error(210); // array size needs a value
 				Lexer.expect(Tk.RBRACKET);
-				int cpIdx = E.aCP(0);
+				int cpIdx = E.aCP((2 << 8) | typeCode);
 				E.eOp(E.MULTIANEWARRAY, cpIdx);
 				E.eb(2); // 2 dimensions
 				E.pop(); // second dimension
@@ -1040,6 +1040,8 @@ public class Expr {
 				int sizeType2 = pExpr();
 				if (sizeType2 == 0) Lexer.error(210); // array size needs a value
 				Lexer.expect(Tk.RBRACKET);
+				// The runtime needs total dimensions even for reference leaves.
+				cpIdx = E.aCP(2 << 8);
 				E.eOp(E.MULTIANEWARRAY, cpIdx);
 				E.eb(2);
 				E.pop();

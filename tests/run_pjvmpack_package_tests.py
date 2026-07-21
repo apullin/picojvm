@@ -16,9 +16,12 @@ CASES = [
     ("ConstStringArrayTest", ["tests/ConstStringArrayTest.class"], []),
     ("InterfaceTest", [
         "tests/HasArea.class",
+        "tests/ExtendedArea.class",
+        "tests/Tagged.class",
         "tests/Describable.class",
         "tests/Measurable.class",
         "tests/Circle.class",
+        "tests/RoundCircle.class",
         "tests/Box.class",
         "tests/InterfaceTest.class",
     ], []),

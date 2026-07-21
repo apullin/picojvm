@@ -30,5 +30,11 @@ class T47_MultiDimArray {
 		// array.length on inner arrays
 		Native.putchar(jagged[0].length + 48); // '2'
 		Native.putchar(jagged[1].length + 48); // '1'
+
+		// This exceeds a 64K heap if byte rows are incorrectly allocated as refs.
+		byte[][] compact = new byte[128][128];
+		compact[127][127] = 73; // 'I'
+		Native.putchar(compact[127][127]);
+		Native.putchar(10);
 	}
 }

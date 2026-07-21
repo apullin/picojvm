@@ -41,11 +41,14 @@
  * the enforceable call depth tops out at 127 even if PJVM_MAX_FRAMES is
  * configured larger. */
 #define PJVM_FDEPTH_LIMIT (PJVM_MAX_FRAMES < 127 ? PJVM_MAX_FRAMES : 127)
-/* Operand-stack headroom required at each invoke. Per-method max stack is
- * not carried in the .pjvm image, so this is the conservative bound on what
- * one frame may consume; size tiny-config PJVM_MAX_STACK accordingly. */
+/* Maximum accepted per-method max_stack. The loader verifies the value
+ * carried by every method table entry, allowing invocation to reserve one
+ * fixed amount without retaining another per-method RAM table. */
 #ifndef PJVM_STACK_HEADROOM
 #define PJVM_STACK_HEADROOM 32
+#endif
+#if PJVM_STACK_HEADROOM > PJVM_MAX_STACK
+#error "PJVM_STACK_HEADROOM must not exceed PJVM_MAX_STACK"
 #endif
 #ifndef PJVM_ENABLE_V4
 #define PJVM_ENABLE_V4 0
@@ -70,6 +73,11 @@
 #endif
 #if PJVM_ENABLE_V4 && defined(PJVM_ASM_HELPERS)
 #error "PJVM_ENABLE_V4 changes PJVMCtx layout; disable 8085 ASM helpers for v4 builds"
+#endif
+#if defined(PJVM_ASM_HELPERS) && \
+    (PJVM_MAX_STACK != 64 || PJVM_MAX_LOCALS != 128 || \
+     PJVM_STATIC_CAP != 32 || PJVM_MAX_FRAMES != 16)
+#error "8085 ASM helpers require stack=64, locals=128, statics=32, frames=16"
 #endif
 
 #define PJVM_PC_HALT 0xFFFFFFFFu
@@ -102,6 +110,7 @@
 #define PJVM_RF_CONST_DATA 0x04   /* bit 2: const_data section present */
 #define PJVM_RF_PACKED_METHOD_TABLE 0x08 /* bit 3: v4 ULEB method table */
 #define PJVM_RF_STATIC_REF_BITMAP 0x10 /* bit 4: static-slot ref bitmap */
+#define PJVM_RF_INTERFACE_MAP 0x20 /* bit 5: class/interface membership map */
 
 /* CP resolution string flag / mask (16-bit) */
 #define PJVM_CP_STR_FLAG_16  0x8000
@@ -114,9 +123,14 @@
 #define PJVM_REF_ROM_STRING  0x8000
 #define PJVM_REF_ROM_OBJECT_BASE 0x8001
 #define PJVM_REF_IS_ROM_OBJECT(hi) ((hi) >= PJVM_REF_ROM_OBJECT_BASE)
+#if !defined(PJVM_ASM_HELPERS) || defined(PJVM_PAGED)
 #define PJVM_ROM_OBJECT_HI(off) ((uint16_t)(PJVM_REF_ROM_OBJECT_BASE + ((off) >> 16)))
 #define PJVM_ROM_OBJECT_OFF(hi, lo) \
     ((((uint32_t)((hi) - PJVM_REF_ROM_OBJECT_BASE)) << 16) | (lo))
+#else
+#define PJVM_ROM_OBJECT_HI(off) PJVM_REF_ROM_OBJECT_BASE
+#define PJVM_ROM_OBJECT_OFF(hi, lo) ((uint32_t)(lo))
+#endif
 
 /* sentinel values */
 #if PJVM_ENABLE_V4
@@ -286,9 +300,8 @@ extern uint8_t *sc;
 void pjvm_parse(uint8_t *data);
 void pjvm_run(PJVMCtx *j);
 uint8_t pjvm_prog_read(uint32_t off);
-/* Binds j as the current VM (g_pjvm).  The heap, GC, and interpreter all
- * operate on the bound context, so a future scheduler switches green
- * threads by rebinding before resuming.  Call before pjvm_run(). */
+/* Initializes and binds the process's sole active VM context. Program
+ * metadata and GC roots are global, so this is not a context-switch API. */
 void pjvm_heap_init(PJVMCtx *j, uint16_t start, uint16_t limit);
 uint16_t pjvm_heap_alloc(uint16_t size, uint8_t kind);
 void pjvm_heap_free(uint16_t a);

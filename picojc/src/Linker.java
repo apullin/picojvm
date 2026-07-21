@@ -1,5 +1,6 @@
 public class Linker {
 	static final int RF_REF_BITMAPS = 0x02;
+	static final int RF_INTERFACE_MAP = 0x20;
 	static final int REF_BITMAP_STRIDE = (C.MAX_FIELDS + 7) >> 3;
 	static byte[] refBm = new byte[C.MAX_CLASSES * REF_BITMAP_STRIDE];
 
@@ -13,10 +14,6 @@ public class Linker {
 	static int constBL;                               // buf write pos
 	static int[] constOff = new int[MAX_CONST];       // per-entry offset into constBuf
 	static int[] constFO = new int[MAX_CONST];        // per-entry file offset (computed during link)
-
-	static boolean isRefField(int fi) {
-		return C.fGcRef[fi];
-	}
 
 	static void buildRefBitmaps() {
 		for (int i = 0; i < refBm.length; i++) refBm[i] = 0;
@@ -33,7 +30,7 @@ public class Linker {
 			}
 
 			for (int fi = 0; fi < C.fCount; fi++) {
-				if (C.fClass[fi] != ci || C.fStatic[fi] || !isRefField(fi)) continue;
+				if (C.fClass[fi] != ci || C.fStatic[fi] || !C.fGcRef[fi]) continue;
 				int slot = C.fSlot[fi] & 0xFFFF;
 				int byteIdx = dst + (slot >> 3);
 				int mask = 1 << (slot & 7);
@@ -42,12 +39,46 @@ public class Linker {
 		}
 	}
 
+	static boolean hasInterface(int ci, int target) {
+		for (int depth = 0; ci >= 0 && depth < C.MAX_CLASSES; depth++) {
+			if (C.cIsIface[ci]) {
+				int inherited = ci;
+				for (int d = 0; inherited >= 0 && d < C.MAX_CLASSES; d++) {
+					if (inherited == target) return true;
+					inherited = C.cParent[inherited];
+				}
+			}
+			int start = C.cIfaceS[ci] & 0xFF;
+			for (int j = 0; j < (C.cIfaceC[ci] & 0xFF); j++) {
+				int direct = C.ifList[start + j];
+				for (int d = 0; direct >= 0 && d < C.MAX_CLASSES; d++) {
+					if (direct == target) return true;
+					direct = C.cParent[direct];
+				}
+			}
+			ci = C.cParent[ci];
+		}
+		return false;
+	}
+
 	static void writeOut() {
 		C.outLen = 0;
-		int userClassCount = C.cCount - C.uClsStart;
-
 		// All user classes (including interfaces as stubs for class ID consistency)
 		int pjvmClassCount = C.cCount - C.uClsStart;
+		int interfacePairs = 0;
+		int imageMaxLoc = 0;
+		int imageMaxStk = 0;
+		for (int mi = 0; mi < C.mCount; mi++) {
+			int ml = C.mMaxLoc[mi] & 0xFF;
+			int ms = C.mMaxStk[mi] & 0xFF;
+			if (ml > imageMaxLoc) imageMaxLoc = ml;
+			if (ms > imageMaxStk) imageMaxStk = ms;
+		}
+		for (int ci = C.uClsStart; ci < C.cCount; ci++) {
+			for (int ii = C.uClsStart; ii < C.cCount; ii++) {
+				if (C.cIsIface[ii] && hasInterface(ci, ii)) interfacePairs++;
+			}
+		}
 
 		// v3 Header (16 bytes)
 		wB(0x85); // magic
@@ -59,9 +90,11 @@ public class Linker {
 		wB(pjvmClassCount); // n_classes
 		wB(C.strCC); // n_string_constants
 		buildRefBitmaps();
-		wB(RF_REF_BITMAPS | (constC > 0 ? 0x04 : 0)); // region_flags
+		wB(RF_REF_BITMAPS | (constC > 0 ? 0x04 : 0) |
+			(interfacePairs > 0 ? RF_INTERFACE_MAP : 0)); // region_flags
 		wILE(C.cdLen); // bytecodes_size (32-bit LE)
-		wSLE(0); // reserved
+		wB(imageMaxLoc); // whole-image max_locals
+		wB(imageMaxStk); // whole-image max_stack
 
 		// Class table (interfaces included as stubs for class ID mapping)
 		for (int ci = C.uClsStart; ci < C.cCount; ci++) {
@@ -151,6 +184,22 @@ public class Linker {
 			wSLE(C.excEPc[i]);
 			wSLE(C.excHPc[i]);
 			wB(C.excCCls[i]);
+		}
+
+		// v3 stores direct transitive membership bits in the image.
+		if (interfacePairs > 0) {
+			int stride = (pjvmClassCount + 7) >> 3;
+			for (int ci = C.uClsStart; ci < C.cCount; ci++) {
+				for (int bi = 0; bi < stride; bi++) {
+					int bits = 0;
+					for (int bit = 0; bit < 8; bit++) {
+						int ii = C.uClsStart + bi * 8 + bit;
+						if (ii < C.cCount && C.cIsIface[ii] &&
+							hasInterface(ci, ii)) bits |= 1 << bit;
+					}
+					wB(bits);
+				}
+			}
 		}
 
 		// const_data section (@Const ROM arrays)

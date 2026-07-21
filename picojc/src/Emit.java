@@ -542,8 +542,10 @@ class E {
 	static void ic1() { eb(ICONST_1); push(); }
 	static void edup() { eb(DUP); push(); }
 	static void cmpBool(int op) {
+		int baseDepth = C.stkDepth;
 		int lbl = label(); int lblEnd = label();
 		eBr(op, lbl); ic0(); eBr(GOTO, lblEnd);
+		C.stkDepth = baseDepth;
 		mark(lbl); ic1(); mark(lblEnd);
 	}
 	static void eOp(int op, int cp) { eb(op); eSBE(cp); }

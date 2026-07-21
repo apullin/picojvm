@@ -22,8 +22,8 @@ GC_FRAGMENT_TEST  = $(BUILDDIR)/gc-fragment-test
 GC_EXACT_TEST     = $(BUILDDIR)/gc-exact-test
 
 # Single-class tests
-TESTS_SINGLE = Fib HelloWorld BubbleSort Counter StringTest RomStringTest StringApiSmoke StringShimTest NativeOpsTest StaticInitTest MultiArrayTest StringSwitchTest VmHardeningTest ConstTest ConstStringArrayTest ConstObjectArrayTest ConstNarrowingTest TermSmoke FilesSmoke PicoJseStdSmoke JavaLangSmoke StringConcatSmoke TarSmoke ZipSmoke ZipDeflateSmoke
-TESTS_MULTI  = Shapes Features InterfaceTest ExceptionTest EnumBasicTest EnumShimTest ThrowableShimTest
+TESTS_SINGLE = Fib HelloWorld BubbleSort Counter StringTest RomStringTest StringApiSmoke StringShimTest NativeOpsTest StaticInitTest MultiArrayTest IntSemanticsTest StringSwitchTest VmHardeningTest ConstTest ConstStringArrayTest ConstObjectArrayTest ConstNarrowingTest TermSmoke FilesSmoke PicoJseStdSmoke JavaLangSmoke StringConcatSmoke TarSmoke ZipSmoke ZipDeflateSmoke
+TESTS_MULTI  = Shapes Features InterfaceTest FieldHidingTest ExceptionTest EnumBasicTest EnumShimTest ThrowableShimTest
 TESTS_PAGER  = BigSwitch BigLUT
 ALL_TESTS    = $(TESTS_SINGLE) $(TESTS_MULTI)
 ALL_TESTS_PAGER = $(ALL_TESTS) $(TESTS_PAGER)
@@ -219,10 +219,17 @@ tests/Features.class: tests/Features.java tests/Shapes.java tests/Native.java
 	$(JAVAC) $(JAVAC8FLAGS) -d tests $^ $(PICOJSE_JAVA_SRCS)
 
 # Multi-class InterfaceTest
-tests/InterfaceTest.pjvm: tests/HasArea.class tests/Describable.class tests/Measurable.class tests/Circle.class tests/Box.class tests/InterfaceTest.class
+tests/InterfaceTest.pjvm: tests/HasArea.class tests/ExtendedArea.class tests/Tagged.class tests/Describable.class tests/Measurable.class tests/Circle.class tests/RoundCircle.class tests/Box.class tests/InterfaceTest.class
 	$(PYTHON) pjvmpack.py $^ -o $@ -v
 
-tests/HasArea.class tests/Describable.class tests/Measurable.class tests/Circle.class tests/Box.class tests/InterfaceTest.class: tests/InterfaceTest.java tests/Native.java
+tests/HasArea.class tests/ExtendedArea.class tests/Tagged.class tests/Describable.class tests/Measurable.class tests/Circle.class tests/RoundCircle.class tests/Box.class tests/InterfaceTest.class: tests/InterfaceTest.java tests/Native.java
+	$(JAVAC) $(JAVAC8FLAGS) -d tests $^ $(PICOJSE_JAVA_SRCS)
+
+# Multi-class field-layout regression.
+tests/FieldHidingTest.pjvm: tests/FieldBase.class tests/FieldChild.class tests/FieldHidingTest.class
+	$(PYTHON) pjvmpack.py $^ -o $@ -v
+
+tests/FieldBase.class tests/FieldChild.class tests/FieldHidingTest.class: tests/FieldHidingTest.java tests/Native.java
 	$(JAVAC) $(JAVAC8FLAGS) -d tests $^ $(PICOJSE_JAVA_SRCS)
 
 # Multi-class ExceptionTest

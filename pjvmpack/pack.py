@@ -77,6 +77,7 @@ from .constants import (
     PJVM_NO_CLINIT,
     PJVM_NO_VTABLE,
     PJVM_RF_CONST_DATA,
+    PJVM_RF_INTERFACE_MAP,
     PJVM_RF_PACKED_METHOD_TABLE,
     PJVM_RF_PIN_HINTS,
     PJVM_RF_REF_BITMAPS,
@@ -146,6 +147,28 @@ IGNORED_CLASS_REF_OPS = {OP_ANEWARRAY, OP_MULTIANEWARRAY}
 
 def _opcode_name(op):
     return OPCODE_NAMES.get(op, f"op 0x{op:02X}")
+
+
+def _multianewarray_info(descriptor):
+    """Encode total dimensions and primitive leaf atype in one CP value."""
+    dimensions = len(descriptor) - len(descriptor.lstrip("["))
+    if dimensions == 0 or dimensions > 0xFF:
+        raise PackError(f"Invalid multianewarray descriptor: {descriptor}")
+
+    leaf = descriptor[dimensions:]
+    if leaf.startswith("L"):
+        atype = 0
+    elif leaf in ("Z", "B"):
+        atype = 8
+    elif leaf == "C":
+        atype = 5
+    elif leaf == "S":
+        atype = 9
+    elif leaf == "I":
+        atype = 10
+    else:
+        raise PackError(f"Unsupported multianewarray leaf type: {descriptor}")
+    return (dimensions << 8) | atype
 
 
 def _describe_cp_entry(cp, cp_idx):
@@ -389,6 +412,38 @@ def _synthesize_exception_classes(classes, class_order, verbose=False):
         cls = classes[name]
         if cls.parent_class_id == PJVM_NO_CLASS and cls.parent_name and cls.parent_name in classes:
             cls.parent_class_id = classes[cls.parent_name].class_id
+
+
+def _build_interface_pairs(classes, class_order):
+    """Return transitive (class_id, interface_id) membership pairs."""
+    cache = {}
+
+    def closure(name, active):
+        if name in cache:
+            return cache[name]
+        if name in active:
+            raise PackError(f"Cyclic interface hierarchy involving {name}")
+
+        active.add(name)
+        cls = classes[name]
+        result = set()
+        if cls.parent_name in classes:
+            result.update(closure(cls.parent_name, active))
+        for interface_name in cls.interface_names:
+            if interface_name not in classes:
+                continue
+            result.add(interface_name)
+            result.update(closure(interface_name, active))
+        active.remove(name)
+        cache[name] = result
+        return result
+
+    pairs = []
+    for name in class_order:
+        cls = classes[name]
+        for interface_name in closure(name, set()):
+            pairs.append((cls.class_id, classes[interface_name].class_id))
+    return sorted(pairs)
 
 
 def _v3_needs_wide(classes, class_order, method_table, main_index,
@@ -1096,10 +1151,16 @@ def pack_pjvm(class_data_list, verbose=False, v2=False, pin_hints=None,
     # Parse classfiles into a name-keyed graph.
     classes = {}
     for class_data in class_data_list:
-        cp, this_class, super_class, fields, methods = parse_class(class_data)
-        name = resolve_class_name(cp, this_class)
-        parent_name = resolve_class_name(cp, super_class)
-        classes[name] = ClassInfo(name, parent_name, cp, fields, methods)
+        parsed = parse_class(class_data)
+        name = resolve_class_name(parsed.cp, parsed.this_class)
+        parent_name = resolve_class_name(parsed.cp, parsed.super_class)
+        interface_names = [
+            resolve_class_name(parsed.cp, interface_index)
+            for interface_index in parsed.interfaces
+        ]
+        classes[name] = ClassInfo(
+            name, parent_name, parsed.cp, parsed.fields, parsed.methods,
+            interface_names=interface_names)
 
     if verbose:
         print(f"Parsed {len(classes)} classes: {', '.join(classes.keys())}")
@@ -1124,6 +1185,8 @@ def pack_pjvm(class_data_list, verbose=False, v2=False, pin_hints=None,
 
     # Synthesize minimal exception classes referenced by bytecode.
     _synthesize_exception_classes(classes, class_order, verbose=verbose)
+    interface_pairs = _build_interface_pairs(classes, class_order)
+    require_u16("interface membership count", len(interface_pairs))
 
     # Build instance/static field layouts.
     for name in class_order:
@@ -1143,8 +1206,10 @@ def pack_pjvm(class_data_list, verbose=False, v2=False, pin_hints=None,
             field_name = cls.cp[f_name_idx][1]
             field_desc = cls.cp[f_desc_idx][1]
             if f_access & ACC_STATIC:  # ACC_STATIC
+                field_slot = len(cls.static_fields)
                 cls.static_fields.append(field_name)
                 cls.static_field_descs.append(field_desc)
+                cls.declared_fields[(field_name, field_desc)] = (True, field_slot)
                 if f_is_const:
                     cls.const_fields.add(field_name)
             else:
@@ -1153,6 +1218,7 @@ def pack_pjvm(class_data_list, verbose=False, v2=False, pin_hints=None,
                 cls.all_instance_fields.append(field_name)
                 cls.all_instance_field_descs.append(field_desc)
                 cls.all_instance_field_is_ref.append(is_ref_descriptor(field_desc))
+                cls.declared_fields[(field_name, field_desc)] = (False, slot)
 
         if verbose and cls.all_instance_fields:
             print(f"    Instance fields: {cls.all_instance_fields}")
@@ -1377,6 +1443,14 @@ def pack_pjvm(class_data_list, verbose=False, v2=False, pin_hints=None,
                         f"{cname}.{mt['name']}{mt['descriptor']}+{off - 1}: "
                         f"multianewarray with {dims} dimensions "
                         f"(picoJVM supports 1-4)")
+                entry = classes[cname].cp[cp_idx]
+                descriptor = classes[cname].cp[entry[1]][1]
+                total_dims = _multianewarray_info(descriptor) >> 8
+                if dims > total_dims:
+                    raise PackError(
+                        f"{cname}.{mt['name']}{mt['descriptor']}+{off - 1}: "
+                        f"multianewarray dimensions {dims} exceed descriptor "
+                        f"{descriptor}")
 
     # Add native/external methods referenced by bytecode.
     native_cache = {}  # (class, name, desc) -> global method index
@@ -1641,39 +1715,23 @@ def pack_pjvm(class_data_list, verbose=False, v2=False, pin_hints=None,
             ref_class_name = resolve_class_name(cp, entry[1])
             nat = cp[entry[2]]
             field_name = cp[nat[1]][1]
+            field_desc = cp[nat[2]][1]
 
-            # Check static fields, walking up the hierarchy: javac may emit
-            # the subclass as the Fieldref owner for an inherited static,
-            # and the slot must come from the declaring class's base. An
-            # unknown owner class simply stays unresolved (reported by the
-            # unresolved-use check) instead of being mislooked-up in the
-            # referencing class.
+            # JVM field lookup checks each declaring class before its parent.
+            # Resolve the exact descriptor as well as the name so hidden
+            # fields retain distinct slots.
             found = False
             walk = ref_class_name
             while walk and walk in classes:
                 tc = classes[walk]
-                for slot, sf in enumerate(tc.static_fields):
-                    if sf == field_name:
-                        cp_resolve[cp_idx] = static_field_base[walk] + slot
-                        found = True
-                        break
-                if found:
+                declaration = tc.declared_fields.get((field_name, field_desc))
+                if declaration is not None:
+                    is_static, slot = declaration
+                    cp_resolve[cp_idx] = (
+                        static_field_base[walk] + slot if is_static else slot)
+                    found = True
                     break
                 walk = tc.parent_name
-
-            if not found:
-                # Check instance fields (search up hierarchy)
-                walk = ref_class_name
-                while walk and walk in classes:
-                    tc = classes[walk]
-                    for slot, iname in enumerate(tc.all_instance_fields):
-                        if iname == field_name:
-                            cp_resolve[cp_idx] = slot
-                            found = True
-                            break
-                    if found:
-                        break
-                    walk = tc.parent_name
 
         # Resolve Integer constants
         for cp_idx in cp_indices:
@@ -1698,13 +1756,17 @@ def pack_pjvm(class_data_list, verbose=False, v2=False, pin_hints=None,
                 string_constant_dedup[utf8_text] = sc_idx
             cp_resolve[cp_idx] = PJVM_CP_STR_FLAG | sc_idx
 
-        # Resolve Class refs → class_id (for 'new' and 'anewarray')
+        # Resolve Class refs. multianewarray uses its otherwise-ignored CP
+        # value to carry terminal element metadata to the runtime.
         for cp_idx in cp_indices:
             entry = cp[cp_idx]
             if entry is None or entry[0] != "Class":
                 continue
             ref_name = cp[entry[1]][1]
-            if ref_name in classes:
+            use_sites = class_cp_uses[name]["sites"].get(cp_idx, ())
+            if any(site[2] == OP_MULTIANEWARRAY for site in use_sites):
+                cp_resolve[cp_idx] = _multianewarray_info(ref_name)
+            elif ref_name in classes:
                 cp_resolve[cp_idx] = classes[ref_name].class_id
 
         unresolved_cp_errors.extend(
@@ -1798,10 +1860,15 @@ def pack_pjvm(class_data_list, verbose=False, v2=False, pin_hints=None,
     region_flags |= PJVM_RF_REF_BITMAPS
     if total_static_fields > 0:
         region_flags |= PJVM_RF_STATIC_REF_BITMAP
+    if interface_pairs:
+        region_flags |= PJVM_RF_INTERFACE_MAP
     if const_arrays:
         region_flags |= PJVM_RF_CONST_DATA
     if pack_method_table and emit_v4:
         region_flags |= PJVM_RF_PACKED_METHOD_TABLE
+
+    image_max_locals = max((mt["max_locals"] for mt in method_table), default=0)
+    image_max_stack = max((mt["max_stack"] for mt in method_table), default=0)
 
     if emit_v4:
         # v4 Header (24 bytes): 16-bit ids/counts and 32-bit CP section size.
@@ -1817,7 +1884,7 @@ def pack_pjvm(class_data_list, verbose=False, v2=False, pin_hints=None,
         out.extend(struct.pack("<H", len(global_string_constants)))
         out.extend(struct.pack("<H", region_flags))
         out.extend(struct.pack("<I", len(bytecode_section)))
-        out.extend(struct.pack("<I", 0))  # reserved
+        out.extend(struct.pack("<HH", image_max_locals, image_max_stack))
     else:
         # v3 Header (16 bytes): 8-bit ids/counts, 16-bit static count.
         hdr_size = PJVM_HDR_SIZE_V3
@@ -1832,7 +1899,7 @@ def pack_pjvm(class_data_list, verbose=False, v2=False, pin_hints=None,
         out.append(len(global_string_constants))
         out.append(region_flags)
         out.extend(struct.pack("<I", len(bytecode_section)))
-        out.extend(struct.pack("<H", 0))  # reserved
+        out.extend(struct.pack("<BB", image_max_locals, image_max_stack))
 
     # Class table.
     for name in class_order:
@@ -1950,7 +2017,27 @@ def pack_pjvm(class_data_list, verbose=False, v2=False, pin_hints=None,
             print(f"  Static-ref bitmap: {len(srb)} bytes "
                   f"({total_static_fields} slots)")
 
-    # const_data section (after pin hints)
+    # Interface membership stays in the program image and costs no VM RAM.
+    # v3 uses a direct bitmap; v4 uses scalable sorted pairs.
+    if region_flags & PJVM_RF_INTERFACE_MAP:
+        if emit_v4:
+            out.extend(struct.pack("<H", len(interface_pairs)))
+            for class_id, interface_id in interface_pairs:
+                out.extend(struct.pack("<HH", class_id, interface_id))
+            interface_size = 2 + len(interface_pairs) * 4
+        else:
+            stride = (len(class_order) + 7) >> 3
+            membership_bits = bytearray(len(class_order) * stride)
+            for class_id, interface_id in interface_pairs:
+                membership_bits[class_id * stride + (interface_id >> 3)] |= (
+                    1 << (interface_id & 7))
+            out.extend(membership_bits)
+            interface_size = len(membership_bits)
+        if verbose:
+            print(f"  Interface map: {len(interface_pairs)} memberships, "
+                  f"{interface_size} bytes")
+
+    # const_data section (after optional metadata)
     cd_init_entries = []  # (static_field_slot, lo, hi)
     if const_arrays:
         cd_start = len(out)

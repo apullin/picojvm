@@ -8,10 +8,19 @@
  *   66  — Box.describe()    = 'B'
  *   27  — via Measurable.measure() on Circle
  *   20  — via Measurable.measure() on Box
+ *   1,0 — positive and negative interface instanceof
+ *   1,1 — marker-interface inheritance through interface and superclass
+ *   27  — successful cross-interface checkcast
  */
 
 interface HasArea {
     int area();
+}
+
+interface ExtendedArea extends HasArea {
+}
+
+interface Tagged {
 }
 
 interface Describable {
@@ -22,12 +31,15 @@ interface Measurable {
     int measure();
 }
 
-class Circle implements HasArea, Describable, Measurable {
+class Circle implements ExtendedArea, Describable, Measurable, Tagged {
     int radius;
 
     public int area() { return radius * radius * 3; }
     public int describe() { return 67; }  // 'C'
     public int measure() { return area(); }
+}
+
+class RoundCircle extends Circle {
 }
 
 class Box implements HasArea, Describable, Measurable {
@@ -71,6 +83,15 @@ public class InterfaceTest {
         // Dispatch through Measurable interface
         printMeasure(c);  // 27
         printMeasure(b);  // 20
+
+        Native.putchar(c instanceof HasArea ? 1 : 0);
+        Native.putchar(b instanceof Tagged ? 1 : 0);
+        Native.putchar(c instanceof Tagged ? 1 : 0);
+        Native.putchar(new RoundCircle() instanceof Tagged ? 1 : 0);
+
+        Describable described = c;
+        HasArea checked = (HasArea) described;
+        printArea(checked); // 27
 
         Native.halt();
     }

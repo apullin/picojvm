@@ -12,6 +12,13 @@
 
 #define NI __attribute__((noinline))
 
+/* Java and picoJVM require sign-filling right shifts. Keep the direct
+ * expression, which maps efficiently to the target helper, but reject a C
+ * implementation that gives signed right shift different semantics. */
+#if ((-2 >> 1) != -1)
+#error "picoJVM requires arithmetic signed right shift"
+#endif
+
 /* --- opcodes ---------------------------------------------------------- */
 enum {
     OP_NOP = 0x00, OP_ACONST_NULL = 0x01,
@@ -154,8 +161,9 @@ uint8_t *sc;
 /* --- internal globals (file-scope) ------------------------------------ */
 uint16_t n_static_fields;
 static pjvm_count_t n_int_constants, n_string_constants;
-uint8_t  region_flags;  /* byte 9: bit0=pin_hints, bit1=ref bitmaps, bit2=const_data */
+uint8_t  region_flags;
 uint32_t pjvm_srb_off;  /* static-ref bitmap offset (0 = absent) */
+static uint32_t im_off;  /* interface membership map offset (0 = absent) */
 /* Constant-fold the format flag when only one loader is compiled in. */
 #if PJVM_ENABLE_V3 && PJVM_ENABLE_V4
 static uint8_t pjvm_format_v4;
@@ -183,16 +191,19 @@ static uint8_t prog_fetch(uint32_t offset);
 #endif
 #define BC(a) PROG(bc_off + (a))
 #define PROG16(off) ((uint16_t)PROG(off) | ((uint16_t)PROG((off) + 1) << 8))
-#if PJVM_USE_CONST_OBJECT_ARRAYS
+#if defined(PJVM_ASM_HELPERS) && !defined(PJVM_PAGED)
+/* The flat 8085 address space is 64 KiB; hi is only the ROM marker. */
+#define ROM_OFF(hi, lo) ((uint32_t)(lo))
+#else
 #define ROM_OFF(hi, lo) (((uint32_t)((hi) - 1) << 16) | (lo))
+#endif
 
+#if PJVM_USE_CONST_OBJECT_ARRAYS
 static pjvm_class_id_t pjvm_ref_class_id(uint16_t lo, uint16_t hi) {
     if (PJVM_REF_IS_ROM_OBJECT(hi))
         return (pjvm_class_id_t)PROG16(PJVM_ROM_OBJECT_OFF(hi, lo));
     return (pjvm_class_id_t)r16(lo);
 }
-#else
-#define ROM_OFF(hi, lo) (((uint32_t)((hi) - 1) << 16) | (lo))
 #endif
 
 #if PJVM_MT_IN_IMAGE
@@ -572,32 +583,49 @@ static uint8_t pjvm_string_byte(uint16_t lo, uint16_t hi, uint16_t idx) {
 }
 #endif
 
+static uint16_t pjvm_array_len(uint16_t lo, uint16_t hi) {
+    return hi ? PROG16(ROM_OFF(hi, lo)) : r16(lo);
+}
+
+static uint8_t pjvm_byte_array_read(uint16_t lo, uint16_t hi, uint16_t idx) {
+    if (hi)
+        return PROG(ROM_OFF(hi, lo) + PJVM_OBJ_HEADER + idx);
+    return r8((uint16_t)(lo + PJVM_OBJ_HEADER + idx));
+}
+
+static uint16_t pjvm_short_array_read(uint16_t lo, uint16_t hi, uint16_t idx) {
+    if (hi)
+        return PROG16(ROM_OFF(hi, lo) + PJVM_OBJ_HEADER + (uint32_t)idx * 2u);
+    return r16((uint16_t)(lo + PJVM_OBJ_HEADER + idx * 2u));
+}
+
 /* Primitive-tier string constructors: always compiled, even when the
  * extended (algorithmic) string APIs are not - pjvmpack rewrites every
  * new-String allocation to the INIT native family, including allocations
  * made by the java/lang/String shim's bytecode. */
-static uint16_t pjvm_make_string_from_bytes(uint16_t src, uint16_t off,
-                                            uint16_t len) {
-    PJVM_GC_PROTECT(src, 0);
+static uint16_t pjvm_make_string_from_bytes(uint16_t src, uint16_t src_hi,
+                                            uint16_t off, uint16_t len) {
+    PJVM_GC_PROTECT(src, src_hi);
     uint16_t a = heap_alloc((uint16_t)(PJVM_OBJ_HEADER + len),
                             PJVM_HEAP_KIND_STRING);
     w16(a, len); w16((uint16_t)(a + 2), 0);
     for (uint16_t i = 0; i < len; i++)
         w8((uint16_t)(a + PJVM_OBJ_HEADER + i),
-           r8((uint16_t)(src + PJVM_OBJ_HEADER + off + i)));
+           pjvm_byte_array_read(src, src_hi, (uint16_t)(off + i)));
     PJVM_GC_UNPROTECT(1);
     return a;
 }
 
-static uint16_t pjvm_make_string_from_chars(uint16_t src, uint16_t off,
-                                            uint16_t len) {
-    PJVM_GC_PROTECT(src, 0);
+static uint16_t pjvm_make_string_from_chars(uint16_t src, uint16_t src_hi,
+                                            uint16_t off, uint16_t len) {
+    PJVM_GC_PROTECT(src, src_hi);
     uint16_t a = heap_alloc((uint16_t)(PJVM_OBJ_HEADER + len),
                             PJVM_HEAP_KIND_STRING);
     w16(a, len); w16((uint16_t)(a + 2), 0);
     for (uint16_t i = 0; i < len; i++)
         w8((uint16_t)(a + PJVM_OBJ_HEADER + i),
-           (uint8_t)r16((uint16_t)(src + PJVM_OBJ_HEADER + (off + i) * 2)));
+           (uint8_t)pjvm_short_array_read(
+               src, src_hi, (uint16_t)(off + i)));
     PJVM_GC_UNPROTECT(1);
     return a;
 }
@@ -743,10 +771,13 @@ static uint16_t pjvm_make_main_args(void) {
 }
 
 /* --- .pjvm loader ----------------------------------------------------- */
-PJVM_BOOT_FN static uint8_t pjvm_check_caps(void) {
+PJVM_BOOT_FN static uint8_t pjvm_check_caps(uint16_t image_max_locals,
+                                             uint16_t image_max_stack) {
     if ((uint32_t)n_methods > (uint32_t)PJVM_METHOD_CAP ||
         (uint32_t)n_classes > (uint32_t)PJVM_CLASS_CAP ||
-        (uint32_t)n_static_fields > (uint32_t)PJVM_STATIC_CAP)
+        (uint32_t)n_static_fields > (uint32_t)PJVM_STATIC_CAP ||
+        image_max_locals > PJVM_MAX_LOCALS ||
+        image_max_stack > PJVM_STACK_HEADROOM)
         return 0;
     return 1;
 }
@@ -764,7 +795,7 @@ PJVM_BOOT_FN static void pjvm_parse_v3(uint8_t *data) {
     n_string_constants = data[8];
     region_flags = data[9];
     bytecodes_size = RD32LE(data + 10);
-    if (!pjvm_check_caps()) {
+    if (!pjvm_check_caps(data[14], data[15])) {
         pjvm_platform_trap(PJVM_TRAP_CAPACITY, data[1]);
         return;
     }
@@ -848,6 +879,14 @@ PJVM_BOOT_FN static void pjvm_parse_v3(uint8_t *data) {
             pjvm_srb_off = 0;
         }
 
+        if (region_flags & PJVM_RF_INTERFACE_MAP) {
+            im_off = (uint32_t)(p - data);
+            p += (uint16_t)n_classes *
+                 (uint16_t)((n_classes + 7u) >> 3);
+        } else {
+            im_off = 0;
+        }
+
         /* const_data section offset */
         if (region_flags & PJVM_RF_CONST_DATA)
             cd_off = (uint32_t)(p - data);
@@ -896,7 +935,7 @@ PJVM_BOOT_FN static void pjvm_parse_v4(uint8_t *data) {
     n_string_constants = RD16LE(data + 12);
     region_flags = (uint8_t)RD16LE(data + 14);
     bytecodes_size = RD32LE(data + 16);
-    if (!pjvm_check_caps()) {
+    if (!pjvm_check_caps(RD16LE(data + 20), RD16LE(data + 22))) {
         pjvm_platform_trap(PJVM_TRAP_CAPACITY, data[1]);
         return;
     }
@@ -954,8 +993,9 @@ PJVM_BOOT_FN static void pjvm_parse_v4(uint8_t *data) {
 
         for (pjvm_method_id_t i = 0; i < n_methods; i++) {
             uint32_t vs_code, vmid_code;
-            m_ml[i] = (pjvm_count_t)pjvm_read_uleb(&p);
-            (void)pjvm_read_uleb(&p); /* max_stack is not needed after parse */
+            uint32_t max_locals = pjvm_read_uleb(&p);
+            (void)pjvm_read_uleb(&p); /* max_stack checked from the header */
+            m_ml[i] = (pjvm_count_t)max_locals;
             m_ac[i] = (pjvm_count_t)pjvm_read_uleb(&p);
             m_fl[i] = (pjvm_flags_t)pjvm_read_uleb(&p);
             vs_code = pjvm_read_uleb(&p);
@@ -1042,6 +1082,13 @@ PJVM_BOOT_FN static void pjvm_parse_v4(uint8_t *data) {
             p += (uint16_t)((n_static_fields + 7u) >> 3);
         } else {
             pjvm_srb_off = 0;
+        }
+        if (region_flags & PJVM_RF_INTERFACE_MAP) {
+            uint16_t n_memberships = RD16LE(p);
+            im_off = (uint32_t)(p - data);
+            p += 2u + (uint32_t)n_memberships * 4u;
+        } else {
+            im_off = 0;
         }
         cd_off = (region_flags & PJVM_RF_CONST_DATA) ? (uint32_t)(p - data) : 0;
     }
@@ -1394,7 +1441,8 @@ static void pjvm_inv(pjvm_method_id_t mi) {
         case NATIVE_STR_INIT_CHARS: {
             uint16_t src, src_hi;
             SPOP32(src, src_hi);
-            spush(pjvm_make_string_from_chars(src, 0, r16(src)), 0);
+            spush(pjvm_make_string_from_chars(
+                src, src_hi, 0, pjvm_array_len(src, src_hi)), 0);
             break;
         }
         case NATIVE_STR_INIT_CHARS_RANGE: {
@@ -1402,7 +1450,7 @@ static void pjvm_inv(pjvm_method_id_t mi) {
             SPOP_U16(len);
             SPOP_U16(off);
             SPOP32(src, src_hi);
-            spush(pjvm_make_string_from_chars(src, off, len), 0);
+            spush(pjvm_make_string_from_chars(src, src_hi, off, len), 0);
             break;
         }
         case NATIVE_STR_INIT_BYTES:
@@ -1410,7 +1458,8 @@ static void pjvm_inv(pjvm_method_id_t mi) {
             uint16_t src, src_hi;
             if (nid == NATIVE_STR_INIT_BYTES_CHARSET) { SPOP32(alo, ahi); }
             SPOP32(src, src_hi);
-            spush(pjvm_make_string_from_bytes(src, 0, r16(src)), 0);
+            spush(pjvm_make_string_from_bytes(
+                src, src_hi, 0, pjvm_array_len(src, src_hi)), 0);
             break;
         }
         case NATIVE_STR_INIT_BYTES_RANGE:
@@ -1421,7 +1470,7 @@ static void pjvm_inv(pjvm_method_id_t mi) {
             SPOP_U16(len);
             SPOP_U16(off);
             SPOP32(src, src_hi);
-            spush(pjvm_make_string_from_bytes(src, off, len), 0);
+            spush(pjvm_make_string_from_bytes(src, src_hi, off, len), 0);
             break;
         }
         case NATIVE_STR_INIT_STRING: {
@@ -1435,19 +1484,29 @@ static void pjvm_inv(pjvm_method_id_t mi) {
             break;
         case NATIVE_ARRAYCOPY:
 #if PJVM_USE_ASM_ARRAYCOPY
+            if (g_pjvm->stk_hi[g_pjvm->sp - 3] != 0) {
+                pjvm_platform_trap(PJVM_TRAP_BAD_NATIVE, g_pjvm->pc);
+                break;
+            }
             pjvm_native_arraycopy();
 #else
         {
             /* arraycopy(byte[] src, int srcOff, byte[] dst, int dstOff, int len)
              * Copies forward only — src and dst must not overlap with dst > src. */
-            uint16_t len, dstOff, dst, srcOff, src;
+            uint16_t len, dstOff, dst, dst_hi, srcOff, src, src_hi;
             SPOP_U16(len);
             SPOP_U16(dstOff);
-            dst = spop_lo();
+            SPOP32(dst, dst_hi);
             SPOP_U16(srcOff);
-            src = spop_lo();
+            SPOP32(src, src_hi);
+            if (dst_hi) {
+                pjvm_platform_trap(PJVM_TRAP_BAD_NATIVE, g_pjvm->pc);
+                break;
+            }
             for (uint16_t i = 0; i < len; i++)
-                w8(dst + PJVM_OBJ_HEADER + dstOff + i, r8(src + PJVM_OBJ_HEADER + srcOff + i));
+                w8((uint16_t)(dst + PJVM_OBJ_HEADER + dstOff + i),
+                   pjvm_byte_array_read(src, src_hi,
+                                        (uint16_t)(srcOff + i)));
         }
 #endif
             break;
@@ -1458,16 +1517,18 @@ static void pjvm_inv(pjvm_method_id_t mi) {
         {
             /* memcmp(byte[] a, int aOff, byte[] b, int bOff, int len)
              * Returns <0, 0, or >0 (signed difference of first mismatch). */
-            uint16_t len, bOff, bref, aOff, aref;
+            uint16_t len, bOff, bref, bref_hi, aOff, aref, aref_hi;
             SPOP_U16(len);
             SPOP_U16(bOff);
-            bref = spop_lo();
+            SPOP32(bref, bref_hi);
             SPOP_U16(aOff);
-            aref = spop_lo();
+            SPOP32(aref, aref_hi);
             int32_t result = 0;
             for (uint16_t i = 0; i < len; i++) {
-                uint8_t av = r8(aref + PJVM_OBJ_HEADER + aOff + i);
-                uint8_t bv = r8(bref + PJVM_OBJ_HEADER + bOff + i);
+                uint8_t av = pjvm_byte_array_read(
+                    aref, aref_hi, (uint16_t)(aOff + i));
+                uint8_t bv = pjvm_byte_array_read(
+                    bref, bref_hi, (uint16_t)(bOff + i));
                 if (av != bv) { result = (int32_t)av - (int32_t)bv; break; }
             }
             pjvm_push32(result);
@@ -1480,47 +1541,44 @@ static void pjvm_inv(pjvm_method_id_t mi) {
 #else
         {
             /* writeBytes(byte[] buf, int off, int len) */
-            uint16_t len, off, ref;
+            uint16_t len, off, ref, ref_hi;
             SPOP_U16(len);
             SPOP_U16(off);
-            ref = spop_lo();
+            SPOP32(ref, ref_hi);
             for (uint16_t i = 0; i < len; i++)
-                pjvm_platform_putchar(r8(ref + PJVM_OBJ_HEADER + off + i));
+                pjvm_platform_putchar(pjvm_byte_array_read(
+                    ref, ref_hi, (uint16_t)(off + i)));
         }
 #endif
             break;
         case NATIVE_STRING_FROM_BYTES:
 #if PJVM_USE_ASM_STRING_FROM_BYTES
+            PJVM_GC_PROTECT(g_pjvm->stk_lo[g_pjvm->sp - 3],
+                            g_pjvm->stk_hi[g_pjvm->sp - 3]);
             pjvm_native_string_from_bytes();
+            PJVM_GC_UNPROTECT(1);
 #else
         {
             /* new String(byte[] src, int off, int len) → String ref */
-            uint16_t len, off, src;
+            uint16_t len, off, src, src_hi;
             SPOP_U16(len);
             SPOP_U16(off);
-            src = spop_lo();
-            PJVM_GC_PROTECT(src, 0);
-            uint16_t a = heap_alloc((uint16_t)(PJVM_OBJ_HEADER + len),
-                                    PJVM_HEAP_KIND_STRING);
-            w16(a, len); w16((uint16_t)(a + 2), 0);
-            for (uint16_t i = 0; i < len; i++)
-                w8(a + PJVM_OBJ_HEADER + i, r8(src + PJVM_OBJ_HEADER + off + i));
-            PJVM_GC_UNPROTECT(1);
-            spush(a, 0);
+            SPOP32(src, src_hi);
+            spush(pjvm_make_string_from_bytes(src, src_hi, off, len), 0);
         }
 #endif
             break;
 #if PJVM_USE_FILE_NATIVES
         case NATIVE_FILE_OPEN: {
             /* fileOpen(byte[] name, int nameLen, int mode) → int status */
-            uint16_t mode, nameLen, nameRef;
+            uint16_t mode, nameLen, nameRef, nameRef_hi;
             SPOP_U16(mode);
             SPOP_U16(nameLen);
-            nameRef = spop_lo();
+            SPOP32(nameRef, nameRef_hi);
             uint8_t nameBuf[64];
             uint16_t nl = nameLen > 63 ? 63 : nameLen;
             for (uint16_t i = 0; i < nl; i++)
-                nameBuf[i] = r8(nameRef + PJVM_OBJ_HEADER + i);
+                nameBuf[i] = pjvm_byte_array_read(nameRef, nameRef_hi, i);
             nameBuf[nl] = 0;
             int32_t result = pjvm_platform_file_open(nameBuf, (uint8_t)nl, (uint8_t)mode);
             pjvm_push32(result);
@@ -1540,10 +1598,14 @@ static void pjvm_inv(pjvm_method_id_t mi) {
         }
         case NATIVE_FILE_READ: {
             /* fileRead(byte[] buf, int off, int len) → int bytesRead */
-            uint16_t len, off, ref;
+            uint16_t len, off, ref, ref_hi;
             SPOP_U16(len);
             SPOP_U16(off);
-            ref = spop_lo();
+            SPOP32(ref, ref_hi);
+            if (ref_hi) {
+                pjvm_platform_trap(PJVM_TRAP_BAD_NATIVE, g_pjvm->pc);
+                break;
+            }
             int32_t total = 0;
             for (uint16_t i = 0; i < len; i++) {
                 int32_t ch = pjvm_platform_file_read_byte();
@@ -1556,12 +1618,13 @@ static void pjvm_inv(pjvm_method_id_t mi) {
         }
         case NATIVE_FILE_WRITE: {
             /* fileWrite(byte[] buf, int off, int len) */
-            uint16_t len, off, ref;
+            uint16_t len, off, ref, ref_hi;
             SPOP_U16(len);
             SPOP_U16(off);
-            ref = spop_lo();
+            SPOP32(ref, ref_hi);
             for (uint16_t i = 0; i < len; i++)
-                pjvm_platform_file_write_byte(r8(ref + PJVM_OBJ_HEADER + off + i));
+                pjvm_platform_file_write_byte(pjvm_byte_array_read(
+                    ref, ref_hi, (uint16_t)(off + i)));
             break;
         }
         case NATIVE_FILE_CLOSE: {
@@ -1573,13 +1636,13 @@ static void pjvm_inv(pjvm_method_id_t mi) {
         }
         case NATIVE_FILE_DELETE: {
             /* fileDelete(byte[] name, int nameLen) → int status */
-            uint16_t nameLen, nameRef;
+            uint16_t nameLen, nameRef, nameRef_hi;
             SPOP_U16(nameLen);
-            nameRef = spop_lo();
+            SPOP32(nameRef, nameRef_hi);
             uint8_t nameBuf[64];
             uint16_t nl = nameLen > 63 ? 63 : nameLen;
             for (uint16_t i = 0; i < nl; i++)
-                nameBuf[i] = r8(nameRef + PJVM_OBJ_HEADER + i);
+                nameBuf[i] = pjvm_byte_array_read(nameRef, nameRef_hi, i);
             nameBuf[nl] = 0;
             int32_t result = pjvm_platform_file_delete(nameBuf, (uint8_t)nl);
             pjvm_push32(result);
@@ -1715,9 +1778,12 @@ static void pjvm_inv(pjvm_method_id_t mi) {
         return;
     }
 
+    pjvm_count_t arg_count = M_AC(mi);
     if (g_pjvm->fdepth >= PJVM_FDEPTH_LIMIT ||
         (uint16_t)(g_pjvm->lt + M_ML(mi)) > PJVM_MAX_LOCALS ||
-        g_pjvm->sp > (uint16_t)(PJVM_MAX_STACK - PJVM_STACK_HEADROOM)) {
+        g_pjvm->sp < arg_count ||
+        (uint16_t)(g_pjvm->sp - arg_count) >
+            (uint16_t)(PJVM_MAX_STACK - PJVM_STACK_HEADROOM)) {
         pjvm_platform_trap(PJVM_TRAP_STACK_OVERFLOW, g_pjvm->pc);
         g_pjvm->pc = PJVM_PC_HALT;
         return;
@@ -1725,7 +1791,7 @@ static void pjvm_inv(pjvm_method_id_t mi) {
 
     PJVMFrame *f = &g_pjvm->frames[g_pjvm->fdepth];
     f->pc = g_pjvm->pc; f->mi = g_pjvm->cur_mi; f->lb = g_pjvm->cur_lb;
-    f->so = (uint16_t)(g_pjvm->sp - M_AC(mi)); f->cb = g_pjvm->cur_cb;
+    f->so = (uint16_t)(g_pjvm->sp - arg_count); f->cb = g_pjvm->cur_cb;
     g_pjvm->fdepth++;
     if (g_pjvm->fdepth > g_pjvm->fdepth_max) g_pjvm->fdepth_max = (uint8_t)g_pjvm->fdepth;
 
@@ -1738,7 +1804,7 @@ static void pjvm_inv(pjvm_method_id_t mi) {
         g_pjvm->loc_hi[nb + i] = 0;
     }
 #endif
-    for (int32_t i = (int32_t)M_AC(mi) - 1; i >= 0; i--) {
+    for (int32_t i = (int32_t)arg_count - 1; i >= 0; i--) {
         g_pjvm->sp--;
         g_pjvm->loc_lo[nb + i] = g_pjvm->stk_lo[g_pjvm->sp];
         g_pjvm->loc_hi[nb + i] = g_pjvm->stk_hi[g_pjvm->sp];
@@ -1824,25 +1890,73 @@ static void pjvm_throw(uint16_t exc_ref, uint32_t throw_pc) {
     }
 }
 
-static uint16_t pjvm_multi_alloc(uint16_t *sizes, uint8_t depth, uint8_t dims) {
-    uint16_t count = sizes[depth];
-    if ((uint32_t)count * 4u + PJVM_OBJ_HEADER > 0xFFFFu) {
+NI static uint16_t pjvm_array_alloc(uint16_t count, uint8_t atype) {
+    uint8_t elem_shift = 2;
+    if (atype == 4 || atype == 8) elem_shift = 0;
+    else if (atype == 5 || atype == 9) elem_shift = 1;
+
+    uint32_t bytes = PJVM_OBJ_HEADER + ((uint32_t)count << elem_shift);
+    if (bytes > 0xFFFFu) {
         pjvm_platform_trap(PJVM_TRAP_CAPACITY, count);
         return 0;
     }
-    uint16_t a = heap_alloc((uint16_t)(PJVM_OBJ_HEADER + count * 4),
-                            PJVM_HEAP_KIND_REF_ARRAY);
-    w16(a, count); w16((uint16_t)(a + 2), PJVM_HEAP_KIND_REF_ARRAY);
-    if (depth + 1 < dims) {
+    uint8_t kind = atype == 0
+        ? PJVM_HEAP_KIND_REF_ARRAY
+        : (uint8_t)(PJVM_HEAP_KIND_BYTE_ARRAY + elem_shift);
+    uint16_t a = heap_alloc((uint16_t)bytes, kind);
+    w16(a, count); w16((uint16_t)(a + 2), kind);
+    return a;
+}
+
+static uint16_t pjvm_multi_alloc(uint16_t *sizes, uint8_t depth, uint8_t dims,
+                                 uint8_t leaf_atype) {
+    uint16_t count = sizes[depth];
+    uint8_t is_leaf = (uint8_t)(depth + 1u == dims);
+    uint16_t a = pjvm_array_alloc(count, is_leaf ? leaf_atype : 0);
+    if (a == 0) return 0;
+    if (!is_leaf) {
         PJVM_GC_PROTECT(a, 0);
         for (uint16_t i = 0; i < count; i++) {
-            uint16_t inner = pjvm_multi_alloc(sizes, depth + 1, dims);
+            uint16_t inner = pjvm_multi_alloc(
+                sizes, (uint8_t)(depth + 1), dims, leaf_atype);
             w16(a + PJVM_OBJ_HEADER + i * 4, inner);
             w16((uint16_t)(a + PJVM_OBJ_HEADER + i * 4 + 2), 0);
         }
         PJVM_GC_UNPROTECT(1);
     }
     return a;
+}
+
+static uint8_t pjvm_is_instance_of(pjvm_class_id_t ci,
+                                   pjvm_class_id_t target_ci) {
+    pjvm_class_id_t object_ci = ci;
+    while (ci != PJVM_NO_CLASS) {
+        if (ci == target_ci) return 1;
+        ci = cls_pid[ci];
+    }
+
+    if (im_off != 0) {
+#if PJVM_ENABLE_V4
+        if (!pjvm_format_v4) {
+#endif
+            uint16_t stride = (uint16_t)((n_classes + 7u) >> 3);
+            uint32_t p = im_off + (uint16_t)object_ci * stride +
+                         (target_ci >> 3);
+            return (uint8_t)((PROG(p) >> (target_ci & 7u)) & 1u);
+#if PJVM_ENABLE_V4
+        }
+        uint16_t count = PROG16(im_off);
+        uint32_t p = im_off + 2;
+        for (uint16_t i = 0; i < count; i++) {
+            pjvm_class_id_t member_ci = (pjvm_class_id_t)PROG16(p);
+            pjvm_class_id_t interface_ci = (pjvm_class_id_t)PROG16(p + 2);
+            p += 4;
+            if (member_ci > object_ci) break;
+            if (member_ci == object_ci && interface_ci == target_ci) return 1;
+        }
+#endif
+    }
+    return 0;
 }
 
 /* --- interpreter loop ------------------------------------------------- */
@@ -2318,10 +2432,10 @@ static void pjvm_exec(void) {
         }
 #endif
 
-        case OP_IMUL:  BINOP32(a * b)
+        case OP_IMUL:  BINOP32((int32_t)((uint32_t)a * (uint32_t)b))
         case OP_IDIV:  BINOP32(pjvm_idiv32(a, b))
         case OP_IREM:  BINOP32(pjvm_irem32(a, b))
-        case OP_ISHL:  SHIFTOP(a << s)
+        case OP_ISHL:  SHIFTOP((int32_t)((uint32_t)a << s))
         case OP_ISHR:  SHIFTOP(a >> s)
         case OP_IUSHR: SHIFTOP((int32_t)((uint32_t)a >> s))
 
@@ -2544,35 +2658,20 @@ static void pjvm_exec(void) {
         case OP_NEWARRAY: {
             uint8_t atype = bcread();
             SPOP32(alo, ahi);
-            uint8_t esz = 4;
-            uint8_t kind = PJVM_HEAP_KIND_INT_ARRAY;
-            if (atype == 4 || atype == 8) esz = 1;
-            else if (atype == 5 || atype == 9) esz = 2;
-            if (esz == 1) kind = PJVM_HEAP_KIND_BYTE_ARRAY;
-            else if (esz == 2) kind = PJVM_HEAP_KIND_SHORT_ARRAY;
-            /* Negative counts and byte sizes past the 16-bit heap would
-             * otherwise wrap into a silently short allocation. */
-            if (ahi != 0 ||
-                (uint32_t)alo * esz + PJVM_OBJ_HEADER > 0xFFFFu) {
+            if (ahi != 0) {
                 pjvm_platform_trap(op, opc);
                 spush(0, 0); break;
             }
-            uint16_t a = heap_alloc((uint16_t)(PJVM_OBJ_HEADER + alo * esz), kind);
-            w16(a, alo); w16((uint16_t)(a + 2), kind);
-            spush(a, 0); break;
+            spush(pjvm_array_alloc(alo, atype), 0); break;
         }
         case OP_ANEWARRAY: {
             g_pjvm->pc += 2;
             SPOP32(alo, ahi);
-            if (ahi != 0 ||
-                (uint32_t)alo * 4u + PJVM_OBJ_HEADER > 0xFFFFu) {
+            if (ahi != 0) {
                 pjvm_platform_trap(op, opc);
                 spush(0, 0); break;
             }
-            uint16_t a = heap_alloc((uint16_t)(PJVM_OBJ_HEADER + alo * 4),
-                                    PJVM_HEAP_KIND_REF_ARRAY);
-            w16(a, alo); w16((uint16_t)(a + 2), PJVM_HEAP_KIND_REF_ARRAY);
-            spush(a, 0); break;
+            spush(pjvm_array_alloc(alo, 0), 0); break;
         }
         case OP_ARRAYLENGTH:
             SPOP32(alo, ahi);
@@ -2584,7 +2683,7 @@ static void pjvm_exec(void) {
             break;
 
         case OP_MULTIANEWARRAY: {
-            g_pjvm->pc += 2;
+            uint16_t array_info = cpread();
             uint8_t ndims = bcread();
             uint16_t sizes[4];
             if (ndims == 0 || ndims > 4) {
@@ -2602,7 +2701,9 @@ static void pjvm_exec(void) {
                 pjvm_platform_trap(op, opc);
                 spush(0, 0); break;
             }
-            spush(pjvm_multi_alloc(sizes, 0, ndims), 0);
+            uint8_t total_dims = (uint8_t)(array_info >> 8);
+            uint8_t leaf_atype = total_dims == ndims ? (uint8_t)array_info : 0;
+            spush(pjvm_multi_alloc(sizes, 0, ndims, leaf_atype), 0);
             break;
         }
 
@@ -2617,12 +2718,8 @@ static void pjvm_exec(void) {
             if (alo != 0) {
                 pjvm_class_id_t ci = (pjvm_class_id_t)r16(alo);
 #endif
-                uint8_t ok = 0;
-                while (ci != PJVM_NO_CLASS) {
-                    if (ci == tci) { ok = 1; break; }
-                    ci = cls_pid[ci];
-                }
-                if (!ok) pjvm_platform_trap(op, opc);
+                if (!pjvm_is_instance_of(ci, tci))
+                    pjvm_platform_trap(op, opc);
             }
             break;
         }
@@ -2639,12 +2736,7 @@ static void pjvm_exec(void) {
             else {
                 pjvm_class_id_t ci = (pjvm_class_id_t)r16(alo);
 #endif
-                uint8_t match = 0;
-                while (ci != PJVM_NO_CLASS) {
-                    if (ci == tci) { match = 1; break; }
-                    ci = cls_pid[ci];
-                }
-                spush(match, 0);
+                spush(pjvm_is_instance_of(ci, tci), 0);
             }
             break;
         }

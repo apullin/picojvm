@@ -270,11 +270,9 @@
 #endif
 
 #ifndef PJVM_USE_ASM_STRING_FROM_BYTES
-#if defined(PJVM_ASM_HELPERS) && !defined(PJVM_PAGED)
-#define PJVM_USE_ASM_STRING_FROM_BYTES 1
-#else
+/* The C native reuses the mandatory String constructor helper and protects
+ * its source across GC, making a second ASM implementation larger overall. */
 #define PJVM_USE_ASM_STRING_FROM_BYTES 0
-#endif
 #endif
 
 #endif /* PJVM_OPTS_H */

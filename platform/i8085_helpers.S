@@ -5,8 +5,9 @@
  * lstore/bcread/bread/cpread.  Each is a normal C-callable function
  * (args on stack, 16-bit return in BC, 8-bit return in A).
  *
- * Offsets below assume sim-build CAP values:
+ * Offsets below require the guarded target CAP values:
  *   STACK=64, LOCALS=128, STATIC=32, FRAMES=16
+ * pjvm.h rejects PJVM_ASM_HELPERS builds with any other layout.
  *
  * PJVMCtx field offsets (i8085, PJVMFrame=11 bytes):
  *   stk_lo   =    0   (64 × 2 = 128 bytes)
@@ -135,6 +136,26 @@ spop_hi:
     MOV C, M
     INX H
     MOV B, M                        ; BC = stk_hi[sp]
+    RET
+#endif
+
+/* Pop a byte-array reference as a direct address. Const-array references
+ * carry a nonzero high word and a program-image offset in the low word;
+ * non-paged 8085 builds can materialize them as pjvm_prog + offset. */
+#if PJVM_USE_ASM_ARRAYCOPY || PJVM_USE_ASM_MEMCMP || \
+    PJVM_USE_ASM_WRITE_BYTES || PJVM_USE_ASM_STRING_FROM_BYTES
+.Lspop_byte_ref:
+    CALL spop_lo                    ; BC = low word, sp--
+    PUSH B
+    CALL spop_hi                    ; BC = high word at the popped slot
+    MOV A, B
+    ORA C
+    POP B                           ; restore low word without changing flags
+    RZ                              ; heap reference is already an address
+    LHLD pjvm_prog
+    DAD B                           ; ROM offset -> flat-memory address
+    MOV B, H
+    MOV C, L
     RET
 #endif
 
@@ -541,7 +562,7 @@ pjvm_native_arraycopy:
     PUSH B
     CALL spop_lo                    ; BC = srcOff
     PUSH B
-    CALL spop_lo                    ; BC = src
+    CALL .Lspop_byte_ref            ; BC = src address (heap or ROM)
 
     /* src_addr = src + 4 + srcOff */
     POP D                           ; DE = srcOff
@@ -590,11 +611,11 @@ pjvm_native_memcmp:
     PUSH B
     CALL spop_lo                    ; BC = bOff
     PUSH B
-    CALL spop_lo                    ; BC = bref
+    CALL .Lspop_byte_ref            ; BC = b address (heap or ROM)
     PUSH B
     CALL spop_lo                    ; BC = aOff
     PUSH B
-    CALL spop_lo                    ; BC = aref
+    CALL .Lspop_byte_ref            ; BC = a address (heap or ROM)
 
     /* a_addr = aref + aOff + 4 */
     POP D                           ; DE = aOff
@@ -667,7 +688,7 @@ pjvm_native_write_bytes:
     PUSH B
     CALL spop_lo                    ; BC = off
     PUSH B
-    CALL spop_lo                    ; BC = ref
+    CALL .Lspop_byte_ref            ; BC = ref address (heap or ROM)
 
     /* addr = ref + off + 4 */
     POP D                           ; DE = off
@@ -715,7 +736,7 @@ pjvm_native_string_from_bytes:
     PUSH B
     CALL spop_lo                    ; BC = off
     PUSH B
-    CALL spop_lo                    ; BC = src
+    CALL .Lspop_byte_ref            ; BC = src address (heap or ROM)
 
     /* src_addr = src + off + 4 */
     POP D                           ; DE = off

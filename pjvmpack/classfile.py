@@ -134,9 +134,7 @@ def parse_class(data):
     this_class = r.u2()
     super_class = r.u2()
 
-    interfaces_count = r.u2()
-    for _ in range(interfaces_count):
-        r.skip_u2()
+    interfaces = [r.u2() for _ in range(r.u2())]
 
     # Field parsing keeps only data needed by the linker plus @Const markers.
     fields = []
@@ -178,4 +176,4 @@ def parse_class(data):
                 code = attr_data
         methods.append(MethodInfo(m_access, m_name_idx, m_desc_idx, code))
 
-    return ParsedClass(cp, this_class, super_class, fields, methods)
+    return ParsedClass(cp, this_class, super_class, fields, methods, interfaces)

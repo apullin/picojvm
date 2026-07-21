@@ -51,6 +51,16 @@ def vm_out(picojvm: Path, image: Path) -> bytes:
     return r.stdout
 
 
+def expect_capacity_reject(picojvm: Path, image: Path) -> None:
+    result = subprocess.run(
+        [str(picojvm), str(image)], stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE)
+    if result.returncode == 0 or b"Capacity exceeded" not in result.stderr:
+        raise AssertionError(
+            f"{image.name}: expected capacity rejection, got "
+            f"rc={result.returncode}, stderr={result.stderr!r}")
+
+
 def gen_many_methods() -> tuple[list[str], bytes]:
     body = ["public class V4ManyMethods {"]
     for i in range(300):
@@ -126,6 +136,30 @@ def gen_many_interface_vmids() -> tuple[list[str], bytes]:
     return ["V4IFace", "V4Impl", "V4ManyInterface", "Native"], bytes([0x40 + (299 % 32)])
 
 
+def gen_interface_types() -> tuple[list[str], bytes]:
+    write(SRC / "V4InterfaceTypes.java", """
+interface V4RootMarker {}
+interface V4ChildMarker extends V4RootMarker {}
+class V4Marked implements V4ChildMarker {}
+class V4MarkedChild extends V4Marked {}
+class V4Unmarked {}
+public class V4InterfaceTypes {
+  public static void main(String[] args) {
+    V4MarkedChild marked = new V4MarkedChild();
+    Native.putchar(marked instanceof V4RootMarker ? 1 : 0);
+    Native.putchar(new V4Unmarked() instanceof V4RootMarker ? 1 : 0);
+    Object value = marked;
+    V4RootMarker checked = (V4RootMarker) value;
+    Native.putchar(checked != null ? 1 : 0);
+  }
+}
+""".lstrip())
+    return [
+        "V4RootMarker", "V4ChildMarker", "V4Marked", "V4MarkedChild",
+        "V4Unmarked", "V4InterfaceTypes", "Native",
+    ], bytes((1, 0, 1))
+
+
 def u2(v: int) -> bytes:
     return struct.pack("<H", v)
 
@@ -142,6 +176,45 @@ def method_v4(max_locals: int, max_stack: int, arg_count: int, flags: int,
         u4(code_offset), u4(cp_base), u2(vslot), u2(vmid),
         u2(exc_count), u2(exc_base),
     ))
+
+
+def write_capacity_image(out: Path, version: int, max_locals: int,
+                         max_stack: int, packed: bool = False) -> None:
+    bytecode = bytes((0xB1,))
+    data = bytearray((0x85, version))
+    if version == 0x4C:
+        data += bytes((1, 0))
+        data += u2(0) + bytes((0, 0, 0, 0))
+        data += u4(len(bytecode)) + bytes((max_locals, max_stack))
+        data += bytes((max_locals, max_stack, 0, 0))
+        data += u4(0) + u2(0) + bytes((0xFF, 0xFF, 0, 0))
+        data += u2(0)
+    else:
+        flags = 0x08 if packed else 0
+        data += u2(1) + u2(0) + u2(0) + u2(0) + u2(0) + u2(0)
+        data += u2(flags) + u4(len(bytecode))
+        data += u2(max_locals) + u2(max_stack)
+        if packed:
+            # max_locals, max_stack, args, flags, vslot, vmid,
+            # code_delta, cp_base+1, exc_count, exc_base+1
+            fields = (max_locals, max_stack, 0, 0, 0, 0, 0, 1, 0, 1)
+            blob = b"".join(_uleb(value) for value in fields)
+            data += u4(len(blob)) + blob
+        else:
+            data += method_v4(max_locals, max_stack, 0, 0, 0, 0)
+        data += u4(0)
+    data += bytecode
+    out.write_bytes(data)
+
+
+def _uleb(value: int) -> bytes:
+    encoded = bytearray()
+    while True:
+        byte = value & 0x7F
+        value >>= 7
+        encoded.append(byte | (0x80 if value else 0))
+        if not value:
+            return bytes(encoded)
 
 
 def write_cpbase_image(out: Path) -> None:
@@ -218,6 +291,8 @@ def main() -> int:
     tests.append(("many-virtuals", names, expected, "auto"))
     names, expected = gen_many_interface_vmids()
     tests.append(("many-interface-vmids", names, expected, "auto"))
+    names, expected = gen_interface_types()
+    tests.append(("interface-types", names, expected, "v4"))
 
     javac()
 
@@ -249,6 +324,19 @@ def main() -> int:
     if got != b"G":
         raise AssertionError(f"wide-locals: expected b'G', got {got!r}")
     print("PASS: v4 wide-locals")
+
+    capacity_cases = (
+        ("v3-max-stack", 0x4C, 0, 33, False),
+        ("v4-max-stack", 0x4D, 0, 33, False),
+        ("v4-packed-max-stack", 0x4D, 0, 33, True),
+        ("v4-max-locals", 0x4D, 8193, 1, False),
+        ("v4-packed-max-locals", 0x4D, 8193, 1, True),
+    )
+    for name, version, max_locals, max_stack, packed in capacity_cases:
+        image = BUILD / f"{name}.pjvm"
+        write_capacity_image(image, version, max_locals, max_stack, packed)
+        expect_capacity_reject(picojvm, image)
+        print(f"PASS: {name} rejected")
     return 0
 
 

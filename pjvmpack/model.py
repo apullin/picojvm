@@ -42,6 +42,7 @@ class ParsedClass:
     super_class: int
     fields: List[FieldInfo]
     methods: List[MethodInfo]
+    interfaces: List[int]
 
     def __iter__(self):
         yield self.cp
@@ -61,10 +62,12 @@ class ClassInfo:
     cp: list
     fields_raw: list
     methods_raw: list
+    interface_names: list = field(default_factory=list)
     class_id: int = -1
     parent_class_id: int = PJVM_NO_CLASS
     static_fields: list = field(default_factory=list)
     static_field_descs: list = field(default_factory=list)
+    declared_fields: dict = field(default_factory=dict)
     const_fields: set = field(default_factory=set)
     own_instance_fields: list = field(default_factory=list)
     all_instance_fields: list = field(default_factory=list)

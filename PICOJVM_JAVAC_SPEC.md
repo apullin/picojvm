@@ -31,7 +31,8 @@ in Java so that it can ultimately self-host: compile itself on picoJVM on real
 18. [Appendix B: Native Method ABI](#appendix-b-native-method-abi)
 19. [Appendix C: Existing picoJVM Test Programs](#appendix-c-existing-picojvm-test-programs)
 20. [Appendix D: .pjvm File Format Reference](#appendix-d-pjvm-file-format-reference)
-    - [D.9: Constant Data Arrays (const_data)](#d9-constant-data-arrays-const_data)
+    - [D.9: Interface Membership Map](#d9-interface-membership-map)
+    - [D.10: Constant Data Arrays (const_data)](#d10-constant-data-arrays-const_data)
 
 ---
 
@@ -103,7 +104,7 @@ All values on the operand stack and in local variables are stored as
   `hi = 0xFFFF` for sign extension.
 - **Reference** (16-bit heap address): stored in `lo`, `hi = 0`.
 - **ROM array reference** (32-bit program image offset): `hi != 0`.
-  See [Appendix D.9: Constant Data Arrays](#d9-constant-data-arrays-const_data).
+  See [Appendix D.10: Constant Data Arrays](#d10-constant-data-arrays-const_data).
 - **null**: `lo = 0, hi = 0`.
 
 The interpreter uses separate parallel arrays: `stk_lo[]`/`stk_hi[]` for the
@@ -276,7 +277,8 @@ Offset  Size  Field            Description
 8       1     n_strings        Number of string constants
 9       1     region_flags     Pin hints / ref bitmaps / const_data flags
 10      4     bytecodes_size   Total bytecode section size
-14      2     reserved         Must be 0
+14      1     image_max_locals Maximum max_locals across all methods (0 if absent)
+15      1     image_max_stack  Maximum max_stack across all methods (0 if absent)
 ```
 
 **v4 header** (24 bytes):
@@ -292,7 +294,8 @@ Offset  Size  Field            Description
 12      2     n_strings        Number of string constants
 14      2     region_flags     Same bits as v3
 16      4     bytecodes_size   Total bytecode section size
-20      4     reserved         Must be 0
+20      2     image_max_locals Maximum max_locals across all methods (0 if absent)
+22      2     image_max_stack  Maximum max_stack across all methods (0 if absent)
 ```
 
 `pjvmpack.py --format auto` emits v3 while all v3 limits fit and emits v4
@@ -308,6 +311,8 @@ Bit 0  pin hints present
 Bit 1  exact-GC reference bitmaps present
 Bit 2  const_data section present
 Bit 3  v4 method table uses packed ULEB encoding
+Bit 4  exact-GC static-reference bitmap present
+Bit 5  interface membership map present
 ```
 
 ### 3.2 Class Table
@@ -346,6 +351,12 @@ exc_off_idx  1        2        Exception table base index
 ```
 
 The fixed entry size is 14 bytes in v3 and 24 bytes in v4.
+
+The packer records whole-image maxima in the header. The runtime checks them
+once against `PJVM_MAX_LOCALS` and `PJVM_STACK_HEADROOM`, preserving the compact
+fixed-headroom execution model without scanning or retaining another
+method-sized RAM table. Zero maxima preserve compatibility with older images,
+whose reserved header bytes were zero.
 
 If v4 `region_flags` bit 3 is set, the method table is packed instead:
 
@@ -388,6 +399,7 @@ Offset  Size      Field     Description
                             - Fieldref (static): static field slot
                             - Fieldref (instance): instance field slot
                             - String: 0x8000 | string_index
+                            - multianewarray Class: dimensions/leaf-atype metadata
                             - Class: class_id
                             - Unresolved: 0xFFFF
 ```
@@ -421,6 +433,10 @@ Raw JVM bytecode stream, `bytecodes_size` bytes.  All methods' bytecodes
 concatenated.  Each method's `code_offset` in the method table points into this
 section. v4-capable runtimes support the `wide` prefix for `iload`, `aload`,
 `istore`, `astore`, and `iinc`; v3-only builds may omit that handler.
+For `multianewarray`, pjvmpack rewrites the resolved Class entry to
+`(descriptor_dimensions << 8) | leaf_atype`. A zero leaf type denotes a
+reference row. The runtime uses a primitive leaf only when the instruction's
+allocated dimension count reaches the descriptor leaf.
 
 ### 3.8 Exception Table
 
@@ -1829,7 +1845,7 @@ Expected output: `[63, 0, 83, 25, 82, 21]` (`'?', 0, 'S', 25, 'R', 21`)
 Expected output: `[1, 2, 3, 10, 4]`
 
 **T35_InterfaceTest.java** — Interface test (identical to existing picoJVM test)
-Expected output: `[27, 20, 67, 66, 27, 20]`
+Expected output: `[27, 20, 67, 66, 27, 20, 1, 0, 1, 1, 27]`
 
 **T36_StringSwitchTest.java** — String switch (identical to existing picoJVM test)
 Expected output: `[1, 2, 3, 0]`
@@ -2456,11 +2472,11 @@ picojc test suite should produce identical output.
 | Counter | Counter.java | 3 | Objects, fields, methods |
 | StringTest | StringTest.java | H,e,l,l,o,5,108,1,0,1,W,o,r,l,d | Strings |
 | StaticInitTest | StaticInitTest.java | 42,50 | Static init, clinit |
-| MultiArrayTest | MultiArrayTest.java | 1,5,9,3,4 | Multi-dim arrays |
+| MultiArrayTest | MultiArrayTest.java | 1,5,9,3,4,77,128,128,1 | Multi-dim arrays |
 | StringSwitchTest | StringSwitchTest.java | 1,2,3,0 | String switch |
 | Shapes | Shapes.java + Shape, Square, Rect | 63,0,83,25,82,21 | Inheritance, vtables |
 | Features | Features.java + Shape, Square, Rect | B,Y,T,E,1,2,3,0,10,20,99,1,0,1,O,K | Mixed features |
-| InterfaceTest | InterfaceTest.java + interfaces | 27,20,67,66,27,20 | Interfaces |
+| InterfaceTest | InterfaceTest.java + interfaces | 27,20,67,66,27,20,1,0,1,1,27 | Interfaces |
 | ExceptionTest | ExceptionTest.java + MyException | 1,2,3,10,4 | Exceptions |
 
 ### C.1 Source Code
@@ -2518,7 +2534,10 @@ Bytes       Section
 [..]        String constants (variable)
 [..]        Bytecode section (bytecodes_size bytes)
 [..]        Exception table (Σ exc_count × 7 bytes v3, × 8 bytes v4)
-[..]        Constant data section (optional, see D.9)
+[..]        Pin hints (optional; one byte per method)
+[..]        Static-reference bitmap (optional)
+[..]        Interface membership map (optional; see D.9)
+[..]        Constant data section (optional, see D.10)
 ```
 
 ### D.2 Byte Order
@@ -2578,7 +2597,25 @@ After 4-byte alignment padding:
 Note: picoJVM uses 2-byte npairs (not 4-byte) and 2-byte offsets (not 4-byte
 as standard JVM).  Match keys remain 4 bytes.
 
-### D.9 Constant Data Arrays (`const_data`)
+### D.9 Interface Membership Map
+
+When `region_flags` bit 5 is set, a transitive interface-membership map follows
+the static-reference bitmap and precedes `const_data`. v3 stores a direct
+class-by-class bitmap:
+
+```
+stride = ceil(n_classes / 8)
+membership[n_classes][stride]
+```
+
+Bit `interface_id & 7` of byte `interface_id >> 3` records membership. v4 uses
+a sorted list prefixed by `u16 n_memberships`, with each entry containing two
+little-endian `u16` values `(class_id, interface_id)`. `pjvmpack` and `picojc`
+emit direct interfaces, extended interfaces, and interfaces inherited from a
+superclass. `checkcast` and `instanceof` first walk the superclass chain, then
+consult this image-resident map; it consumes no per-class RAM.
+
+### D.10 Constant Data Arrays (`const_data`)
 
 #### Motivation
 
@@ -2630,14 +2667,17 @@ This means the same `.java` source compiles and runs correctly on:
 
 #### .pjvm Format Extension
 
-The `const_data` section is appended after the exception table.  Its presence is
-indicated by a flag in the header:
+The `const_data` section is appended after the exception table and any optional
+pin, static-reference, and interface metadata. Its presence is indicated by a
+flag in the header:
 
 **Header field** (v3, byte 9 `region_flags`):
 - Bit 0: pin hints present (existing)
 - Bit 1: exact-GC reference bitmaps present
 - **Bit 2**: `const_data` section present
 - Bit 3: v4 packed method table present
+- Bit 4: static-reference bitmap present
+- Bit 5: interface membership map present
 
 **Section layout**:
 ```

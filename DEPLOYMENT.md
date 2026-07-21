@@ -6,7 +6,7 @@ and how to fit the common 8085 memory maps. All numbers are measured at
 
 ## The flagship configuration
 
-Small caps, v3 loader, free-list heap + GC (`TRIGGERS=3`), full hardening,
+Small caps, v3 loader, free-list heap + GC (`TRIGGERS=3`), runtime guards,
 shims-compatible native tier, asm helpers, boot overlay:
 
 | | non-LTO | `TARGET_LTO=1` |

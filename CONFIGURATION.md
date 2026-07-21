@@ -20,6 +20,9 @@ options change.
 Caps bound RAM tables and are checked at load (`PJVM_TRAP_CAPACITY`).
 Call depth additionally clamps at 127 (`PJVM_FDEPTH_LIMIT` — `fdepth` is an
 `int8_t`; the `PJVMCtx` layout is frozen for the 8085 asm helpers).
+`PJVM_STACK_HEADROOM` defaults to 32 and is the largest per-method
+`max_stack` accepted by the loader; it must not exceed `PJVM_MAX_STACK`.
+Raise both when packing unusually stack-heavy javac methods.
 
 ## Image format loaders
 
@@ -100,6 +103,9 @@ compiler corpus never emits (`pop2`, `dup_x1`, `swap`, the single-operand
 `PJVM_ASM_HELPERS` (a target build option, `TARGET_ASM_HELPERS=1` in the
 Makefile) enables the hand-written helper pack; individual
 `PJVM_USE_ASM_*` gates select stack helpers, copies
-(`arraycopy`/`memcmp`/`write_bytes`), and `string_from_bytes`. All are
+(`arraycopy`/`memcmp`/`write_bytes`), and optionally `string_from_bytes`
+(off by default because it duplicates the GC-safe C constructor path). All are
 non-paged-target only; offsets assume the sim-build capacity values (see
-the header comment in `platform/i8085_helpers.S`).
+the header comment in `platform/i8085_helpers.S`). Builds using the helper
+pack are rejected unless stack=64, locals=128, statics=32, and frames=16;
+disable `TARGET_ASM_HELPERS` before changing those capacities.

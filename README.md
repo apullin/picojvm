@@ -19,7 +19,7 @@ to bytecode and run by the VM like any other program.
 
 | | |
 |---|---|
-| Full-featured VM ROM (GC, exceptions, strings, hardening; LTO) | **31.5KB** |
+| Full-featured VM ROM (GC, exceptions, strings, runtime guards; LTO) | **31.5KB** |
 | Java heap on a flat 64K 8085, same build | **26.2KB** |
 | Minimal interpreter core (no GC), outlined | 24.2KB |
 | Interpreter + heap + GC source | ~4,400 lines of C |
@@ -38,8 +38,9 @@ to bytecode and run by the VM like any other program.
 - **java.lang in bytecode** — `String`, `Enum`, `Throwable`/`Exception`
   algorithms ship as packed shims over a small native primitive tier; the
   legacy C implementations are compiled out by default
-- **Hardened interpreter** — frame/stack/array/index/division guards and
-  loud traps; a corrupted or hostile image cannot take down the machine
+- **Guarded interpreter** — frame/stack/array/index/division guards and
+  loud traps for runtime faults and declared-capacity mismatches. Packed
+  `.pjvm` images are currently trusted; hostile-image validation is future work
 - **Program-space paging** — 32-bit program space with an LRU chunk cache;
   bytecode beyond 64K pages in from disk
 - **Boot overlay** — the image loader links inside the heap window and is
@@ -57,7 +58,7 @@ bytecode. It compiles itself, on picoJVM.
 
 - **Self-hosting fixpoint** — javac builds gen0, gen0 compiles picojc to
   gen1, gen1 compiles itself to gen2, gen1 == gen2 byte-identical
-- **76 positive + 36 negative tests**, plus binary-match and disk-mode
+- **77 positive + 38 negative tests**, plus binary-match and disk-mode
   suites, all passing on the host VM
 - **Disk-backed compilation** — reads source and writes images through the
   file natives; single-file and multi-file (`sources.lst`) modes
@@ -144,12 +145,11 @@ MachineOutliner that picoJVM leans on lives in that backend.
 
 ## TODO
 
-- **Multiple VM instances** — execution state already lives in `PJVMCtx`,
-  and the heap/GC bind the current context through one global
-  (`pjvm_heap_init` is the `setCurrent` point, green-thread style), but
-  program metadata (`pjvm_prog`, section offsets, method tables) is still
-  global. A `PJVMProg` descriptor would let MP/M or FreeRTOS tasks each run
-  an independent VM.
+- **Optional multiple VM instances** — the supported runtime contract is one
+  active VM per process or machine. Execution storage lives in `PJVMCtx`, but
+  program metadata and GC roots are global; `pjvm_heap_init` initializes the
+  singleton rather than switching contexts. A future `PJVMProg` descriptor
+  could provide independent instances when a target actually needs them.
 - **JDOS** — a resident shell; the term/file natives and archive tools are
   the substrate.
 

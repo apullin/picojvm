@@ -203,27 +203,13 @@ public class Resolver {
 	}
 
 	static int fStatField(int ci, int nm) {
-		while (ci >= 0) {
-			for (int fi = 0; fi < C.fCount; fi++) {
-				if (C.fClass[fi] == ci && C.fName[fi] == nm && C.fStatic[fi]) {
-					return fi;
-				}
-			}
-			ci = C.cParent[ci];
-		}
-		return -1;
+		int fi = fField(ci, nm);
+		return fi >= 0 && C.fStatic[fi] ? fi : -1;
 	}
 
 	static int fInstField(int ci, int nm) {
-		while (ci >= 0) {
-			for (int fi = 0; fi < C.fCount; fi++) {
-				if (C.fClass[fi] == ci && C.fName[fi] == nm && !C.fStatic[fi]) {
-					return fi;
-				}
-			}
-			ci = C.cParent[ci];
-		}
-		return -1;
+		int fi = fField(ci, nm);
+		return fi >= 0 && !C.fStatic[fi] ? fi : -1;
 	}
 
 	static int fMethod(int ci, int nm, boolean isStatic) {

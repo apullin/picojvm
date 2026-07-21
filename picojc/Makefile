@@ -53,7 +53,7 @@ TESTS = T01_Empty T02_Literal T03_Arithmetic T04_IfElse T05_WhileLoop \
 	        T68_ArrayField T69_StaticIntArrayInit T70_ArrayElemCompound \
 	        T71_ObjectFieldCompound T72_BooleanOps T73_MethodArrayReturn \
 	        T74_ParenIdent T75_SwitchControl T76_ConstFieldInit \
-	        T77_InstanceFieldInit
+	        T77_InstanceFieldInit T78_FieldHiding
 
 NEGTESTS = N01_InvalidStaticCall N02_OverloadSameClass \
            N03_OverloadInherited N04_SwitchTooManyCases \
@@ -72,7 +72,8 @@ NEGTESTS = N01_InvalidStaticCall N02_OverloadSameClass \
 	           N29_InvalidObjArrayStore N30_InvalidRefReturn \
 	           N31_InvalidThrowScalar N32_InvalidObjArrayInit \
 	           N33_CaseIdent N34_ContinueOutsideLoop \
-	           N35_ReturnInFinally N36_ComplexInstanceInit
+	           N35_ReturnInFinally N36_ComplexInstanceInit \
+	           N37_HiddenInstanceAsStatic N38_HiddenStaticViaObject
 
 # Tests requiring lib/ (platform package)
 LIB_SRCS = ../lib/Console.java ../lib/Arrays.java ../lib/IO.java

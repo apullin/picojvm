@@ -15,7 +15,8 @@ public class DiskMain {
 
 	// Multi-file manifest support
 	static final int MAX_FILES = 16;
-	static final int MAX_FNAME = 64;
+	// The native file bridge reserves one byte for a trailing NUL.
+	static final int MAX_FNAME = 63;
 	static byte[][] fileNames;
 	static int[] fileNameLens;
 	static int fileCount;
@@ -24,6 +25,7 @@ public class DiskMain {
 	static byte[] spillName = new byte[8];
 
 	public static void main(String[] args) {
+		Tk.line = 1;
 		// "input.java" fallback name
 		fname[0] = (byte)'i'; fname[1] = (byte)'n'; fname[2] = (byte)'p';
 		fname[3] = (byte)'u'; fname[4] = (byte)'t'; fname[5] = (byte)'.';
@@ -54,7 +56,7 @@ public class DiskMain {
 		Resolver.resolve();
 
 		// Pass 3: Emit (rewind and re-stream)
-		Native.fileOpen(spillName, 8, 2);
+		if (Native.fileOpen(spillName, 8, 2) != 0) { Lexer.error(276); return; }
 		if (multiFile) Lexer.rewindDiskFiles();
 		else { Lexer.rewindDisk(); Lexer.initDisk(fname, 10); }
 		Lexer.nextToken();
@@ -66,7 +68,7 @@ public class DiskMain {
 
 		// Pass 4: Link (write .pjvm to stdout)
 		// Reopen spill file for reading bytecodes
-		Native.fileOpen(spillName, 8, 1);
+		if (Native.fileOpen(spillName, 8, 1) != 0) { Lexer.error(276); return; }
 		Linker.writeOut();
 		Native.fileClose(1);
 
@@ -113,15 +115,15 @@ public class DiskMain {
 				if (lineLen > 0) addFile(lineBuf, lineLen);
 				lineLen = 0;
 			} else {
-				if (lineLen < MAX_FNAME) {
-					lineBuf[lineLen] = (byte) ch;
-					lineLen++;
-				}
+				if (lineLen >= MAX_FNAME) { Lexer.error(277); return false; }
+				lineBuf[lineLen] = (byte) ch;
+				lineLen++;
 			}
 		}
 
 		Native.fileClose(1);
-		return fileCount > 0;
+		if (fileCount <= 0) { Lexer.error(277); return false; }
+		return true;
 	}
 
 	static void addFile(byte[] lineBuf, int lineLen) {
@@ -140,7 +142,7 @@ public class DiskMain {
 		}
 		int trimLen = lineLen - start;
 		if (trimLen <= 0) return;
-		if (fileCount >= MAX_FILES) return;
+		if (fileCount >= MAX_FILES) { Lexer.error(277); return; }
 		fileNames[fileCount] = new byte[trimLen];
 		Native.arraycopy(lineBuf, start, fileNames[fileCount], 0, trimLen);
 		fileNameLens[fileCount] = trimLen;

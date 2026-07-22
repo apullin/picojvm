@@ -170,7 +170,9 @@ public class Linker {
 		if (C.diskSpill) {
 			// Read bytecodes back from spill file
 			for (int i = 0; i < C.cdLen; i++) {
-				wB(Native.fileReadByte());
+				int b = Native.fileReadByte();
+				if (b < 0) { Lexer.error(276); return; }
+				wB(b);
 			}
 		} else {
 			for (int i = 0; i < C.cdLen; i++) {

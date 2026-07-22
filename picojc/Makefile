@@ -24,6 +24,7 @@ TESTDIR = tests
 EXPDIR  = expected
 NEGDIR  = tests-negative
 PKGDIR  = tests-pkg
+DISK_SCOPE_DIR = tests-disk-scope
 PICOJSE_DIR = ../pj
 JAVA_LANG_DIR = ../java/lang
 PICOJSE_TESTDIR = ../tests
@@ -355,6 +356,64 @@ test-disk-package: $(PICOJVM) $(BUILDDIR)/picojc-disk.pjvm
 		echo "  Got:"; cat $(BUILDDIR)/disk_pkg_test/T64.out | head -3; \
 		false; \
 	fi
+
+# Each manifest entry is a separate Java compilation unit. Imports and a
+# package declaration from one file must not leak into the next file.
+test-disk-isolation: $(PICOJVM) $(BUILDDIR)/picojc-disk.pjvm
+	@rm -rf $(BUILDDIR)/disk_scope_test
+	@mkdir -p $(BUILDDIR)/disk_scope_test
+	@cp $(DISK_SCOPE_DIR)/P.java $(DISK_SCOPE_DIR)/A.java $(DISK_SCOPE_DIR)/B.java $(BUILDDIR)/disk_scope_test/
+	@printf 'P.java\nA.java\nB.java\n' > $(BUILDDIR)/disk_scope_test/sources.lst
+	@cd $(BUILDDIR)/disk_scope_test && $(DISK_PICOJVM) $(DISK_COMPILER) > scope.err 2> scope.log || true
+	@if grep -Eq '^E[0-9]+:202$$' $(BUILDDIR)/disk_scope_test/scope.err; then \
+		echo "PASS: disk compilation-unit scope isolation"; \
+	else \
+		echo "FAIL: disk package/import state leaked across source files"; \
+		head -c 64 $(BUILDDIR)/disk_scope_test/scope.err; echo; \
+		false; \
+	fi
+
+# A source file need not end in a newline. The virtual boundary keeps its
+# trailing line comment from swallowing the first line of the next file.
+test-disk-boundary: $(PICOJVM) $(BUILDDIR)/picojc-disk.pjvm
+	@rm -rf $(BUILDDIR)/disk_boundary_test
+	@mkdir -p $(BUILDDIR)/disk_boundary_test
+	@printf 'class BoundaryA {} // no final newline' > $(BUILDDIR)/disk_boundary_test/BoundaryA.java
+	@printf 'public class BoundaryMain { public static void main(String[] args) { Native.putchar(65); Native.putchar(10); } }\n' > $(BUILDDIR)/disk_boundary_test/BoundaryMain.java
+	@printf 'BoundaryA.java\nBoundaryMain.java\n' > $(BUILDDIR)/disk_boundary_test/sources.lst
+	@cd $(BUILDDIR)/disk_boundary_test && $(DISK_PICOJVM) $(DISK_COMPILER) > BoundaryMain.pjvm 2> compile.log
+	@$(PICOJVM) $(BUILDDIR)/disk_boundary_test/BoundaryMain.pjvm > $(BUILDDIR)/disk_boundary_test/out.txt 2> $(BUILDDIR)/disk_boundary_test/run.log
+	@if diff -q $(BUILDDIR)/disk_boundary_test/out.txt $(EXPDIR)/DiskBoundary.txt > /dev/null 2>&1; then \
+		echo "PASS: disk source-file token boundary"; \
+	else \
+		echo "FAIL: disk source-file token boundary"; \
+		false; \
+	fi
+
+# Disk and manifest failures must be reported rather than truncated, ignored,
+# or allowed to produce a partial image.
+test-disk-errors: $(PICOJVM) $(BUILDDIR)/picojc-disk.pjvm
+	@rm -rf $(BUILDDIR)/disk_error_test
+	@mkdir -p $(BUILDDIR)/disk_error_test/missing
+	@cd $(BUILDDIR)/disk_error_test/missing && $(DISK_PICOJVM) $(DISK_COMPILER) > error.txt 2> run.log || true
+	@grep -Eq '^E[0-9]+:276$$' $(BUILDDIR)/disk_error_test/missing/error.txt
+	@mkdir -p $(BUILDDIR)/disk_error_test/empty
+	@: > $(BUILDDIR)/disk_error_test/empty/sources.lst
+	@cd $(BUILDDIR)/disk_error_test/empty && $(DISK_PICOJVM) $(DISK_COMPILER) > error.txt 2> run.log || true
+	@grep -Eq '^E[0-9]+:277$$' $(BUILDDIR)/disk_error_test/empty/error.txt
+	@mkdir -p $(BUILDDIR)/disk_error_test/long
+	@printf 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n' > $(BUILDDIR)/disk_error_test/long/sources.lst
+	@cd $(BUILDDIR)/disk_error_test/long && $(DISK_PICOJVM) $(DISK_COMPILER) > error.txt 2> run.log || true
+	@grep -Eq '^E[0-9]+:277$$' $(BUILDDIR)/disk_error_test/long/error.txt
+	@mkdir -p $(BUILDDIR)/disk_error_test/many
+	@printf 'f01.java\nf02.java\nf03.java\nf04.java\nf05.java\nf06.java\nf07.java\nf08.java\nf09.java\nf10.java\nf11.java\nf12.java\nf13.java\nf14.java\nf15.java\nf16.java\nf17.java\n' > $(BUILDDIR)/disk_error_test/many/sources.lst
+	@cd $(BUILDDIR)/disk_error_test/many && $(DISK_PICOJVM) $(DISK_COMPILER) > error.txt 2> run.log || true
+	@grep -Eq '^E[0-9]+:277$$' $(BUILDDIR)/disk_error_test/many/error.txt
+	@mkdir -p $(BUILDDIR)/disk_error_test/spill/bc.spill
+	@printf 'class A { public static void main(String[] args) {} }\n' > $(BUILDDIR)/disk_error_test/spill/input.java
+	@cd $(BUILDDIR)/disk_error_test/spill && $(DISK_PICOJVM) $(DISK_COMPILER) > error.txt 2> run.log || true
+	@grep -Eq '^E[0-9]+:276$$' $(BUILDDIR)/disk_error_test/spill/error.txt
+	@echo "PASS: disk compiler error handling"
 
 # Multi-file package/library tests against the real picoJSE sources.
 test-disk-picojse-term: $(PICOJVM) $(BUILDDIR)/picojc-disk.pjvm
@@ -845,14 +904,14 @@ test-selfhost: test-selfhost-fixpoint test-binmatch test-gen1
 	@echo "=== Self-hosting regression: ALL PASSED ==="
 
 # Everything: unit tests + selfhost + disk modes
-test-all: test test-negative test-selfhost test-disk test-disk-multi test-disk-package test-disk-picojse test-disk-selfhost
+test-all: test test-negative test-selfhost test-disk test-disk-multi test-disk-package test-disk-isolation test-disk-boundary test-disk-errors test-disk-picojse test-disk-selfhost
 	@echo ""
 	@echo "=== ALL TESTS PASSED ==="
 
 clean:
 	rm -rf $(BUILDDIR)
 
-.PHONY: all test test-negative test-all build check-javac clean test-disk test-disk-multi test-disk-package test-disk-picojse test-disk-picojse-term test-disk-picojse-io test-disk-picojse-std test-disk-picojse-string-concat test-disk-picojse-archive test-disk-picojse-zip test-disk-picojse-tools-tar test-disk-picojse-tools-zip test-disk-picojse-tools-arc test-disk-selfhost
+.PHONY: all test test-negative test-all build check-javac clean test-disk test-disk-multi test-disk-package test-disk-isolation test-disk-boundary test-disk-errors test-disk-picojse test-disk-picojse-term test-disk-picojse-io test-disk-picojse-std test-disk-picojse-string-concat test-disk-picojse-archive test-disk-picojse-zip test-disk-picojse-tools-tar test-disk-picojse-tools-zip test-disk-picojse-tools-arc test-disk-selfhost
 .PHONY: test-selfhost test-selfhost-fixpoint test-binmatch test-gen1
 .SECONDARY: $(BUILDDIR)/%.pjvm $(BUILDDIR)/%.out
 .SECONDARY: $(BUILDDIR)/gen1_%.pjvm $(BUILDDIR)/gen1_%.out

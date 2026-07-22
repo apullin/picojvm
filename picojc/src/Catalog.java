@@ -5,10 +5,12 @@ public class Catalog {
 	static int[] impSimple = new int[MAX_IMPORTS];
 	static int[] impFull = new int[MAX_IMPORTS];
 	static int impCount;
+	static int scopeFile;
 
 	static void resetUnitScope() {
 		curPkgNm = -1;
 		impCount = 0;
+		scopeFile = Lexer.diskMode ? Lexer.dFileCur : -1;
 	}
 
 	static void catalog() {
@@ -55,6 +57,7 @@ public class Catalog {
 	}
 
 	static void scanUnitScope() {
+		if (Lexer.diskMode && scopeFile != Lexer.dFileCur) resetUnitScope();
 		while (Tk.type == Tk.PACKAGE || Tk.type == Tk.IMPORT) {
 			if (Tk.type == Tk.PACKAGE) {
 				Lexer.nextToken();

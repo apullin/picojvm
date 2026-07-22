@@ -102,9 +102,11 @@ public class Resolver {
 		for (int ci = 0; ci < C.cCount; ci++) {
 			int inherited = 0;
 			if (C.cParent[ci] >= 0) {
-				inherited = C.cFieldC[C.cParent[ci]];
+				inherited = C.cFieldC[C.cParent[ci]] & 0xFF;
 			}
-			C.cFieldC[ci] = (byte)(inherited + C.cOwnF[ci]);
+			int fieldCount = inherited + (C.cOwnF[ci] & 0xFF);
+			C.chk(fieldCount, 256, 280);
+			C.cFieldC[ci] = (byte)fieldCount;
 		}
 
 		// Assign field slots
@@ -118,7 +120,7 @@ public class Resolver {
 				int ci = C.fClass[fi];
 				int inherited = 0;
 				if (C.cParent[ci] >= 0) {
-					inherited = C.cFieldC[C.cParent[ci]];
+					inherited = C.cFieldC[C.cParent[ci]] & 0xFF;
 				}
 				int ownIdx = 0;
 				for (int fj = 0; fj < fi; fj++) {
@@ -136,15 +138,17 @@ public class Resolver {
 		// Build vtables
 		for (int ci = 0; ci < C.cCount; ci++) {
 			if (C.cIsIface[ci]) continue;
-			C.vtBase[ci] = (byte)vtableLen();
+			int base = vtableLen();
+			C.vtBase[ci] = (byte)base;
 			int parentVtSize = 0;
 			if (C.cParent[ci] >= 0) {
 				// Copy parent vtable
 				int pid = C.cParent[ci];
-				parentVtSize = C.cVtSize[pid];
-				int pBase = C.vtBase[pid];
+				parentVtSize = C.cVtSize[pid] & 0xFF;
+				int pBase = C.vtBase[pid] & 0xFF;
+				if (base + parentVtSize > C.MAX_VTABLE) Lexer.error(280);
 				for (int j = 0; j < parentVtSize; j++) {
-					C.vtable[C.vtBase[ci] + j] = C.vtable[pBase + j];
+					C.vtable[base + j] = C.vtable[pBase + j];
 				}
 			}
 			C.cVtSize[ci] = (byte)parentVtSize;
@@ -157,19 +161,22 @@ public class Resolver {
 
 				// Check if this overrides a parent method
 				int slot = -1;
-				for (int j = 0; j < C.cVtSize[ci]; j++) {
-					int existingMi = C.vtable[C.vtBase[ci] + j];
+				int vtSize = C.cVtSize[ci] & 0xFF;
+				for (int j = 0; j < vtSize; j++) {
+					int existingMi = C.vtable[base + j];
 					if (sameSig(existingMi, mi)) {
 						slot = j;
 						break;
 					}
 				}
 				if (slot >= 0) {
-					C.vtable[C.vtBase[ci] + slot] = (short)mi;
+					C.vtable[base + slot] = (short)mi;
 					C.mVtSlot[mi] = (byte)slot;
 				} else {
-					slot = C.cVtSize[ci]++;
-					C.vtable[C.vtBase[ci] + slot] = (short)mi;
+					if (base + vtSize >= C.MAX_VTABLE) Lexer.error(280);
+					slot = vtSize;
+					C.cVtSize[ci] = (byte)(vtSize + 1);
+					C.vtable[base + slot] = (short)mi;
 					C.mVtSlot[mi] = (byte)slot;
 				}
 			}
@@ -252,7 +259,7 @@ public class Resolver {
 		// Sum of all vtable sizes so far
 		int total = 0;
 		for (int ci = 0; ci < C.cCount; ci++) {
-			total += C.cVtSize[ci];
+			total += C.cVtSize[ci] & 0xFF;
 		}
 		return total;
 	}

@@ -1282,26 +1282,25 @@ public class Expr {
 		while (Tk.type != Tk.RPAREN && Tk.type != Tk.EOF) {
 			int argType = pExpr();
 			if (argType == 0) Lexer.error(210); // call argument needs a value
-			if (sigC < C.MAX_CALL_ARGS) {
-				short sc;
-				if (argType == 1) {
-					if (exprNarrow == C.NK_BYTE) sc = C.SIG_BYTE;
-					else if (exprNarrow == C.NK_CHAR) sc = C.SIG_CHAR;
-					else if (exprNarrow == C.NK_SHORT) sc = C.SIG_SHORT;
-					else if (exprNarrow == C.NK_BOOL) sc = C.SIG_BOOL;
-					else sc = C.SIG_INT;
-				} else if (argType == 2) {
-					if (exprArrRefNm >= 0) sc = (short)(C.SIG_OBJ_ARRAY_BASE + exprArrRefNm);
-					else if (exprRefNm == -2) sc = C.SIG_NULL;
-					else sc = (short)(exprRefNm >= 0 ? exprRefNm : C.N_OBJECT);
-				} else if (argType == 4) sc = C.SIG_BYTE_ARR;
-				else if (argType == 5) sc = C.SIG_CHAR_ARR;
-				else if (argType == 8) sc = C.SIG_SHORT_ARR;
-				else if (argType == 9) sc = C.SIG_BOOL_ARR;
-				else sc = C.SIG_INT_ARR;
-				argSigStack[base + sigC] = sc;
-				sigC++;
-			}
+			C.chk(sigC, C.MAX_CALL_ARGS, 257);
+			short sc;
+			if (argType == 1) {
+				if (exprNarrow == C.NK_BYTE) sc = C.SIG_BYTE;
+				else if (exprNarrow == C.NK_CHAR) sc = C.SIG_CHAR;
+				else if (exprNarrow == C.NK_SHORT) sc = C.SIG_SHORT;
+				else if (exprNarrow == C.NK_BOOL) sc = C.SIG_BOOL;
+				else sc = C.SIG_INT;
+			} else if (argType == 2) {
+				if (exprArrRefNm >= 0) sc = (short)(C.SIG_OBJ_ARRAY_BASE + exprArrRefNm);
+				else if (exprRefNm == -2) sc = C.SIG_NULL;
+				else sc = (short)(exprRefNm >= 0 ? exprRefNm : C.N_OBJECT);
+			} else if (argType == 4) sc = C.SIG_BYTE_ARR;
+			else if (argType == 5) sc = C.SIG_CHAR_ARR;
+			else if (argType == 8) sc = C.SIG_SHORT_ARR;
+			else if (argType == 9) sc = C.SIG_BOOL_ARR;
+			else sc = C.SIG_INT_ARR;
+			argSigStack[base + sigC] = sc;
+			sigC++;
 			argc++;
 			if (Tk.type == Tk.COMMA) Lexer.nextToken();
 		}

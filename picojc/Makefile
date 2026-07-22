@@ -92,7 +92,9 @@ NEGTESTS = N01_InvalidStaticCall N02_OverloadSameClass \
 	           N61_AmbiguousConstructor N62_AmbiguousMethod \
 	           N63_SwitchLocalScope N64_StringSwitchLocalScope \
 	           N65_TryLocalScope N66_CatchLocalScope \
-	           N67_FinallyLocalScope
+	           N67_FinallyLocalScope N68_VoidLocal \
+	           N69_TooManyParameters N70_TooManyArguments \
+	           N71_TooManyImports
 
 # Tests requiring lib/ (platform package)
 LIB_SRCS = ../lib/Console.java ../lib/Arrays.java ../lib/IO.java
@@ -247,6 +249,11 @@ test-negative: $(PICOJVM) $(BUILDDIR)/picojc.pjvm
 	echo ""; \
 	echo "Negative tests: $$pass passed, $$fail failed out of $$(echo $(NEGTESTS) | wc -w | tr -d ' ')"; \
 	test $$fail -eq 0
+
+# Generated boundary cases keep large repetitive fixtures out of the tree.
+test-capacity: $(PICOJVM) $(BUILDDIR)/picojc.pjvm
+	$(PYTHON) tests_capacity.py $(abspath $(PICOJVM)) \
+		$(abspath $(BUILDDIR)/picojc.pjvm) $(abspath $(BUILDDIR)/capacity)
 
 # --- Disk-backed compiler ---
 # picojc-disk.pjvm: same compiler, but reads "input.java" from disk instead of --preload
@@ -907,14 +914,14 @@ test-selfhost: test-selfhost-fixpoint test-binmatch test-gen1
 	@echo "=== Self-hosting regression: ALL PASSED ==="
 
 # Everything: unit tests + selfhost + disk modes
-test-all: test test-negative test-selfhost test-disk test-disk-multi test-disk-package test-disk-isolation test-disk-boundary test-disk-errors test-disk-picojse test-disk-selfhost
+test-all: test test-negative test-capacity test-selfhost test-disk test-disk-multi test-disk-package test-disk-isolation test-disk-boundary test-disk-errors test-disk-picojse test-disk-selfhost
 	@echo ""
 	@echo "=== ALL TESTS PASSED ==="
 
 clean:
 	rm -rf $(BUILDDIR)
 
-.PHONY: all test test-negative test-all build check-javac clean test-disk test-disk-multi test-disk-package test-disk-isolation test-disk-boundary test-disk-errors test-disk-picojse test-disk-picojse-term test-disk-picojse-io test-disk-picojse-std test-disk-picojse-string-concat test-disk-picojse-archive test-disk-picojse-zip test-disk-picojse-tools-tar test-disk-picojse-tools-zip test-disk-picojse-tools-arc test-disk-selfhost
+.PHONY: all test test-negative test-capacity test-all build check-javac clean test-disk test-disk-multi test-disk-package test-disk-isolation test-disk-boundary test-disk-errors test-disk-picojse test-disk-picojse-term test-disk-picojse-io test-disk-picojse-std test-disk-picojse-string-concat test-disk-picojse-archive test-disk-picojse-zip test-disk-picojse-tools-tar test-disk-picojse-tools-zip test-disk-picojse-tools-arc test-disk-selfhost
 .PHONY: test-selfhost test-selfhost-fixpoint test-binmatch test-gen1
 .SECONDARY: $(BUILDDIR)/%.pjvm $(BUILDDIR)/%.out
 .SECONDARY: $(BUILDDIR)/gen1_%.pjvm $(BUILDDIR)/gen1_%.out

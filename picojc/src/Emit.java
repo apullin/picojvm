@@ -216,6 +216,8 @@ class E {
 	// Merge the temporary chunk back into the class-level <clinit> staging area.
 	static void endClinitChunk(boolean trackLocals) {
 		patchBranches();
+		if (cinitLen + C.mcLen > cinitBuf.length ||
+			C.cpMCount > cinitCpL.length) Lexer.error(279);
 		for (int i = 0; i < C.mcLen; i++) {
 			cinitBuf[cinitLen + i] = C.mcode[i];
 		}
@@ -442,6 +444,7 @@ class E {
 	static int pTypeLoc() {
 		// Returns: 0=int, 1=ref, 2=object[], 3=int[], 4=byte[], 5=char[], 8=short[], 9=boolean[]
 		Catalog.scanTy(false);
+		if (Catalog.tyBase < 0) Lexer.error(211);
 		tyRefNm = Catalog.tyRefNm;
 		tyNarrow = Catalog.tyNarrow;
 		if (tyRefNm >= 0 && !Catalog.isBuiltinType(tyRefNm) && Resolver.fClsByNm(tyRefNm) < 0) Lexer.error(202);
@@ -569,11 +572,13 @@ class E {
 	}
 
 	static void eSBE(int s) {
+		C.chk(C.mcLen + 1, 3072, 256);
 		C.mcode[C.mcLen++] = (byte)((s >> 8) & 0xFF);
 		C.mcode[C.mcLen++] = (byte)(s & 0xFF);
 	}
 
 	static void eIBE(int v) {
+		C.chk(C.mcLen + 3, 3072, 256);
 		C.mcode[C.mcLen++] = (byte)((v >> 24) & 0xFF);
 		C.mcode[C.mcLen++] = (byte)((v >> 16) & 0xFF);
 		C.mcode[C.mcLen++] = (byte)((v >> 8) & 0xFF);
@@ -625,6 +630,7 @@ class E {
 	}
 
 	static void push() {
+		C.chk(C.stkDepth, 255, 257);
 		C.stkDepth++;
 		if (C.stkDepth > C.maxStk) C.maxStk = C.stkDepth;
 	}
@@ -800,6 +806,7 @@ class E {
 		else if (arrKind == 8) { elemType = 2; elemSize = 2; }   // short
 		else { elemType = 3; elemSize = 4; }                      // int
 
+		C.chk(Linker.constC, Linker.MAX_CONST, 279);
 		int idx = Linker.constC++;
 		Linker.constSlot[idx] = C.fSlot[fi];
 		Linker.constET[idx] = (byte)elemType;
@@ -808,6 +815,7 @@ class E {
 		int count = 0;
 		while (Tk.type != Tk.RBRACE && Tk.type != Tk.EOF) {
 			int val = parseConstVal();
+			C.chk(Linker.constBL + elemSize - 1, Linker.constBuf.length, 279);
 			if (elemSize == 1) {
 				Linker.constBuf[Linker.constBL++] = (byte)(val & 0xFF);
 			} else if (elemSize == 2) {

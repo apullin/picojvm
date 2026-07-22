@@ -313,10 +313,9 @@ public class Lexer {
 		Tk.strLen = 0;
 		int c = ch();
 		while (c >= 0 && isAlphaNum(c)) {
-			if (Tk.strLen < 255) {
-				Tk.strBuf[Tk.strLen] = (byte) c;
-				Tk.strLen++;
-			}
+			C.chk(Tk.strLen, 255, 251);
+			Tk.strBuf[Tk.strLen] = (byte) c;
+			Tk.strLen++;
 			advance();
 			c = ch();
 		}
@@ -407,10 +406,9 @@ public class Lexer {
 			} else {
 				advance();
 			}
-			if (Tk.strLen < 255) {
-				Tk.strBuf[Tk.strLen] = (byte) c;
-				Tk.strLen++;
-			}
+			C.chk(Tk.strLen, 255, 259);
+			Tk.strBuf[Tk.strLen] = (byte) c;
+			Tk.strLen++;
 			c = ch();
 		}
 		if (c >= 0) advance(); // skip closing "

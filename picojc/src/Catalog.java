@@ -67,11 +67,10 @@ public class Catalog {
 			} else {
 				Lexer.nextToken();
 				int fullNm = parseQName(false);
-				if (impCount < MAX_IMPORTS) {
-					impSimple[impCount] = C.tailNm(fullNm);
-					impFull[impCount] = fullNm;
-					impCount++;
-				}
+				C.chk(impCount, MAX_IMPORTS, 278);
+				impSimple[impCount] = C.tailNm(fullNm);
+				impFull[impCount] = fullNm;
+				impCount++;
 				Lexer.expect(Tk.SEMI);
 			}
 		}
@@ -379,7 +378,11 @@ public class Catalog {
 		C.fRefNm[fi] = (short)refNm;
 		C.fInitPos[fi] = -1; C.fInitLn[fi] = (short)0;
 		C.fFinal[fi] = isFinal; C.fHasConst[fi] = false; C.fIsConst[fi] = false;
-		if (!isStat) C.cOwnF[ci]++;
+		if (!isStat) {
+			int ownFields = C.cOwnF[ci] & 0xFF;
+			C.chk(ownFields, 255, 280);
+			C.cOwnF[ci] = (byte)(ownFields + 1);
+		}
 		return fi;
 	}
 
@@ -526,31 +529,30 @@ public class Catalog {
 		boolean firstIsStringArray = false;
 		while (Tk.type != Tk.RPAREN && Tk.type != Tk.EOF) {
 			skipTy();
-			if (sigTmpC < C.MAX_CALL_ARGS) {
-				short sc;
-				if (Catalog.tyDims == 0) {
-					if (Catalog.tyBase == 1) {
-						if (Catalog.tyNarrow == C.NK_BYTE) sc = C.SIG_BYTE;
-						else if (Catalog.tyNarrow == C.NK_CHAR) sc = C.SIG_CHAR;
-						else if (Catalog.tyNarrow == C.NK_SHORT) sc = C.SIG_SHORT;
-						else if (Catalog.tyNarrow == C.NK_BOOL) sc = C.SIG_BOOL;
-						else sc = C.SIG_INT;
-					} else {
-						sc = (short)Catalog.tyRefNm;
-					}
-				} else if (Catalog.tyBase == 2 && Catalog.tyDims == 1) {
-					sc = (short)(C.SIG_OBJ_ARRAY_BASE + Catalog.tyRefNm);
-				} else if (Catalog.tyBase == 1 && Catalog.tyDims == 1) {
-					if (Catalog.tyArrKind == 4) sc = C.SIG_BYTE_ARR;
-					else if (Catalog.tyArrKind == 5) sc = C.SIG_CHAR_ARR;
-					else if (Catalog.tyArrKind == 8) sc = C.SIG_SHORT_ARR;
-					else if (Catalog.tyArrKind == 9) sc = C.SIG_BOOL_ARR;
-					else sc = C.SIG_INT_ARR;
+			C.chk(sigTmpC, C.MAX_CALL_ARGS, 257);
+			short sc;
+			if (Catalog.tyDims == 0) {
+				if (Catalog.tyBase == 1) {
+					if (Catalog.tyNarrow == C.NK_BYTE) sc = C.SIG_BYTE;
+					else if (Catalog.tyNarrow == C.NK_CHAR) sc = C.SIG_CHAR;
+					else if (Catalog.tyNarrow == C.NK_SHORT) sc = C.SIG_SHORT;
+					else if (Catalog.tyNarrow == C.NK_BOOL) sc = C.SIG_BOOL;
+					else sc = C.SIG_INT;
 				} else {
-					sc = (short)(C.SIG_OBJ_ARRAY_BASE + C.N_OBJECT);
+					sc = (short)Catalog.tyRefNm;
 				}
-				sigTmp[sigTmpC++] = sc;
+			} else if (Catalog.tyBase == 2 && Catalog.tyDims == 1) {
+				sc = (short)(C.SIG_OBJ_ARRAY_BASE + Catalog.tyRefNm);
+			} else if (Catalog.tyBase == 1 && Catalog.tyDims == 1) {
+				if (Catalog.tyArrKind == 4) sc = C.SIG_BYTE_ARR;
+				else if (Catalog.tyArrKind == 5) sc = C.SIG_CHAR_ARR;
+				else if (Catalog.tyArrKind == 8) sc = C.SIG_SHORT_ARR;
+				else if (Catalog.tyArrKind == 9) sc = C.SIG_BOOL_ARR;
+				else sc = C.SIG_INT_ARR;
+			} else {
+				sc = (short)(C.SIG_OBJ_ARRAY_BASE + C.N_OBJECT);
 			}
+			sigTmp[sigTmpC++] = sc;
 			boolean isStringArray = Catalog.tyBase == 2 && Catalog.tyRefNm == C.N_STRING &&
 									Catalog.tyDims == 1;
 			if (Tk.type == Tk.ELLIPSIS) {

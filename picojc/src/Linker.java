@@ -25,7 +25,7 @@ public class Linker {
 
 			if (parent >= C.uClsStart) {
 				int src = (parent - C.uClsStart) * REF_BITMAP_STRIDE;
-				int parentBytes = (C.cFieldC[parent] + 7) >> 3;
+				int parentBytes = ((C.cFieldC[parent] & 0xFF) + 7) >> 3;
 				for (int j = 0; j < parentBytes; j++) refBm[dst + j] = refBm[src + j];
 			}
 
@@ -100,7 +100,7 @@ public class Linker {
 		for (int ci = C.uClsStart; ci < C.cCount; ci++) {
 			int outCi = ci - C.uClsStart;
 			int bitmapOff = outCi * REF_BITMAP_STRIDE;
-			int bitmapLen = (C.cFieldC[ci] + 7) >> 3;
+			int bitmapLen = ((C.cFieldC[ci] & 0xFF) + 7) >> 3;
 			int parentId = 0xFF;
 			if (C.cParent[ci] >= 0) {
 				parentId = C.cParent[ci] - C.uClsStart;
@@ -113,8 +113,8 @@ public class Linker {
 			if (C.cClinit[ci] != 0xFF) clinitIdx = C.cClinit[ci];
 			wB(clinitIdx);
 			// Vtable entries
-			for (int j = 0; j < C.cVtSize[ci]; j++) {
-				wB(C.vtable[C.vtBase[ci] + j]);
+			for (int j = 0; j < (C.cVtSize[ci] & 0xFF); j++) {
+				wB(C.vtable[(C.vtBase[ci] & 0xFF) + j]);
 			}
 			for (int j = 0; j < bitmapLen; j++) {
 				wB(refBm[bitmapOff + j] & 0xFF);

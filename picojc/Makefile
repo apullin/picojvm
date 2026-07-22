@@ -53,7 +53,9 @@ TESTS = T01_Empty T02_Literal T03_Arithmetic T04_IfElse T05_WhileLoop \
 	        T68_ArrayField T69_StaticIntArrayInit T70_ArrayElemCompound \
 	        T71_ObjectFieldCompound T72_BooleanOps T73_MethodArrayReturn \
 	        T74_ParenIdent T75_SwitchControl T76_ConstFieldInit \
-	        T77_InstanceFieldInit T78_FieldHiding
+	        T77_InstanceFieldInit T78_FieldHiding T79_ClassOrder \
+	        T80_InterfaceHierarchy T81_OverloadSpecificity \
+	        T82_LongString T83_InterfaceNameWidth
 
 NEGTESTS = N01_InvalidStaticCall N02_OverloadSameClass \
            N03_OverloadInherited N04_SwitchTooManyCases \

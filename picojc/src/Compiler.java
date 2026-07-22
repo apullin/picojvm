@@ -61,7 +61,7 @@ class C {
 	static short[] vtable = new short[MAX_VTABLE]; // flat: class vtables concatenated
 	static byte[] vtBase = new byte[MAX_CLASSES]; // offset into vtable[]
 	// Interface list (flat)
-	static byte[] ifList = new byte[64]; // class IDs
+	static short[] ifList = new short[64]; // name IDs during catalog, then class IDs
 	static int ifListLen;
 
 	// --- Field table ---
@@ -138,7 +138,7 @@ class C {
 
 	// --- String constants ---
 	static byte[][] strC = new byte[MAX_STR_CONST][];
-	static byte[] strCLen = new byte[MAX_STR_CONST];
+	static short[] strCLen = new short[MAX_STR_CONST];
 	static int strCC;
 
 	// --- Exception table ---

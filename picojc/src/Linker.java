@@ -160,7 +160,7 @@ public class Linker {
 
 		// String constants
 		for (int i = 0; i < C.strCC; i++) {
-			int len = C.strCLen[i];
+			int len = C.strCLen[i] & 0xFFFF;
 			wSLE(len);
 			Native.writeBytes(C.strC[i], 0, len);
 			C.outLen += len;

@@ -1,4 +1,8 @@
 public class Resolver {
+	static byte[] classOrder = new byte[C.MAX_CLASSES];
+	static byte[] classRemap = new byte[C.MAX_CLASSES];
+	static byte[] classAt = new byte[C.MAX_CLASSES];
+
 	static void resolve() {
 		// Resolve parent class references (name → class index)
 		// Save cCount: synthExcCls (called via fClsByNm)
@@ -8,19 +12,74 @@ public class Resolver {
 			if (C.cParent[ci] != -1) {
 				int parentNm = C.cParent[ci]; // currently a name index
 				int pid = fClsByNm(parentNm);
+				if (pid < 0 && parentNm != C.N_OBJECT) Lexer.error(202);
 				C.cParent[ci] = (short)pid; // now a class index, -1 if not found (Object)
 			}
 		}
 
 		// Resolve interface references
 		for (int ci = 0; ci < C.cCount; ci++) {
-			int start = C.cIfaceS[ci];
-			for (int j = 0; j < C.cIfaceC[ci]; j++) {
+			int start = C.cIfaceS[ci] & 0xFF;
+			for (int j = 0; j < (C.cIfaceC[ci] & 0xFF); j++) {
 				int ifNm = C.ifList[start + j]; // name index
 				int ifId = fClsByNm(ifNm);
-				C.ifList[start + j] = (byte)ifId; // now class index
+				if (ifId < 0 || !C.cIsIface[ifId]) Lexer.error(202);
+				C.ifList[start + j] = (short)ifId; // now class index
 			}
 		}
+
+		// Stable topological order: preserve declaration order among unrelated
+		// classes while ensuring every parent precedes its children.
+		for (int ci = 0; ci < C.cCount; ci++) {
+			classRemap[ci] = (byte)(ci < C.uClsStart ? ci : -1);
+			classOrder[ci] = (byte)ci;
+			classAt[ci] = (byte)ci;
+		}
+		int ordered = C.uClsStart;
+		while (ordered < C.cCount) {
+			boolean progress = false;
+			for (int ci = C.uClsStart; ci < C.cCount; ci++) {
+				if (classRemap[ci] >= 0) continue;
+				int parent = C.cParent[ci];
+				if (parent < 0 || classRemap[parent] >= 0) {
+					classOrder[ordered] = (byte)ci;
+					classRemap[ci] = (byte)ordered++;
+					progress = true;
+				}
+			}
+			if (!progress) Lexer.error(271); // cyclic inheritance
+		}
+		for (int dst = C.uClsStart; dst < C.cCount; dst++) {
+			int wanted = classOrder[dst] & 0xFF;
+			int src = dst;
+			while ((classAt[src] & 0xFF) != wanted) src++;
+			if (src != dst) {
+				short sv; byte bv; int iv; boolean zv;
+				sv = C.cName[dst]; C.cName[dst] = C.cName[src]; C.cName[src] = sv;
+				sv = C.cSimple[dst]; C.cSimple[dst] = C.cSimple[src]; C.cSimple[src] = sv;
+				sv = C.cParent[dst]; C.cParent[dst] = C.cParent[src]; C.cParent[src] = sv;
+				bv = C.cFieldC[dst]; C.cFieldC[dst] = C.cFieldC[src]; C.cFieldC[src] = bv;
+				bv = C.cOwnF[dst]; C.cOwnF[dst] = C.cOwnF[src]; C.cOwnF[src] = bv;
+				bv = C.cVtSize[dst]; C.cVtSize[dst] = C.cVtSize[src]; C.cVtSize[src] = bv;
+				sv = C.cClinit[dst]; C.cClinit[dst] = C.cClinit[src]; C.cClinit[src] = sv;
+				bv = C.cIfaceS[dst]; C.cIfaceS[dst] = C.cIfaceS[src]; C.cIfaceS[src] = bv;
+				bv = C.cIfaceC[dst]; C.cIfaceC[dst] = C.cIfaceC[src]; C.cIfaceC[src] = bv;
+				zv = C.cIsIface[dst]; C.cIsIface[dst] = C.cIsIface[src]; C.cIsIface[src] = zv;
+				zv = C.cIsEnum[dst]; C.cIsEnum[dst] = C.cIsEnum[src]; C.cIsEnum[src] = zv;
+				iv = C.cBodyS[dst]; C.cBodyS[dst] = C.cBodyS[src]; C.cBodyS[src] = iv;
+				iv = C.cBodyE[dst]; C.cBodyE[dst] = C.cBodyE[src]; C.cBodyE[src] = iv;
+				bv = C.vtBase[dst]; C.vtBase[dst] = C.vtBase[src]; C.vtBase[src] = bv;
+				byte old = classAt[dst];
+				classAt[dst] = classAt[src];
+				classAt[src] = old;
+			}
+		}
+		for (int ci = C.uClsStart; ci < C.cCount; ci++) {
+			if (C.cParent[ci] >= 0) C.cParent[ci] = (short)(classRemap[C.cParent[ci]] & 0xFF);
+		}
+		for (int i = 0; i < C.ifListLen; i++) C.ifList[i] = (short)(classRemap[C.ifList[i]] & 0xFF);
+		for (int fi = 0; fi < C.fCount; fi++) C.fClass[fi] = classRemap[C.fClass[fi] & 0xFF];
+		for (int mi = 0; mi < C.mCount; mi++) C.mClass[mi] = classRemap[C.mClass[mi] & 0xFF];
 
 		// Compute instance field counts (including inherited)
 		for (int ci = 0; ci < C.cCount; ci++) {
@@ -99,32 +158,39 @@ public class Resolver {
 			}
 		}
 
-		// Assign vmids for interface methods
+		// A signature has one global vmid, even when inherited or declared by
+		// multiple interfaces. One implementation can therefore satisfy all of it.
 		int nextVmid = 0;
 		for (int ci = 0; ci < C.cCount; ci++) {
 			if (!C.cIsIface[ci]) continue;
 			for (int mi = 0; mi < C.mCount; mi++) {
 				if (C.mClass[mi] != ci) continue;
-				C.mVmid[mi] = (byte)nextVmid++;
+				int vmid = -1;
+				for (int prior = 0; prior < mi; prior++) {
+					int pci = C.mClass[prior] & 0xFF;
+					if (C.cIsIface[pci] && sameSig(prior, mi)) {
+						vmid = C.mVmid[prior] & 0xFF;
+						break;
+					}
+				}
+				if (vmid < 0) {
+					C.chk(nextVmid, 255, 275);
+					vmid = nextVmid++;
+				}
+				C.mVmid[mi] = (byte)vmid;
 			}
 		}
-		// Copy vmids to implementing class methods
-		for (int ci = 0; ci < C.cCount; ci++) {
-			if (C.cIsIface[ci]) continue;
-			int start = C.cIfaceS[ci];
-			for (int j = 0; j < C.cIfaceC[ci]; j++) {
-				int ifId = C.ifList[start + j];
-				if (ifId < 0) continue;
-				for (int imi = 0; imi < C.mCount; imi++) {
-					if (C.mClass[imi] != ifId) continue;
-					// Find matching method in implementing class
-						for (int cmi = 0; cmi < C.mCount; cmi++) {
-							if (C.mClass[cmi] != ci) continue;
-							if (sameSig(cmi, imi)) {
-								C.mVmid[cmi] = C.mVmid[imi];
-							}
-						}
-					}
+		// Any matching class method may appear in a subclass's vtable as an
+		// inherited implementation, so annotate by signature rather than owner.
+		for (int cmi = 0; cmi < C.mCount; cmi++) {
+			int ci = C.mClass[cmi] & 0xFF;
+			if (C.cIsIface[ci] || C.mStatic[cmi] || C.mIsCtor[cmi]) continue;
+			for (int imi = 0; imi < C.mCount; imi++) {
+				int ii = C.mClass[imi] & 0xFF;
+				if (C.cIsIface[ii] && sameSig(cmi, imi)) {
+					C.mVmid[cmi] = C.mVmid[imi];
+					break;
+				}
 			}
 		}
 
@@ -212,10 +278,6 @@ public class Resolver {
 		return fi >= 0 && !C.fStatic[fi] ? fi : -1;
 	}
 
-	static int fMethod(int ci, int nm, boolean isStatic) {
-		return fMethodExact(ci, nm, isStatic, -1);
-	}
-
 	// Declaration-shape matching: used for exact body lookup, ctors, and entrypoints.
 	static boolean declShapeFits(int mi, int ci, int nm, boolean isStatic, int argc,
 								 boolean allowNative, boolean allowCtor) {
@@ -236,40 +298,38 @@ public class Resolver {
 			short actual = sig[i];
 			if (expect == actual) continue;
 			if (exact) return false;
-			boolean expectRef = expect >= 0 || expect == C.SIG_NULL || expect >= C.SIG_OBJ_ARRAY_BASE ||
-				expect == C.SIG_INT_ARR || expect == C.SIG_BYTE_ARR || expect == C.SIG_CHAR_ARR ||
-				expect == C.SIG_SHORT_ARR || expect == C.SIG_BOOL_ARR;
-			boolean actualRef = actual >= 0 || actual == C.SIG_NULL || actual >= C.SIG_OBJ_ARRAY_BASE ||
-				actual == C.SIG_INT_ARR || actual == C.SIG_BYTE_ARR || actual == C.SIG_CHAR_ARR ||
-				actual == C.SIG_SHORT_ARR || actual == C.SIG_BOOL_ARR;
-			boolean actualScalar = actual == C.SIG_INT || actual == C.SIG_BYTE || actual == C.SIG_CHAR ||
-				actual == C.SIG_SHORT || actual == C.SIG_BOOL;
-			if (actual == C.SIG_NULL && expectRef) continue;
-			if (expect == C.N_OBJECT && actualRef) continue;
-			if (expect >= 0 && expect < C.SIG_OBJ_ARRAY_BASE &&
-				actual >= 0 && actual < C.SIG_OBJ_ARRAY_BASE) {
-				int srcCi = fClsByNm(actual);
-				int dstCi = fClsByNm(expect);
-				if (srcCi >= 0 && dstCi >= 0) {
-					boolean ok = false;
-					for (int ci = srcCi; ci >= 0; ci = C.cParent[ci]) {
-						if (ci == dstCi) { ok = true; break; }
-					}
-					if (!ok && C.cIsIface[dstCi]) {
-						for (int ci = srcCi; ci >= 0 && !ok; ci = C.cParent[ci]) {
-							int start = C.cIfaceS[ci];
-							for (int j = 0; j < C.cIfaceC[ci]; j++) {
-								if (C.ifList[start + j] == dstCi) { ok = true; break; }
-							}
-						}
-					}
-					if (ok) continue;
-				}
-			}
-			if (expect == C.SIG_INT && actualScalar && actual != C.SIG_BOOL) continue;
-			return false;
+			if (!sigAssignable(actual, expect)) return false;
 		}
 		return true;
+	}
+
+	static boolean sigAssignable(short actual, short expect) {
+		if (actual == expect) return true;
+		boolean actualClass = actual >= 0 && actual < C.SIG_OBJ_ARRAY_BASE;
+		boolean expectClass = expect >= 0 && expect < C.SIG_OBJ_ARRAY_BASE;
+		boolean actualObjArray = actual >= C.SIG_OBJ_ARRAY_BASE;
+		boolean expectObjArray = expect >= C.SIG_OBJ_ARRAY_BASE;
+		boolean actualArray = actualObjArray || actual == C.SIG_INT_ARR || actual == C.SIG_BYTE_ARR ||
+			actual == C.SIG_CHAR_ARR || actual == C.SIG_SHORT_ARR || actual == C.SIG_BOOL_ARR;
+		boolean expectArray = expectObjArray || expect == C.SIG_INT_ARR || expect == C.SIG_BYTE_ARR ||
+			expect == C.SIG_CHAR_ARR || expect == C.SIG_SHORT_ARR || expect == C.SIG_BOOL_ARR;
+		if (actual == C.SIG_NULL && (expectClass || expectArray)) return true;
+		if (expect == C.N_OBJECT && (actualClass || actualArray)) return true;
+		if ((actualClass && expectClass) || (actualObjArray && expectObjArray)) {
+			int actualNm = actualObjArray ? actual - C.SIG_OBJ_ARRAY_BASE : actual;
+			int expectNm = expectObjArray ? expect - C.SIG_OBJ_ARRAY_BASE : expect;
+			int srcCi = fClsByNm(actualNm);
+			int dstCi = fClsByNm(expectNm);
+			if (srcCi >= 0 && dstCi >= 0) {
+				for (int ci = srcCi; ci >= 0; ci = C.cParent[ci]) {
+					if (ci == dstCi) return true;
+				}
+				if (C.cIsIface[dstCi] && Linker.hasInterface(srcCi, dstCi)) return true;
+			}
+		}
+		boolean actualScalar = actual == C.SIG_INT || actual == C.SIG_BYTE || actual == C.SIG_CHAR ||
+			actual == C.SIG_SHORT || actual == C.SIG_BOOL;
+		return expect == C.SIG_INT && actualScalar && actual != C.SIG_BOOL;
 	}
 
 	// Shared call matching: keep staticness, arity, and varargs rules in one place.
@@ -374,19 +434,48 @@ public class Resolver {
 		for (int pass = 0; pass < 2; pass++) {
 			int walkCi = ci;
 			boolean exact = pass == 0;
+			int best = -1;
+			int varargsMi = -1;
+			boolean ambiguous = false;
 			while (walkCi >= 0) {
-				int varargsMi = -1;
 				for (mi = 0; mi < C.mCount; mi++) {
 					if (C.mClass[mi] != walkCi || !callShapeFits(mi, methodNm, isStatic, argc) ||
 						!sigFits(mi, Expr.lastArgSig, Expr.lastArgSigC, exact)) {
 						continue;
 					}
-					if (!C.mVarargs[mi]) return mi;
-					if (varargsMi < 0) varargsMi = mi;
+					if (exact && !C.mVarargs[mi]) return mi;
+					if (C.mVarargs[mi]) {
+						if (varargsMi < 0) varargsMi = mi;
+						continue;
+					}
+					if (best < 0) {
+						best = mi;
+						continue;
+					}
+					if (sameSig(best, mi)) continue; // overridden declaration
+					int count = C.mSigC[mi] & 0xFF;
+					int cs = C.mSigS[mi] & 0xFFFF;
+					int bs = C.mSigS[best] & 0xFFFF;
+					boolean candidateBetter = count == (C.mSigC[best] & 0xFF);
+					boolean bestBetter = candidateBetter;
+					for (int ai = 0; ai < count; ai++) {
+						short candidateArg = C.sigParam[cs + ai];
+						short bestArg = C.sigParam[bs + ai];
+						if (candidateArg == bestArg) continue;
+						if (!sigAssignable(candidateArg, bestArg)) candidateBetter = false;
+						if (!sigAssignable(bestArg, candidateArg)) bestBetter = false;
+					}
+					if (candidateBetter && !bestBetter) {
+						best = mi;
+						ambiguous = false;
+					} else if (!bestBetter) {
+						ambiguous = true;
+					}
 				}
-				if (varargsMi >= 0) return varargsMi;
 				walkCi = C.cParent[walkCi];
 			}
+			if (best >= 0) return ambiguous ? -1 : best;
+			if (varargsMi >= 0) return varargsMi;
 		}
 		return -1;
 	}

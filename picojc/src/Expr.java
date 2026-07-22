@@ -83,7 +83,7 @@ public class Expr {
 	}
 
 	static void chkStoreCompat(int exprType, int dstType, int dstRefNm, int dstNarrow) {
-		int srcCi, dstCi, start;
+		int srcCi, dstCi;
 		if (dstType == 0) {
 			chkImplicitNarrow(dstNarrow);
 			return;
@@ -102,14 +102,7 @@ public class Expr {
 					for (int ci = srcCi; ci >= 0; ci = C.cParent[ci]) {
 						if (ci == dstCi) return;
 					}
-					if (C.cIsIface[dstCi]) {
-						for (int ci = srcCi; ci >= 0; ci = C.cParent[ci]) {
-							start = C.cIfaceS[ci];
-							for (int j = 0; j < C.cIfaceC[ci]; j++) {
-								if (C.ifList[start + j] == dstCi) return;
-							}
-						}
-					}
+					if (C.cIsIface[dstCi] && Linker.hasInterface(srcCi, dstCi)) return;
 				}
 			} else if (exprType >= 3 && (dstRefNm < 0 || dstRefNm == C.N_OBJECT)) {
 				return;
@@ -127,14 +120,7 @@ public class Expr {
 						for (int ci = srcCi; ci >= 0; ci = C.cParent[ci]) {
 							if (ci == dstCi) return;
 						}
-						if (C.cIsIface[dstCi]) {
-							for (int ci = srcCi; ci >= 0; ci = C.cParent[ci]) {
-								start = C.cIfaceS[ci];
-								for (int j = 0; j < C.cIfaceC[ci]; j++) {
-									if (C.ifList[start + j] == dstCi) return;
-								}
-							}
-						}
+						if (C.cIsIface[dstCi] && Linker.hasInterface(srcCi, dstCi)) return;
 					}
 				}
 				if (exprRefNm < 0 && exprArrRefNm < 0) return;
@@ -1130,7 +1116,7 @@ public class Expr {
 	// Unqualified calls inside a method prefer an instance target, then static.
 	static int eSelfCall(int methodNm) {
 		int ownerNm = C.cName[C.curCi];
-		if (!C.curMStatic && Resolver.fMethod(C.curCi, methodNm, false) >= 0) {
+		if (!C.curMStatic && Resolver.fMethodExact(C.curCi, methodNm, false, -1) >= 0) {
 			E.ethis();
 			return eCall(ownerNm, methodNm, E.INVOKEVIRTUAL, 205);
 		}

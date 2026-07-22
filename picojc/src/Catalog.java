@@ -129,7 +129,7 @@ public class Catalog {
 			while (Tk.type == Tk.IDENT || Tk.type == Tk.STRING_KW) {
 				int ifNm = parseTypeNm();
 				C.chk(C.ifListLen, 64, 255);
-				C.ifList[C.ifListLen++] = (byte)ifNm; // store as name, resolve later
+				C.ifList[C.ifListLen++] = (short)ifNm; // store as name, resolve later
 				C.cIfaceC[ci]++;
 				if (Tk.type == Tk.COMMA) Lexer.nextToken();
 				else break;

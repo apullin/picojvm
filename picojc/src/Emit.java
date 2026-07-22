@@ -687,7 +687,7 @@ class E {
 			strIdx = C.strCC++;
 			C.strC[strIdx] = new byte[len];
 			Native.arraycopy(buf, 0, C.strC[strIdx], 0, len);
-			C.strCLen[strIdx] = (byte)len;
+			C.strCLen[strIdx] = (short)len;
 		}
 		return aCP(0x8000 | strIdx);
 	}

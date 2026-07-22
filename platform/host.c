@@ -16,7 +16,9 @@
 #include <time.h>
 #include <unistd.h>
 
-#define RAW_MEM_SIZE 262144u  /* 256KB — supports source files > 64K for self-hosting */
+#ifndef RAW_MEM_SIZE
+#define RAW_MEM_SIZE 524288u  /* Host workspace for large self-hosted compiler inputs. */
+#endif
 #define HEAP_MEM_SIZE 524288u
 #ifndef PJVM_HOST_HEAP_BASE
 #define PJVM_HOST_HEAP_BASE 1u

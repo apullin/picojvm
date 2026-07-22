@@ -7,7 +7,7 @@ class Base {
 class Mid extends Base {
 	int mid;
 	Mid(int v, int m) {
-		val = v;
+		super(v);
 		mid = m;
 	}
 	int getMid() { return mid; }
@@ -16,8 +16,7 @@ class Mid extends Base {
 class Leaf extends Mid {
 	int leaf;
 	Leaf(int v, int m, int l) {
-		val = v;
-		mid = m;
+		super(v, m);
 		leaf = l;
 	}
 }

@@ -85,9 +85,11 @@ public class Catalog {
 				Lexer.expect(Tk.RPAREN);
 			}
 		}
-		// Skip modifiers: public, abstract, final
+		// Class modifiers affect whether unresolved abstract slots are legal.
+		boolean isAbstract = false;
 		while (Tk.type == Tk.PUBLIC || Tk.type == Tk.ABSTRACT ||
 			   Tk.type == Tk.FINAL) {
+			if (Tk.type == Tk.ABSTRACT) isAbstract = true;
 			Lexer.nextToken();
 		}
 
@@ -114,6 +116,7 @@ public class Catalog {
 		C.cSimple[ci] = (short)simpleNm;
 		C.cIsIface[ci] = isIface;
 		C.cIsEnum[ci] = isEnum;
+		C.cAbstract[ci] = isAbstract || isIface;
 
 		// extends?
 		if (Tk.type == Tk.EXTENDS) {
@@ -472,6 +475,7 @@ public class Catalog {
 	static void catMethod(int ci, int nm, boolean isStat, boolean isCtor,
 							   boolean isNat, boolean isAbstract, int retType, int retRefNm, int retNarrow) {
 		int mi = C.initMethod(ci, isCtor ? C.N_INIT : nm, 0, isStat, isCtor, isNat, retType);
+		C.mAbstract[mi] = isAbstract || C.cIsIface[ci];
 		C.mRetNarrow[mi] = (byte)retNarrow;
 		C.mRetRefNm[mi] = (short)retRefNm;
 

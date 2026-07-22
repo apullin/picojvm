@@ -55,7 +55,9 @@ TESTS = T01_Empty T02_Literal T03_Arithmetic T04_IfElse T05_WhileLoop \
 	        T74_ParenIdent T75_SwitchControl T76_ConstFieldInit \
 	        T77_InstanceFieldInit T78_FieldHiding T79_ClassOrder \
 	        T80_InterfaceHierarchy T81_OverloadSpecificity \
-	        T82_LongString T83_InterfaceNameWidth
+	        T82_LongString T83_InterfaceNameWidth T84_ReturnFlow \
+	        T85_ConstructorSpecificity T86_ObjectForEach \
+	        T87_ReferenceTernary
 
 NEGTESTS = N01_InvalidStaticCall N02_OverloadSameClass \
            N03_OverloadInherited N04_SwitchTooManyCases \
@@ -75,7 +77,18 @@ NEGTESTS = N01_InvalidStaticCall N02_OverloadSameClass \
 	           N31_InvalidThrowScalar N32_InvalidObjArrayInit \
 	           N33_CaseIdent N34_ContinueOutsideLoop \
 	           N35_ReturnInFinally N36_ComplexInstanceInit \
-	           N37_HiddenInstanceAsStatic N38_HiddenStaticViaObject
+	           N37_HiddenInstanceAsStatic N38_HiddenStaticViaObject \
+	           N39_ConstructorMismatch N40_AbstractInstantiation \
+	           N41_BareReturnValueMethod N42_ValueReturnVoid \
+	           N43_NonVoidFallthrough N44_UnknownNew N45_UnknownArray \
+	           N46_UnknownInstanceof N47_UnknownCatch N48_UnknownFieldType \
+	           N49_InvalidArraySize N50_InvalidArrayIndex \
+	           N51_InvalidLengthReceiver N52_InvalidForeachSource \
+	           N53_InvalidForeachElement N54_InvalidTernaryArms \
+	           N55_UnimplementedAbstract N56_UnimplementedInterface \
+	           N57_MissingSuperConstructor N58_UnknownParameterType \
+	           N59_UnknownReturnType N60_UnknownLocalType \
+	           N61_AmbiguousConstructor N62_AmbiguousMethod
 
 # Tests requiring lib/ (platform package)
 LIB_SRCS = ../lib/Console.java ../lib/Arrays.java ../lib/IO.java

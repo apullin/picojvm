@@ -262,6 +262,7 @@ public class Expr {
 		E.push();
 		if (arrType == 2) {
 			int ci = Resolver.fClsByNm(refNm);
+			if (ci < 0 && !Catalog.isBuiltinType(refNm)) Lexer.error(202);
 			E.eOp(E.ANEWARRAY, E.aCP(ci >= 0 ? ci : 0));
 		} else {
 			E.eb(E.NEWARRAY);
@@ -330,13 +331,43 @@ public class Expr {
 			int fArrRefNm = exprArrRefNm;
 			int fNarrow = exprNarrow;
 			E.mark(lblEnd);
-			type = tType;
-			if (tType == 2 && fType == 2 && tRefNm == fRefNm && tArrRefNm == fArrRefNm) {
-				exprRefNm = tRefNm;
-				exprArrRefNm = tArrRefNm;
-			} else if (tType == 1 && fType == 1 && tNarrow == fNarrow) {
-				setScalarKind(tNarrow);
-			} else clearRefInfo();
+			if (tType == 1 || fType == 1) {
+				if (tType != 1 || fType != 1 ||
+					(tNarrow == C.NK_BOOL) != (fNarrow == C.NK_BOOL)) Lexer.error(211);
+				type = 1;
+				setScalarKind(tNarrow == fNarrow ? tNarrow : C.NK_NONE);
+			} else {
+				short tSig;
+				short fSig;
+				if (tType == 2) {
+					if (tArrRefNm >= 0) tSig = (short)(C.SIG_OBJ_ARRAY_BASE + tArrRefNm);
+					else if (tRefNm == -2) tSig = C.SIG_NULL;
+					else tSig = (short)(tRefNm >= 0 ? tRefNm : C.N_OBJECT);
+				} else if (tType == 4) tSig = C.SIG_BYTE_ARR;
+				else if (tType == 5) tSig = C.SIG_CHAR_ARR;
+				else if (tType == 8) tSig = C.SIG_SHORT_ARR;
+				else if (tType == 9) tSig = C.SIG_BOOL_ARR;
+				else tSig = C.SIG_INT_ARR;
+				if (fType == 2) {
+					if (fArrRefNm >= 0) fSig = (short)(C.SIG_OBJ_ARRAY_BASE + fArrRefNm);
+					else if (fRefNm == -2) fSig = C.SIG_NULL;
+					else fSig = (short)(fRefNm >= 0 ? fRefNm : C.N_OBJECT);
+				} else if (fType == 4) fSig = C.SIG_BYTE_ARR;
+				else if (fType == 5) fSig = C.SIG_CHAR_ARR;
+				else if (fType == 8) fSig = C.SIG_SHORT_ARR;
+				else if (fType == 9) fSig = C.SIG_BOOL_ARR;
+				else fSig = C.SIG_INT_ARR;
+				boolean trueToFalse = Resolver.sigAssignable(tSig, fSig);
+				boolean falseToTrue = Resolver.sigAssignable(fSig, tSig);
+				if (!trueToFalse && !falseToTrue) Lexer.error(211);
+				if (trueToFalse && !falseToTrue) {
+					type = fType; exprRefNm = fRefNm; exprArrRefNm = fArrRefNm;
+				} else {
+					type = tType; exprRefNm = tRefNm; exprArrRefNm = tArrRefNm;
+				}
+				exprNarrow = C.NK_NONE;
+				exprConst = false;
+			}
 		}
 		return type;
 	}
@@ -429,6 +460,7 @@ public class Expr {
 				int classNm = Catalog.parseTypeNm();
 				E.pop();
 				int ci = Resolver.fClsByNm(classNm);
+				if (ci < 0 && !Catalog.isBuiltinType(classNm)) Lexer.error(202);
 				int cpIdx = E.aCP(ci >= 0 ? ci : 0);
 				E.eOp(E.INSTANCEOF, cpIdx); E.push();
 				type = 1;
@@ -692,11 +724,13 @@ public class Expr {
 		while (true) {
 			if (Tk.type == Tk.DOT) {
 				int recvRefNm = exprRefNm;
+				int recvArrRefNm = exprArrRefNm;
 				Lexer.nextToken();
 				int memberNm = C.iN();
 
 				if (memberNm == C.N_LENGTH && Tk.type != Tk.LPAREN) {
 					// array.length
+					if (type < 3 && (type != 2 || recvArrRefNm < 0 && recvRefNm != -1)) Lexer.error(211);
 					E.eb(E.ARRAYLENGTH);
 					type = 1;
 					clearRefInfo();
@@ -712,9 +746,12 @@ public class Expr {
 				else if (Tk.type == Tk.LBRACKET) {
 					// Array access
 					int arrElemRefNm = exprArrRefNm;
+					int arrRefNm = exprRefNm;
+					if (type < 3 && (type != 2 || arrElemRefNm < 0 && arrRefNm != -1)) Lexer.error(211);
 					Lexer.nextToken();
 					int indexType = pExpr();
 					if (indexType == 0) Lexer.error(210); // array index needs a value
+					if (indexType != 1 || exprNarrow == C.NK_BOOL) Lexer.error(211);
 					Lexer.expect(Tk.RBRACKET);
 					E.pop(); // index
 
@@ -962,6 +999,7 @@ public class Expr {
 			}
 			int sizeType = pExpr();
 			if (sizeType == 0) Lexer.error(210); // array size needs a value
+			if (sizeType != 1 || exprNarrow == C.NK_BOOL) Lexer.error(211);
 			Lexer.expect(Tk.RBRACKET);
 
 			int arrType = primArrKind(elemType);
@@ -980,6 +1018,7 @@ public class Expr {
 				}
 				int sizeType2 = pExpr();
 				if (sizeType2 == 0) Lexer.error(210); // array size needs a value
+				if (sizeType2 != 1 || exprNarrow == C.NK_BOOL) Lexer.error(211);
 				Lexer.expect(Tk.RBRACKET);
 				int cpIdx = E.aCP((2 << 8) | typeCode);
 				E.eOp(E.MULTIANEWARRAY, cpIdx);
@@ -1015,9 +1054,11 @@ public class Expr {
 			}
 			int refSizeType = pExpr();
 			if (refSizeType == 0) Lexer.error(210); // array size needs a value
+			if (refSizeType != 1 || exprNarrow == C.NK_BOOL) Lexer.error(211);
 			Lexer.expect(Tk.RBRACKET);
 
 			int ci = Resolver.fClsByNm(classNm);
+			if (ci < 0 && !Catalog.isBuiltinType(classNm)) Lexer.error(202);
 			int cpIdx = E.aCP(ci >= 0 ? ci : 0);
 
 			// Check for 2D
@@ -1025,6 +1066,7 @@ public class Expr {
 				Lexer.nextToken();
 				int sizeType2 = pExpr();
 				if (sizeType2 == 0) Lexer.error(210); // array size needs a value
+				if (sizeType2 != 1 || exprNarrow == C.NK_BOOL) Lexer.error(211);
 				Lexer.expect(Tk.RBRACKET);
 				// The runtime needs total dimensions even for reference leaves.
 				cpIdx = E.aCP(2 << 8);
@@ -1042,7 +1084,8 @@ public class Expr {
 
 		// Object creation: new ClassName(args)
 		int ci = Resolver.fClsByNm(classNm);
-		if (ci < 0) ci = Resolver.synthExcCls(classNm);
+		if (ci < 0) { Lexer.error(202); return 0; }
+		if (C.cIsIface[ci] || C.cAbstract[ci]) { Lexer.error(274); return 0; }
 		int cpIdx = E.aCP(ci);
 		E.eOp(E.NEW, cpIdx);
 		E.push();
@@ -1051,18 +1094,10 @@ public class Expr {
 		Lexer.expect(Tk.LPAREN);
 		int argc = pArgs(1); // 'this' counts
 
-		// Find constructor: prefer argc match, fall back to any ctor
+		// Resolve only a matching constructor; unrelated fallbacks corrupt the stack.
 		Resolver.sigFromCatalog = false;
 		int ctorMi = Resolver.fCtor(ci, argc);
-		if (ctorMi < 0) {
-			for (int mi = 0; mi < C.mCount; mi++) {
-				if (C.mClass[mi] == ci && C.mIsCtor[mi]) {
-					ctorMi = mi;
-					break;
-				}
-			}
-		}
-		if (ctorMi < 0) ctorMi = C.ensNat(C.N_OBJECT, C.N_INIT);
+		if (ctorMi < 0) { Lexer.error(205); return 0; }
 
 		int ctorCpIdx = E.aCP(ctorMi);
 		E.eOp(E.INVOKESPECIAL, ctorCpIdx);

@@ -336,9 +336,10 @@ class E {
 				Lexer.expect(Tk.SEMI);
 			} else {
 				ethis();
-				int targetMi = -1;
+				Resolver.sigFromCatalog = false;
+				int targetMi;
 				if (C.cParent[C.curCi] >= 0) targetMi = Resolver.fCtor(C.cParent[C.curCi], 1);
-				if (targetMi < 0) targetMi = C.ensNat(C.N_OBJECT, C.N_INIT);
+				else targetMi = C.ensNat(C.N_OBJECT, C.N_INIT);
 				if (targetMi < 0) { Lexer.error(205); return; }
 				eOp(INVOKESPECIAL, aCP(targetMi));
 				pop();
@@ -359,14 +360,11 @@ class E {
 
 			// Parse body
 			Lexer.expect(Tk.LBRACE);
-			Stmt.pBlock();
+			boolean completes = Stmt.pBlock();
 			Lexer.expect(Tk.RBRACE);
 
-			// If method doesn't end with return, add implicit return
-			if (C.mcLen == 0 || (C.mcode[C.mcLen - 1] & 0xFF) != RETURN &&
-				(C.mcode[C.mcLen - 1] & 0xFF) != IRETURN && (C.mcode[C.mcLen - 1] & 0xFF) != ARETURN) {
-				eb(RETURN);
-			}
+			if (C.mRetT[mi] != 0 && completes) Lexer.error(273);
+			if (C.mRetT[mi] == 0 && completes) eb(RETURN);
 		}
 
 		patchBranches();
@@ -423,9 +421,11 @@ class E {
 				C.maxStk = 0;
 				int ci = C.mClass[mi];
 				ethis();
-				int targetMi = -1;
+				Resolver.sigFromCatalog = false;
+				int targetMi;
 				if (C.cParent[ci] >= 0) targetMi = Resolver.fCtor(C.cParent[ci], 1);
-				if (targetMi < 0) targetMi = C.ensNat(C.N_OBJECT, C.N_INIT);
+				else targetMi = C.ensNat(C.N_OBJECT, C.N_INIT);
+				if (targetMi < 0) { Lexer.error(205); return; }
 				eOp(INVOKESPECIAL, aCP(targetMi));
 				pop();
 				eInstFieldInits(ci);
@@ -444,6 +444,7 @@ class E {
 		Catalog.scanTy(false);
 		tyRefNm = Catalog.tyRefNm;
 		tyNarrow = Catalog.tyNarrow;
+		if (tyRefNm >= 0 && !Catalog.isBuiltinType(tyRefNm) && Resolver.fClsByNm(tyRefNm) < 0) Lexer.error(202);
 		if (Catalog.tyBase == 2) {
 			if (Catalog.tyDims == 0) return 1;
 			if (Catalog.tyDims == 1 && tyRefNm >= 0) return 2; // object[]

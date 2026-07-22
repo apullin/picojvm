@@ -1,39 +1,52 @@
 public class Stmt {
-	static void pBlock() {
+	static boolean pBlock() {
+		boolean completes = true;
 		while (Tk.type != Tk.RBRACE && Tk.type != Tk.EOF) {
-			pStmt();
+			boolean stmtCompletes = pStmt();
+			if (completes) completes = stmtCompletes;
 		}
+		return completes;
 	}
 
-	static void pStmt() {
+	static boolean pStmt() {
 		if (Tk.type == Tk.LBRACE) {
 			Lexer.nextToken();
 			int savedLocalCount = C.locCount;
-			pBlock();
+			boolean completes = pBlock();
 			C.locCount = savedLocalCount; // restore scope
 			Lexer.expect(Tk.RBRACE);
+			return completes;
 		}
 		else if (Tk.type == Tk.IF) {
-			pIf();
+			return pIf();
 		}
 		else if (Tk.type == Tk.WHILE) {
 			pWhile();
+			return true;
 		}
 		else if (Tk.type == Tk.DO) {
 			pDoWhile();
+			return true;
 		}
 		else if (Tk.type == Tk.FOR) {
 			pFor();
+			return true;
 		}
 		else if (Tk.type == Tk.RETURN) {
 			pRet();
+			return false;
 		}
 		else if (Tk.type == Tk.BREAK) {
 			Lexer.nextToken();
 			Lexer.expect(Tk.SEMI);
 			if (C.lpDepth <= 0) Lexer.error(268); // break outside loop/switch
+			int target = C.lpBrkLbl[C.lpDepth - 1];
+			for (int i = C.flowSwitchDepth - 1; i >= 0; i--) {
+				if (C.flowSwitchEnd[i] == target) { C.flowSwitchBreak[i] = true; break; }
+			}
 			markTryEscape(C.lpDepth - 1);
-			E.eBr(E.GOTO, C.lpBrkLbl[C.lpDepth - 1]); // GOTO break
+			E.eBr(E.GOTO, target); // GOTO break
+			return false;
 		}
 		else if (Tk.type == Tk.CONTINUE) {
 			Lexer.nextToken();
@@ -41,18 +54,22 @@ public class Stmt {
 			if (C.lpDepth <= 0 || C.lpContLbl[C.lpDepth - 1] < 0) Lexer.error(268); // continue outside loop
 			markTryEscape(C.lpContOwn[C.lpDepth - 1]);
 			E.eBr(E.GOTO, C.lpContLbl[C.lpDepth - 1]); // GOTO continue
+			return false;
 		}
 		else if (Tk.type == Tk.SWITCH) {
-			pSwitch();
+			return pSwitch();
 		}
 		else if (Tk.type == Tk.THROW) {
 			pThrow();
+			return false;
 		}
 		else if (Tk.type == Tk.TRY) {
 			pTry();
+			return true;
 		}
 		else if (isTyTok(Tk.type)) {
 			pLocal();
+			return true;
 		}
 		else if (Tk.type == Tk.IDENT) {
 			// Could be local declaration (ClassName var) or expression statement
@@ -78,9 +95,11 @@ public class Stmt {
 				Native.arraycopy(C.nPool, C.nOff[nm], Tk.strBuf, 0, Tk.strLen);
 				pExprStmt();
 			}
+			return true;
 		}
 		else {
 			pExprStmt();
+			return true;
 		}
 	}
 
@@ -164,24 +183,26 @@ public class Stmt {
 		E.eBr(onTrue ? E.IFNE : E.IFEQ, lbl);
 	}
 
-	static void pIf() {
+	static boolean pIf() {
 		Lexer.nextToken(); // skip 'if'
 		Lexer.expect(Tk.LPAREN);
 		int lblElse = E.label();
 		pCondBr(lblElse, false);
 		Lexer.expect(Tk.RPAREN);
 
-		pStmt();
+		boolean thenCompletes = pStmt();
 
 		if (Tk.type == Tk.ELSE) {
 			int lblEnd = E.label();
 			E.eBr(E.GOTO, lblEnd); // GOTO end
 			E.mark(lblElse);
 			Lexer.nextToken(); // skip 'else'
-			pStmt();
+			boolean elseCompletes = pStmt();
 			E.mark(lblEnd);
+			return thenCompletes || elseCompletes;
 		} else {
 			E.mark(lblElse);
+			return true;
 		}
 	}
 
@@ -232,7 +253,21 @@ public class Stmt {
 
 		// Init — check for for-each: for (type name : expr)
 		if (Tk.type != Tk.SEMI) {
-			if (isTyTok(Tk.type)) {
+			boolean localDecl = isTyTok(Tk.type);
+			if (!localDecl && Tk.type == Tk.IDENT) {
+				Lexer.save();
+				int typeNm = C.intern(Tk.strBuf, Tk.strLen);
+				int savedType = Tk.type;
+				Lexer.nextToken();
+				localDecl = Tk.type == Tk.IDENT ||
+					(Tk.type == Tk.LBRACKET &&
+					 Resolver.fClsByNm(Catalog.resolveTypeNm(typeNm)) >= 0);
+				Lexer.restore();
+				Tk.type = savedType;
+				Tk.strLen = C.nLen[typeNm];
+				Native.arraycopy(C.nPool, C.nOff[typeNm], Tk.strBuf, 0, Tk.strLen);
+			}
+			if (localDecl) {
 				int varType = E.pTypeLoc();
 				int varRefNm = E.tyRefNm;
 				int varNarrow = E.tyNarrow;
@@ -242,7 +277,7 @@ public class Stmt {
 				Lexer.nextToken(); // consume name
 
 				if (Tk.type == Tk.COLON) {
-					pForEach(varType, E.tyNarrow, slot);
+					pForEach(varType, varRefNm, E.tyNarrow, slot);
 					C.locCount = savedLocalCount;
 					return;
 				}
@@ -325,12 +360,26 @@ public class Stmt {
 		C.locCount = savedLocalCount;
 	}
 
-	static void pForEach(int elemType, int elemNarrow, int elemSlot) {
+	static void pForEach(int elemType, int elemRefNm, int elemNarrow, int elemSlot) {
 		Lexer.nextToken(); // skip ':'
 
 		// Parse array expression
 		int arrType = Expr.pExpr(); // array ref on stack
 		if (arrType == 0) Lexer.error(210); // foreach source needs a value
+		int arrRefNm = Expr.exprRefNm;
+		int arrElemRefNm = Expr.exprArrRefNm;
+		if (arrType < 3 && (arrType != 2 || arrElemRefNm < 0 && arrRefNm != -1)) Lexer.error(211);
+		if (arrType >= 3) {
+			if (elemType != 0) Lexer.error(208);
+			Expr.setScalarKind(Expr.arrNarrow(arrType));
+			Expr.chkStoreCompat(1, 0, -1, elemNarrow);
+		} else if (arrElemRefNm >= 0) {
+			if (elemType != 1) Lexer.error(208);
+			Expr.setObjRef(arrElemRefNm);
+			Expr.chkStoreCompat(2, 1, elemRefNm, C.NK_NONE);
+		} else if (elemType == 0) {
+			Lexer.error(208);
+		}
 
 		// Allocate hidden locals: $a (array ref), $i (index), $n (length)
 		byte[] sb = Tk.strBuf;
@@ -369,7 +418,7 @@ public class Stmt {
 		E.eLd(arrSlot, 1); E.push();
 		E.eLd(iSlot, 0); E.push();
 		E.eALd(arrType); E.pop(); // xALOAD: pops index+ref, pushes element = net -1
-		E.eStN(elemSlot, elemType >= 3 ? 1 : 0, elemNarrow); E.pop();
+		E.eStN(elemSlot, elemType != 0 ? 1 : 0, elemNarrow); E.pop();
 
 		// Body
 		E.pushLp(lblEnd, lblUpdate);
@@ -396,11 +445,13 @@ public class Stmt {
 	static void pRet() {
 		for (int i = 0; i < C.tryDepth; i++) C.tryEsc[i]++;
 		Lexer.nextToken(); // skip 'return'
+		int retType = C.mRetT[C.curMi];
 		if (Tk.type == Tk.SEMI) {
+			if (retType != 0) Lexer.error(272);
 			Lexer.nextToken();
 			E.eb(E.RETURN);
 			} else {
-				int retType = C.mRetT[C.curMi];
+				if (retType == 0) Lexer.error(272);
 				int retArrKind = retType == 2 ? C.mRetNarrow[C.curMi] : 0;
 				int exprType = Expr.pExpr();
 				if (exprType == 0) Lexer.error(210); // return expression needs a value
@@ -538,7 +589,7 @@ public class Stmt {
 		E.pop();
 	}
 
-	static void pSwitch() {
+	static boolean pSwitch() {
 		Lexer.nextToken(); // skip 'switch'
 		Lexer.expect(Tk.LPAREN);
 		int switchType = Expr.pExpr();
@@ -547,8 +598,7 @@ public class Stmt {
 
 		if (switchType == 2) {
 			// String switch — value still on stack
-			pStringSwitch();
-			return;
+			return pStringSwitch();
 		}
 
 		int swSlot = aSwitchLocal(0, -1);
@@ -560,6 +610,11 @@ public class Stmt {
 		int base = C.caseTop;
 		int caseCount = 0;
 		int defaultLabel = -1;
+		boolean lastGroupCompletes = true;
+		C.chk(C.flowSwitchDepth, 8, 265);
+		int flowIndex = C.flowSwitchDepth++;
+		C.flowSwitchEnd[flowIndex] = (short)lblEnd;
+		C.flowSwitchBreak[flowIndex] = false;
 
 		// Parse the body first, then branch into the selected case block.
 		E.eBr(E.GOTO, lblDispatch);
@@ -571,6 +626,7 @@ public class Stmt {
 
 		while (Tk.type != Tk.RBRACE && Tk.type != Tk.EOF) {
 			if (Tk.type == Tk.CASE) {
+				lastGroupCompletes = true;
 				Lexer.nextToken();
 				int val;
 				boolean neg = false;
@@ -592,12 +648,14 @@ public class Stmt {
 				C.caseTop++;
 				caseCount++;
 			} else if (Tk.type == Tk.DEFAULT) {
+				lastGroupCompletes = true;
 				Lexer.nextToken();
 				Lexer.expect(Tk.COLON);
 				defaultLabel = E.label();
 				E.mark(defaultLabel);
 			} else {
-				pStmt();
+				boolean stmtCompletes = pStmt();
+				if (lastGroupCompletes) lastGroupCompletes = stmtCompletes;
 			}
 		}
 
@@ -615,11 +673,14 @@ public class Stmt {
 		}
 		E.mark(lblEnd);
 		C.caseTop = base;
+		C.flowSwitchDepth--;
+		boolean completes = defaultLabel < 0 || lastGroupCompletes || C.flowSwitchBreak[flowIndex];
 
 		Lexer.expect(Tk.RBRACE);
+		return completes;
 	}
 
-	static void pStringSwitch() {
+	static boolean pStringSwitch() {
 		// String value on JVM stack — store in hidden local
 		int swSlot = aSwitchLocal(1, C.N_STRING);
 		E.eSt(swSlot, 1); E.pop();
@@ -632,6 +693,11 @@ public class Stmt {
 		int base = C.caseTop;
 		int caseCount = 0;
 		int defaultLabel = -1;
+		boolean lastGroupCompletes = true;
+		C.chk(C.flowSwitchDepth, 8, 265);
+		int flowIndex = C.flowSwitchDepth++;
+		C.flowSwitchEnd[flowIndex] = (short)lblEnd;
+		C.flowSwitchBreak[flowIndex] = false;
 
 		E.eBr(E.GOTO, lblDispatch);
 		Lexer.expect(Tk.LBRACE);
@@ -642,6 +708,7 @@ public class Stmt {
 
 		while (Tk.type != Tk.RBRACE && Tk.type != Tk.EOF) {
 			if (Tk.type == Tk.CASE) {
+				lastGroupCompletes = true;
 				Lexer.nextToken();
 				if (Tk.type != Tk.STR_LIT) Lexer.error(267); // case label needs a string literal
 				// Parse string literal — register in CP
@@ -657,12 +724,14 @@ public class Stmt {
 					C.caseTop++;
 					caseCount++;
 			} else if (Tk.type == Tk.DEFAULT) {
+				lastGroupCompletes = true;
 				Lexer.nextToken();
 				Lexer.expect(Tk.COLON);
 				defaultLabel = E.label();
 				E.mark(defaultLabel);
 			} else {
-				pStmt();
+				boolean stmtCompletes = pStmt();
+				if (lastGroupCompletes) lastGroupCompletes = stmtCompletes;
 			}
 		}
 
@@ -679,8 +748,11 @@ public class Stmt {
 		E.eBr(E.GOTO, defaultLabel >= 0 ? defaultLabel : lblEnd);
 		E.mark(lblEnd);
 		C.caseTop = base;
+		C.flowSwitchDepth--;
+		boolean completes = defaultLabel < 0 || lastGroupCompletes || C.flowSwitchBreak[flowIndex];
 
 		Lexer.expect(Tk.RBRACE);
+		return completes;
 	}
 
 	static void pTry() {
@@ -726,7 +798,7 @@ public class Stmt {
 
 			// Record exception table entry
 			int catchClassId = Resolver.fClsByNm(excNm);
-			if (catchClassId < 0) catchClassId = 0xFF;
+			if (catchClassId < 0) Lexer.error(202);
 			C.chk(C.excC, C.MAX_EXC, 264);
 			C.excSPc[C.excC] = (short)startPC;
 			C.excEPc[C.excC] = (short)endPC;

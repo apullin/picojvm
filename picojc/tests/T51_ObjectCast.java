@@ -5,13 +5,13 @@ class Animal {
 }
 
 class Cow extends Animal {
-	Cow(int i) { id = i; }
+	Cow(int i) { super(i); }
 	int sound() { return 77; } // 'M' for moo
 	int milk() { return 42; } // '*'
 }
 
 class Pig extends Animal {
-	Pig(int i) { id = i; }
+	Pig(int i) { super(i); }
 	int sound() { return 79; } // 'O' for oink
 }
 

@@ -56,6 +56,7 @@ class C {
 	static byte[] cIfaceC = new byte[MAX_CLASSES];
 	static boolean[] cIsIface = new boolean[MAX_CLASSES];
 	static boolean[] cIsEnum = new boolean[MAX_CLASSES];
+	static boolean[] cAbstract = new boolean[MAX_CLASSES];
 	static int[] cBodyS = new int[MAX_CLASSES]; // source offset (must be int: >32KB sources)
 	static int[] cBodyE   = new int[MAX_CLASSES];
 	static short[] vtable = new short[MAX_VTABLE]; // flat: class vtables concatenated
@@ -99,6 +100,7 @@ class C {
 	static boolean[] mStatic     = new boolean[MAX_METHODS];
 	static boolean[] mIsCtor= new boolean[MAX_METHODS];
 	static boolean[] mNative     = new boolean[MAX_METHODS];
+	static boolean[] mAbstract   = new boolean[MAX_METHODS];
 	static boolean[] mVarargs    = new boolean[MAX_METHODS];
 	static boolean[] mMainStrArgs = new boolean[MAX_METHODS];
 	static byte[] mFixedArgs = new byte[MAX_METHODS];
@@ -185,6 +187,9 @@ class C {
 	static byte[] tryLpD = new byte[8];
 	static short[] tryEsc = new short[8];
 	static int tryDepth;
+	static short[] flowSwitchEnd = new short[8];
+	static boolean[] flowSwitchBreak = new boolean[8];
+	static int flowSwitchDepth;
 
 	// --- Current context ---
 	static int curCi;
@@ -338,7 +343,7 @@ class C {
 		chk(mCount, MAX_METHODS, 252);
 		int mi = mCount++;
 		mClass[mi] = (byte)ci; mName[mi] = (short)nm; mArgC[mi] = (byte)argc;
-		mStatic[mi] = isStat; mIsCtor[mi] = isCtor; mNative[mi] = isNat;
+		mStatic[mi] = isStat; mIsCtor[mi] = isCtor; mNative[mi] = isNat; mAbstract[mi] = false;
 			mRetT[mi] = (byte)retType; mVtSlot[mi] = (byte)0xFF; mVmid[mi] = (byte)0xFF; mExcC[mi] = 0;
 			mRetNarrow[mi] = (byte)NK_NONE;
 			mRetRefNm[mi] = (short)-1;
@@ -351,7 +356,7 @@ class C {
 	static int initClass(int nm) {
 		chk(cCount, MAX_CLASSES, 253);
 		int ci = cCount++;
-		cName[ci] = (short)nm; cParent[ci] = -1; cIsIface[ci] = false;
+		cName[ci] = (short)nm; cParent[ci] = -1; cIsIface[ci] = false; cAbstract[ci] = false;
 		cSimple[ci] = (short)nm;
 		cClinit[ci] = 0xFF; cIfaceS[ci] = (byte)ifListLen; cIfaceC[ci] = 0; cOwnF[ci] = 0;
 		return ci;

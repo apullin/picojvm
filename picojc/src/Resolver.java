@@ -28,6 +28,22 @@ public class Resolver {
 			}
 		}
 
+		// Every declared reference type must resolve after the full catalog pass.
+		for (int fi = 0; fi < C.fCount; fi++) {
+			int nm = C.fRefNm[fi];
+			if (nm >= 0 && !Catalog.isBuiltinType(nm) && fClsByNm(nm) < 0) Lexer.error(202);
+		}
+		for (int mi = 0; mi < C.mCount; mi++) {
+			int nm = C.mRetRefNm[mi];
+			if (nm >= 0 && !Catalog.isBuiltinType(nm) && fClsByNm(nm) < 0) Lexer.error(202);
+			int ss = C.mSigS[mi] & 0xFFFF;
+			for (int i = 0; i < (C.mSigC[mi] & 0xFF); i++) {
+				int sig = C.sigParam[ss + i];
+				if (sig >= C.SIG_OBJ_ARRAY_BASE) sig = sig - C.SIG_OBJ_ARRAY_BASE;
+				if (sig >= 0 && !Catalog.isBuiltinType(sig) && fClsByNm(sig) < 0) Lexer.error(202);
+			}
+		}
+
 		// Stable topological order: preserve declaration order among unrelated
 		// classes while ensuring every parent precedes its children.
 		for (int ci = 0; ci < C.cCount; ci++) {
@@ -66,6 +82,7 @@ public class Resolver {
 				bv = C.cIfaceC[dst]; C.cIfaceC[dst] = C.cIfaceC[src]; C.cIfaceC[src] = bv;
 				zv = C.cIsIface[dst]; C.cIsIface[dst] = C.cIsIface[src]; C.cIsIface[src] = zv;
 				zv = C.cIsEnum[dst]; C.cIsEnum[dst] = C.cIsEnum[src]; C.cIsEnum[src] = zv;
+				zv = C.cAbstract[dst]; C.cAbstract[dst] = C.cAbstract[src]; C.cAbstract[src] = zv;
 				iv = C.cBodyS[dst]; C.cBodyS[dst] = C.cBodyS[src]; C.cBodyS[src] = iv;
 				iv = C.cBodyE[dst]; C.cBodyE[dst] = C.cBodyE[src]; C.cBodyE[src] = iv;
 				bv = C.vtBase[dst]; C.vtBase[dst] = C.vtBase[src]; C.vtBase[src] = bv;
@@ -155,6 +172,27 @@ public class Resolver {
 					C.vtable[C.vtBase[ci] + slot] = (short)mi;
 					C.mVtSlot[mi] = (byte)slot;
 				}
+			}
+		}
+
+		// A concrete class must close every abstract vtable slot and every
+		// interface signature that its declaration hierarchy promises.
+		for (int ci = 0; ci < C.cCount; ci++) {
+			if (C.cIsIface[ci] || C.cAbstract[ci]) continue;
+			int base = C.vtBase[ci] & 0xFF;
+			for (int slot = 0; slot < (C.cVtSize[ci] & 0xFF); slot++) {
+				if (C.mAbstract[C.vtable[base + slot] & 0xFFFF]) Lexer.error(274);
+			}
+			for (int imi = 0; imi < C.mCount; imi++) {
+				int ii = C.mClass[imi] & 0xFF;
+				if (!C.cIsIface[ii] || C.mStatic[imi] || C.mIsCtor[imi] ||
+					!Linker.hasInterface(ci, ii)) continue;
+				boolean found = false;
+				for (int slot = 0; slot < (C.cVtSize[ci] & 0xFF); slot++) {
+					int cmi = C.vtable[base + slot] & 0xFFFF;
+					if (!C.mAbstract[cmi] && sameSig(cmi, imi)) { found = true; break; }
+				}
+				if (!found) Lexer.error(274);
 			}
 		}
 
@@ -392,10 +430,48 @@ public class Resolver {
 	static int fCtor(int ci, int argc) {
 		short[] sig = sigFromCatalog ? Catalog.sigTmp : Expr.lastArgSig;
 		int sigC = sigFromCatalog ? Catalog.sigTmpC : Expr.lastArgSigC;
+		int best = -1;
 		for (int mi = 0; mi < C.mCount; mi++) {
 			if (declShapeFits(mi, ci, C.N_INIT, false, argc, false, true) &&
 				sigFits(mi, sig, sigC, true)) {
 				return mi;
+			}
+		}
+		if (!sigFromCatalog) {
+			for (int mi = 0; mi < C.mCount; mi++) {
+				if (!declShapeFits(mi, ci, C.N_INIT, false, argc, false, true) ||
+					!sigFits(mi, sig, sigC, false)) continue;
+				if (best < 0) { best = mi; continue; }
+				int count = C.mSigC[mi] & 0xFF;
+				int cs = C.mSigS[mi] & 0xFFFF;
+				int bs = C.mSigS[best] & 0xFFFF;
+				boolean candidateBetter = count == (C.mSigC[best] & 0xFF);
+				boolean bestBetter = candidateBetter;
+				for (int ai = 0; ai < count; ai++) {
+					short candidateArg = C.sigParam[cs + ai];
+					short bestArg = C.sigParam[bs + ai];
+					if (candidateArg == bestArg) continue;
+					if (!sigAssignable(candidateArg, bestArg)) candidateBetter = false;
+					if (!sigAssignable(bestArg, candidateArg)) bestBetter = false;
+				}
+				if (candidateBetter && !bestBetter) best = mi;
+			}
+			if (best >= 0) {
+				for (int mi = 0; mi < C.mCount; mi++) {
+					if (mi == best ||
+						!declShapeFits(mi, ci, C.N_INIT, false, argc, false, true) ||
+						!sigFits(mi, sig, sigC, false)) continue;
+					int count = C.mSigC[best] & 0xFF;
+					int bs = C.mSigS[best] & 0xFFFF;
+					int cs = C.mSigS[mi] & 0xFFFF;
+					boolean bestBetter = count == (C.mSigC[mi] & 0xFF);
+					for (int ai = 0; ai < count; ai++) {
+						if (!sigAssignable(C.sigParam[bs + ai], C.sigParam[cs + ai]))
+							bestBetter = false;
+					}
+					if (!bestBetter) return -1;
+				}
+				return best;
 			}
 		}
 		// Lazily materialize the default constructor: only classes that are
@@ -436,7 +512,6 @@ public class Resolver {
 			boolean exact = pass == 0;
 			int best = -1;
 			int varargsMi = -1;
-			boolean ambiguous = false;
 			while (walkCi >= 0) {
 				for (mi = 0; mi < C.mCount; mi++) {
 					if (C.mClass[mi] != walkCi || !callShapeFits(mi, methodNm, isStatic, argc) ||
@@ -467,14 +542,32 @@ public class Resolver {
 					}
 					if (candidateBetter && !bestBetter) {
 						best = mi;
-						ambiguous = false;
-					} else if (!bestBetter) {
-						ambiguous = true;
 					}
 				}
 				walkCi = C.cParent[walkCi];
 			}
-			if (best >= 0) return ambiguous ? -1 : best;
+			if (best >= 0) {
+				walkCi = ci;
+				while (walkCi >= 0) {
+					for (mi = 0; mi < C.mCount; mi++) {
+						if (mi == best || C.mClass[mi] != walkCi || C.mVarargs[mi] ||
+							!callShapeFits(mi, methodNm, isStatic, argc) ||
+							!sigFits(mi, Expr.lastArgSig, Expr.lastArgSigC, exact) ||
+							sameSig(best, mi)) continue;
+						int count = C.mSigC[best] & 0xFF;
+						int bs = C.mSigS[best] & 0xFFFF;
+						int cs = C.mSigS[mi] & 0xFFFF;
+						boolean bestBetter = count == (C.mSigC[mi] & 0xFF);
+						for (int ai = 0; ai < count; ai++) {
+							if (!sigAssignable(C.sigParam[bs + ai], C.sigParam[cs + ai]))
+								bestBetter = false;
+						}
+						if (!bestBetter) return -1;
+					}
+					walkCi = C.cParent[walkCi];
+				}
+				return best;
+			}
 			if (varargsMi >= 0) return varargsMi;
 		}
 		return -1;

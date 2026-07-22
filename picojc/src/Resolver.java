@@ -269,7 +269,8 @@ public class Resolver {
 			if (C.cName[ci] == nm) return ci;
 		}
 		// Check well-known names
-		if (nm == C.N_THROWABLE || nm == C.N_EXCEPTION || nm == C.N_RUNTIME_EX) {
+		if (nm == C.N_THROWABLE || nm == C.N_EXCEPTION || nm == C.N_RUNTIME_EX ||
+			nm == C.N_INDEX_OOB) {
 			// Synthesize exception class
 			return synthExcCls(nm);
 		}
@@ -284,9 +285,12 @@ public class Resolver {
 			parentNm = C.N_THROWABLE;
 			synthExcCls(C.N_THROWABLE); // ensure parent exists
 		}
-		else { // RuntimeException
+		else if (nm == C.N_RUNTIME_EX) {
 			parentNm = C.N_EXCEPTION;
 			synthExcCls(C.N_EXCEPTION); // ensure parent exists
+		} else {
+			parentNm = C.N_RUNTIME_EX;
+			synthExcCls(C.N_RUNTIME_EX); // ensure parent exists
 		}
 
 		// Check if already exists

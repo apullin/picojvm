@@ -135,7 +135,6 @@ class E {
 		if (Tk.type == Tk.RBRACE) Lexer.nextToken();
 	}
 
-	static int emitClassIdx; // tracking which class we're emitting
 	static int fCurCls() {
 		// Match by position - classes appear in source order
 		for (int ci = C.uClsStart; ci < C.cCount; ci++) {

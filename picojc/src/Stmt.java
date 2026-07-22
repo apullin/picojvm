@@ -21,16 +21,13 @@ public class Stmt {
 			return pIf();
 		}
 		else if (Tk.type == Tk.WHILE) {
-			pWhile();
-			return true;
+			return pWhile();
 		}
 		else if (Tk.type == Tk.DO) {
-			pDoWhile();
-			return true;
+			return pDoWhile();
 		}
 		else if (Tk.type == Tk.FOR) {
-			pFor();
-			return true;
+			return pFor();
 		}
 		else if (Tk.type == Tk.RETURN) {
 			pRet();
@@ -40,6 +37,7 @@ public class Stmt {
 			Lexer.nextToken();
 			Lexer.expect(Tk.SEMI);
 			if (C.lpDepth <= 0) Lexer.error(268); // break outside loop/switch
+			C.lpContOwn[C.lpDepth - 1] = (byte)(C.lpContOwn[C.lpDepth - 1] | 64);
 			int target = C.lpBrkLbl[C.lpDepth - 1];
 			for (int i = C.flowSwitchDepth - 1; i >= 0; i--) {
 				if (C.flowSwitchEnd[i] == target) { C.flowSwitchBreak[i] = true; break; }
@@ -52,7 +50,9 @@ public class Stmt {
 			Lexer.nextToken();
 			Lexer.expect(Tk.SEMI);
 			if (C.lpDepth <= 0 || C.lpContLbl[C.lpDepth - 1] < 0) Lexer.error(268); // continue outside loop
-			markTryEscape(C.lpContOwn[C.lpDepth - 1]);
+			int owner = C.lpContOwn[C.lpDepth - 1] & 31;
+			C.lpContOwn[owner] = (byte)(C.lpContOwn[owner] | 128);
+			markTryEscape(owner);
 			E.eBr(E.GOTO, C.lpContLbl[C.lpDepth - 1]); // GOTO continue
 			return false;
 		}
@@ -147,9 +147,10 @@ public class Stmt {
 	// ==================== CONTROL FLOW ====================
 
 	// Parse a condition and branch directly when the tail is a materialized cmpBool.
-	static void pCondBr(int lbl, boolean onTrue) {
+	static boolean pCondBr(int lbl, boolean onTrue) {
 		int savedDepth = C.stkDepth;
 		int condType = Expr.pExpr();
+		boolean alwaysTrue = Expr.exprConst && Expr.exprConstVal != 0;
 		if (condType == 0) Lexer.error(210); // condition needs a value
 		if (condType != 1 || Expr.exprNarrow != C.NK_BOOL) Lexer.error(211);
 		if (C.mcLen >= 8 && C.patC >= 2) {
@@ -176,11 +177,12 @@ public class Stmt {
 				C.patC--;
 				C.mcLen = start + 3;
 				C.stkDepth = savedDepth;
-				return;
+				return alwaysTrue;
 			}
 		}
 		E.pop();
 		E.eBr(onTrue ? E.IFNE : E.IFEQ, lbl);
+		return alwaysTrue;
 	}
 
 	static boolean pIf() {
@@ -206,7 +208,7 @@ public class Stmt {
 		}
 	}
 
-	static void pWhile() {
+	static boolean pWhile() {
 		Lexer.nextToken(); // skip 'while'
 		int lblTop = E.label();
 		int lblEnd = E.label();
@@ -214,38 +216,45 @@ public class Stmt {
 		E.mark(lblTop);
 
 		Lexer.expect(Tk.LPAREN);
-		pCondBr(lblEnd, false);
+		boolean alwaysTrue = pCondBr(lblEnd, false);
 		Lexer.expect(Tk.RPAREN);
 
+		int loopDepth = C.lpDepth;
 		E.pushLp(lblEnd, lblCont);
 		pStmt();
+		boolean hasBreak = (C.lpContOwn[loopDepth] & 64) != 0;
 		E.popLp();
 
 		E.eBr(E.GOTO, lblTop); // GOTO top
 		E.mark(lblEnd);
+		return !alwaysTrue || hasBreak;
 	}
 
-	static void pDoWhile() {
+	static boolean pDoWhile() {
 		Lexer.nextToken(); // skip 'do'
 		int lblTop = E.label();
 		int lblEnd = E.label();
 		int lblCont = E.label();
 		E.mark(lblTop);
 
+		int loopDepth = C.lpDepth;
 		E.pushLp(lblEnd, lblCont);
-		pStmt();
+		boolean bodyCompletes = pStmt();
+		boolean hasBreak = (C.lpContOwn[loopDepth] & 64) != 0;
+		boolean hasContinue = (C.lpContOwn[loopDepth] & 128) != 0;
 		E.popLp();
 
 		Lexer.expect(Tk.WHILE);
 		E.mark(lblCont);
 		Lexer.expect(Tk.LPAREN);
-		pCondBr(lblTop, true);
+		boolean alwaysTrue = pCondBr(lblTop, true);
 		Lexer.expect(Tk.RPAREN);
 		E.mark(lblEnd);
 		Lexer.expect(Tk.SEMI);
+		return hasBreak || (!alwaysTrue && (bodyCompletes || hasContinue));
 	}
 
-	static void pFor() {
+	static boolean pFor() {
 		Lexer.nextToken(); // skip 'for'
 		Lexer.expect(Tk.LPAREN);
 
@@ -279,7 +288,7 @@ public class Stmt {
 				if (Tk.type == Tk.COLON) {
 					pForEach(varType, varRefNm, E.tyNarrow, slot);
 					C.locCount = savedLocalCount;
-					return;
+					return true;
 				}
 
 					// Traditional for — already declared the local, handle initializer
@@ -324,8 +333,9 @@ public class Stmt {
 		// Condition
 		E.mark(lblCond);
 		boolean hasUpdate = false;
+		boolean alwaysTrue = true;
 		if (Tk.type != Tk.SEMI) {
-			pCondBr(lblEnd, false);
+			alwaysTrue = pCondBr(lblEnd, false);
 		}
 		Lexer.expect(Tk.SEMI);
 
@@ -346,8 +356,10 @@ public class Stmt {
 
 		// Body
 		E.mark(lblBody);
+		int loopDepth = C.lpDepth;
 		E.pushLp(lblEnd, lblUpdate);
 		pStmt();
+		boolean hasBreak = (C.lpContOwn[loopDepth] & 64) != 0;
 		E.popLp();
 
 		if (hasUpdate) {
@@ -358,6 +370,7 @@ public class Stmt {
 		E.mark(lblEnd);
 
 		C.locCount = savedLocalCount;
+		return !alwaysTrue || hasBreak;
 	}
 
 	static void pForEach(int elemType, int elemRefNm, int elemNarrow, int elemSlot) {
@@ -625,7 +638,7 @@ public class Stmt {
 		// continue inside a switch targets the enclosing loop, if any
 		int outerCont = C.lpDepth > 0 ? C.lpContLbl[C.lpDepth - 1] : -1;
 		E.pushLp(lblEnd, outerCont);
-		C.lpContOwn[C.lpDepth - 1] = (byte)(C.lpDepth >= 2 ? C.lpContOwn[C.lpDepth - 2] : -1);
+		C.lpContOwn[C.lpDepth - 1] = (byte)(C.lpDepth >= 2 ? C.lpContOwn[C.lpDepth - 2] & 31 : -1);
 
 		while (Tk.type != Tk.RBRACE && Tk.type != Tk.EOF) {
 			if (Tk.type == Tk.CASE) {
@@ -708,7 +721,7 @@ public class Stmt {
 		// continue inside a switch targets the enclosing loop, if any
 		int outerCont = C.lpDepth > 0 ? C.lpContLbl[C.lpDepth - 1] : -1;
 		E.pushLp(lblEnd, outerCont);
-		C.lpContOwn[C.lpDepth - 1] = (byte)(C.lpDepth >= 2 ? C.lpContOwn[C.lpDepth - 2] : -1);
+		C.lpContOwn[C.lpDepth - 1] = (byte)(C.lpDepth >= 2 ? C.lpContOwn[C.lpDepth - 2] & 31 : -1);
 
 		while (Tk.type != Tk.RBRACE && Tk.type != Tk.EOF) {
 			if (Tk.type == Tk.CASE) {

@@ -13,7 +13,6 @@ public class Lexer {
 	static int dLen;        // valid bytes in buffer
 	static boolean dEof;    // true when file is exhausted
 	static boolean dSaved;  // true between save() and restore()
-	static boolean dBoundary; // virtual newline between manifest files
 
 	// Multi-file support
 	static byte[][] dFiles;    // file list (max 16)
@@ -42,7 +41,6 @@ public class Lexer {
 		dLen = 0;
 		dEof = false;
 		dSaved = false;
-		dBoundary = false;
 		srcLen = 0x7FFFFFFF; // effectively infinite for pos < srcLen guards
 		pos = 0;
 		dFill();
@@ -56,7 +54,6 @@ public class Lexer {
 		dLen = 0;
 		dEof = false;
 		dSaved = false;
-		dBoundary = false;
 		pos = 0;
 		line = 1;
 	}
@@ -82,7 +79,6 @@ public class Lexer {
 		dLen = 0;
 		dEof = false;
 		dSaved = false;
-		dBoundary = false;
 		srcLen = 0x7FFFFFFF;
 		pos = 0;
 		dFill();
@@ -98,7 +94,6 @@ public class Lexer {
 		dLen = 0;
 		dEof = false;
 		dSaved = false;
-		dBoundary = false;
 		pos = 0;
 		line = 1;
 		dFill();
@@ -111,12 +106,12 @@ public class Lexer {
 		dFileCur++;
 		int r = Native.fileOpen(dFiles[dFileCur], dFileLens[dFileCur], 1);
 		if (r != 0) { error(276); return false; }
+		Catalog.resetUnitScope();
 		// Reserve one global source position for a separator. This prevents a
 		// token or // comment from consuming bytes in the next source file.
 		dBase = pos + 1;
 		dLen = 0;
 		dEof = false;
-		dBoundary = true;
 		dFill();
 		return true;
 	}
@@ -153,7 +148,7 @@ public class Lexer {
 
 	static int ch() {
 		if (diskMode) {
-			if (dBoundary) return '\n';
+			if (pos < dBase) return '\n';
 			int bi = pos - dBase;
 			if (bi >= 0 && bi < dLen) return dBuf[bi] & 0xFF;
 			if (dEof) {
@@ -193,7 +188,6 @@ public class Lexer {
 	}
 
 	static void advance() {
-		if (diskMode && dBoundary) dBoundary = false;
 		pos++;
 	}
 

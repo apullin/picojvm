@@ -5,12 +5,10 @@ public class Catalog {
 	static int[] impSimple = new int[MAX_IMPORTS];
 	static int[] impFull = new int[MAX_IMPORTS];
 	static int impCount;
-	static int scopeFile;
 
 	static void resetUnitScope() {
 		curPkgNm = -1;
 		impCount = 0;
-		scopeFile = Lexer.diskMode ? Lexer.dFileCur : -1;
 	}
 
 	static void catalog() {
@@ -27,7 +25,8 @@ public class Catalog {
 		return nm == C.N_OBJECT || nm == C.N_STRING || nm == C.N_NATIVE ||
 			   nm == C.N_STRING_BUILDER || nm == C.N_STRING_BUILDER_SIMPLE ||
 			   nm == C.N_PJ_NATIVE ||
-			   nm == C.N_THROWABLE || nm == C.N_EXCEPTION || nm == C.N_RUNTIME_EX;
+			   nm == C.N_THROWABLE || nm == C.N_EXCEPTION || nm == C.N_RUNTIME_EX ||
+			   nm == C.N_INDEX_OOB;
 	}
 
 	static int resolveTypeNm(int nm) {
@@ -57,7 +56,6 @@ public class Catalog {
 	}
 
 	static void scanUnitScope() {
-		if (Lexer.diskMode && scopeFile != Lexer.dFileCur) resetUnitScope();
 		while (Tk.type == Tk.PACKAGE || Tk.type == Tk.IMPORT) {
 			if (Tk.type == Tk.PACKAGE) {
 				Lexer.nextToken();
@@ -376,7 +374,7 @@ public class Catalog {
 		C.fGcRef[fi] = gcRef;
 		C.fArrKind[fi] = (byte)arrKind; C.fSlot[fi] = (short)-1;
 		C.fRefNm[fi] = (short)refNm;
-		C.fInitPos[fi] = -1; C.fInitLn[fi] = (short)0;
+		C.fInitPos[fi] = -1;
 		C.fFinal[fi] = isFinal; C.fHasConst[fi] = false; C.fIsConst[fi] = false;
 		if (!isStat) {
 			int ownFields = C.cOwnF[ci] & 0xFF;
@@ -402,7 +400,6 @@ public class Catalog {
 
 		if (Tk.type == Tk.ASSIGN && isStat) {
 			C.fInitPos[fi] = Lexer.pos;
-			C.fInitLn[fi] = (short)Lexer.line;
 			if (isFinal) extractConst(fi);
 			ensClinitFor(ci);
 		} else if (Tk.type == Tk.ASSIGN) {
@@ -410,7 +407,6 @@ public class Catalog {
 			// top of every constructor; anything more complex is rejected
 			// loudly instead of being silently ignored.
 			C.fInitPos[fi] = Lexer.pos;
-			C.fInitLn[fi] = (short)Lexer.line;
 			extractConst(fi);
 			if (!C.fHasConst[fi]) Lexer.error(270);
 		}
@@ -423,12 +419,10 @@ public class Catalog {
 					// Record initializer for comma-separated fields: static int A=0, B=1;
 				if (Tk.type == Tk.ASSIGN && isStat) {
 					C.fInitPos[fi2] = Lexer.pos;
-					C.fInitLn[fi2] = (short)Lexer.line;
 					if (isFinal) extractConst(fi2);
 					ensClinitFor(ci);
 				} else if (Tk.type == Tk.ASSIGN) {
 					C.fInitPos[fi2] = Lexer.pos;
-					C.fInitLn[fi2] = (short)Lexer.line;
 					extractConst(fi2);
 					if (!C.fHasConst[fi2]) Lexer.error(270);
 				}

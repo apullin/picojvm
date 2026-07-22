@@ -42,6 +42,7 @@ class C {
 	static final int N_PJ_NATIVE = 34;
 	static final int N_TERM_INFO = 35, N_KEY_READ = 36, N_TICKS = 37;
 	static final int N_STRING_BUILDER_SIMPLE = 38, N_STRING_BUILDER = 39, N_APPEND = 40;
+	static final int N_INDEX_OOB = 41;
 
 	// --- Class table ---
 	static int cCount;
@@ -75,7 +76,6 @@ class C {
 	static boolean[] fGcRef = new boolean[MAX_FIELDS]; // field slot holds a heap reference
 	static short[] fSlot   = new short[MAX_FIELDS]; // assigned in resolve
 	static int[] fInitPos  = new int[MAX_FIELDS]; // source pos of initializer (must be int: >32KB sources)
-	static short[] fInitLn = new short[MAX_FIELDS]; // line of initializer
 	static byte[] fArrKind = new byte[MAX_FIELDS]; // 0=non-array, 3=int[], 4=byte[], 5=char[], 8=short[], 9=boolean[]
 	static short[] fRefNm = new short[MAX_FIELDS]; // declared ref type name, -1 if unknown/non-ref
 	static boolean[] fFinal = new boolean[MAX_FIELDS];
@@ -158,7 +158,6 @@ class C {
 	static short[] locRefNm = new short[MAX_LOCALS]; // declared ref type name, -1 if unknown/non-ref
 	static int locCount;
 	static int locNext;
-	static int maxLoc;
 	static int stkDepth;
 	static int maxStk;
 
@@ -174,7 +173,8 @@ class C {
 	static short[] lpBrkLbl = new short[32];
 	static short[] lpContLbl  = new short[32];
 	// Index of the lp entry that owns each entry's continue label: a switch
-	// inherits the enclosing loop's continue, so its owner points there.
+	// inherits the enclosing loop's continue, so its owner points there. Bits
+	// 6 and 7 record a targeted break and continue without extra state arrays.
 	static byte[] lpContOwn = new byte[32];
 	static int lpDepth;
 
@@ -257,7 +257,8 @@ class C {
 			"fileWrite", "fileClose", "fileDelete",
 			"length", "charAt", "equals", "toString", "hashCode", "args",
 			"Const", "pj.Native", "termInfo", "keyRead", "ticks",
-			"StringBuilder", "java.lang.StringBuilder", "append"
+			"StringBuilder", "java.lang.StringBuilder", "append",
+			"IndexOutOfBoundsException"
 		};
 		for (int i = 0; i < seeds.length; i++) iStr(seeds[i]);
 	}

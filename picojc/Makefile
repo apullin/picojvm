@@ -58,7 +58,7 @@ TESTS = T01_Empty T02_Literal T03_Arithmetic T04_IfElse T05_WhileLoop \
 	        T80_InterfaceHierarchy T81_OverloadSpecificity \
 	        T82_LongString T83_InterfaceNameWidth T84_ReturnFlow \
 	        T85_ConstructorSpecificity T86_ObjectForEach \
-	        T87_ReferenceTernary
+	        T87_ReferenceTernary T88_IndexOutOfBounds T89_LoopCompletion
 
 NEGTESTS = N01_InvalidStaticCall N02_OverloadSameClass \
            N03_OverloadInherited N04_SwitchTooManyCases \
@@ -94,7 +94,8 @@ NEGTESTS = N01_InvalidStaticCall N02_OverloadSameClass \
 	           N65_TryLocalScope N66_CatchLocalScope \
 	           N67_FinallyLocalScope N68_VoidLocal \
 	           N69_TooManyParameters N70_TooManyArguments \
-	           N71_TooManyImports
+	           N71_TooManyImports N72_LoopFallthrough \
+	           N73_LoopBreakFallthrough
 
 # Tests requiring lib/ (platform package)
 LIB_SRCS = ../lib/Console.java ../lib/Arrays.java ../lib/IO.java

@@ -590,6 +590,7 @@ public class Stmt {
 	}
 
 	static boolean pSwitch() {
+		int savedLocalCount = C.locCount;
 		Lexer.nextToken(); // skip 'switch'
 		Lexer.expect(Tk.LPAREN);
 		int switchType = Expr.pExpr();
@@ -598,7 +599,9 @@ public class Stmt {
 
 		if (switchType == 2) {
 			// String switch — value still on stack
-			return pStringSwitch();
+			boolean completes = pStringSwitch();
+			C.locCount = savedLocalCount;
+			return completes;
 		}
 
 		int swSlot = aSwitchLocal(0, -1);
@@ -677,6 +680,7 @@ public class Stmt {
 		boolean completes = defaultLabel < 0 || lastGroupCompletes || C.flowSwitchBreak[flowIndex];
 
 		Lexer.expect(Tk.RBRACE);
+		C.locCount = savedLocalCount;
 		return completes;
 	}
 
@@ -756,6 +760,7 @@ public class Stmt {
 	}
 
 	static void pTry() {
+		int savedLocalCount = C.locCount;
 		Lexer.nextToken(); // skip 'try'
 
 		int lblEnd = E.label();
@@ -771,12 +776,14 @@ public class Stmt {
 		Lexer.expect(Tk.LBRACE);
 		pBlock();
 		Lexer.expect(Tk.RBRACE);
+		C.locCount = savedLocalCount;
 
 		int endPC = C.mcLen;
 		E.eBr(E.GOTO, lblEnd); // GOTO after handlers
 
 		// Catch clauses
 		while (Tk.type == Tk.CATCH) {
+			C.locCount = savedLocalCount;
 			Lexer.nextToken();
 			Lexer.expect(Tk.LPAREN);
 
@@ -810,6 +817,7 @@ public class Stmt {
 			Lexer.expect(Tk.LBRACE);
 			pBlock();
 			Lexer.expect(Tk.RBRACE);
+			C.locCount = savedLocalCount;
 
 			E.eBr(E.GOTO, lblEnd); // GOTO end
 		}
@@ -825,6 +833,7 @@ public class Stmt {
 			int lblFinally = E.label();
 			int excSlot = C.locCount;
 			E.aLoc(C.iStr("$finally"), 1);
+			int finallyLocalCount = C.locCount;
 
 			// Catch-all handler: store exception, goto finally
 			int handlerPC = C.mcLen;
@@ -851,6 +860,7 @@ public class Stmt {
 			Lexer.expect(Tk.LBRACE);
 			pBlock();
 			Lexer.expect(Tk.RBRACE);
+			C.locCount = finallyLocalCount;
 
 			// If exception was caught, re-throw
 			E.eLd(excSlot, 1); // ALOAD excSlot
@@ -867,6 +877,7 @@ public class Stmt {
 		} else {
 			E.mark(lblEnd);
 		}
+		C.locCount = savedLocalCount;
 	}
 
 }

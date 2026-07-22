@@ -89,7 +89,10 @@ NEGTESTS = N01_InvalidStaticCall N02_OverloadSameClass \
 	           N55_UnimplementedAbstract N56_UnimplementedInterface \
 	           N57_MissingSuperConstructor N58_UnknownParameterType \
 	           N59_UnknownReturnType N60_UnknownLocalType \
-	           N61_AmbiguousConstructor N62_AmbiguousMethod
+	           N61_AmbiguousConstructor N62_AmbiguousMethod \
+	           N63_SwitchLocalScope N64_StringSwitchLocalScope \
+	           N65_TryLocalScope N66_CatchLocalScope \
+	           N67_FinallyLocalScope
 
 # Tests requiring lib/ (platform package)
 LIB_SRCS = ../lib/Console.java ../lib/Arrays.java ../lib/IO.java

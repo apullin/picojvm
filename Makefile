@@ -159,7 +159,7 @@ endif
 ifeq ($(TMS_LTO),1)
 TMS_LTO_CFLAGS = -flto
 TMS_LTO_SUFFIX = -lto
-TMS_LTO_OPT = $(if $(filter s z,$(TMS_TARGET_OPT)),2,$(TMS_TARGET_OPT))
+TMS_LTO_OPT ?= $(TMS_TARGET_OPT)
 TMS_LTO_LDFLAGS = --lto-O$(TMS_LTO_OPT)
 endif
 TMS_SECTION_FLAGS = -ffunction-sections -fdata-sections
